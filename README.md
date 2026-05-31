@@ -67,7 +67,7 @@ LLMDash is a self-hosted AI chat interface that connects to multiple LLM provide
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/llmdash.git
+git clone https://codeberg.org/axoisaxo/LLMDash.git
 cd llmdash
 
 # Copy and edit environment configuration
