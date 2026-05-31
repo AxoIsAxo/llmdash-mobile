@@ -1,0 +1,44 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+*.egg
+.venv/
+venv/
+env/
+*.so
+
+# --- Environment ---
+.env
+.env.local
+.env.*.local
+
+# --- Node ---
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
+# --- Database ---
+*.db
+*.sqlite
+*.sqlite3
+
+# --- Data ---
+data/documents/*
+!data/documents/.gitkeep
+
+# --- IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# --- Docker ---
+.docker/
