@@ -9,7 +9,7 @@ interface SidePanel {
 }
 import {
   Send, Plus, Key, MessageSquare, Trash2, ChevronLeft,
-  ChevronRight, Wrench, Bot, Loader2, Terminal, Globe, FileText, Eye,
+  ChevronRight, Wrench, Bot, Loader2, Terminal, Globe, FileText, Eye, Search,
   Copy, Check, RefreshCw, Square, ChevronUp, ChevronDown, Download,
   Shield, LogOut, Settings, Minus, CreditCard
 } from 'lucide-react'
@@ -208,6 +208,7 @@ function App() {
               }]
             })
           } else if (event.type === 'tool_calls') {
+            toolCalls.length = 0
             toolCalls.push(...(event.tool_calls || []))
             setMessages(prev => {
               const last = prev[prev.length - 1]
@@ -353,6 +354,7 @@ function App() {
               }]
             })
           } else if (event.type === 'tool_calls') {
+            toolCalls.length = 0
             toolCalls.push(...(event.tool_calls || []))
             setMessages(prev => {
               const last = prev[prev.length - 1]
@@ -848,6 +850,7 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
           <div className="max-w-2xl rounded-xl bg-gray-800/50 border border-gray-700/50 px-4 py-2">
             <div className="flex items-center gap-2 text-xs text-gray-500 mb-1">
               {message.tool_name === 'web_search' && <Globe className="w-3 h-3" />}
+              {message.tool_name === 'web_scrape' && <Search className="w-3 h-3" />}
               {message.tool_name === 'run_command' && <Terminal className="w-3 h-3" />}
               {message.tool_name === 'render_html' && <Eye className="w-3 h-3" />}
               <span className="font-mono">{message.tool_name}</span>

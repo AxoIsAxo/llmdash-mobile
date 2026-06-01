@@ -334,13 +334,16 @@ async def list_env_vars(current_user: dict = Depends(require_role("owner", "admi
 async def update_env_vars(req: EnvUpdateRequest, current_user: dict = Depends(require_role("owner", "admin"))):
     env_path = ".env"
     existing = {}
-    if os.path.exists(env_path):
-        with open(env_path) as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    k, v = line.split("=", 1)
-                    existing[k.strip()] = v.strip()
+    if os.path.exists(env_path) and not os.path.isdir(env_path):
+        try:
+            with open(env_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        existing[k.strip()] = v.strip()
+        except (OSError, IOError):
+            existing = {}
 
     for key, value in req.updates.items():
         if key in app_config.ENV_VAR_MAP or key in existing:
@@ -503,11 +506,10 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
         f"The current UTC date and time is {now.strftime('%Y-%m-%d %H:%M:%S')} UTC "
         f"({now.strftime('%A, %B %d, %Y')}).\n"
         "You have access to built-in tools including web_search which queries SearXNG for real-time "
-        "information from the internet. Always use web_search proactively whenever the user asks about "
-        "current events, recent news, live data, or any topic where your training data may be outdated.\n"
-        "When searching the web, use specific and concise queries. If a search returns no results or "
-        "irrelevant results, refine your query and try again. Cite sources when providing information "
-        "obtained from web searches.\n"
+        "information from the internet. Use web_search when the user asks about current events, "
+        "recent news, live data, or any topic where your training data may be outdated.\n"
+        "When searching the web, use specific and concise queries. Cite sources when providing "
+        "information obtained from web searches.\n"
         "You can also create and edit documents, render HTML, and execute code in a sandboxed "
         "environment. Be thorough, accurate, and helpful."
     )
@@ -557,7 +559,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                     total_total_tokens += chunk.usage["total_tokens"]
 
             tool_round = 0
-            while final_tool_calls and tool_round < 10:
+            while final_tool_calls and tool_round < 5:
                 tool_round += 1
 
                 assistant_msg = Message(
@@ -608,7 +610,8 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                 accumulated_reasoning = ""
                 final_tool_calls = []
 
-                async for chunk in provider.stream_chat_with_results(messages, tools, model, tool_results):
+                next_tools = tools if tool_round == 1 else []
+                async for chunk in provider.stream_chat_with_results(messages, next_tools, model, tool_results):
                     if chunk.content_delta:
                         accumulated_content += chunk.content_delta
                         yield f"data: {json.dumps({'type': 'content_delta', 'content': chunk.content_delta})}\n\n"
