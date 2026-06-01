@@ -47,7 +47,16 @@ export interface Message {
   tool_calls_json: ToolCall[] | null;
   tool_call_id: string | null;
   tool_name: string | null;
+  status?: string;
   created_at: string;
+}
+
+export interface GenerateStatus {
+  generating: boolean;
+  message_id: number | null;
+  message_content: string | null;
+  tool_calls_json: ToolCall[] | null;
+  status: string;
 }
 
 export interface ToolCall {

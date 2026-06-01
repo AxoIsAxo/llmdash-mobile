@@ -85,6 +85,7 @@ class Message(Base):
     tool_call_id = Column(String(128), nullable=True)
     tool_name = Column(String(128), nullable=True)
     reasoning_content = Column(Text, nullable=True)
+    status = Column(String(32), default="done", nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
@@ -163,6 +164,11 @@ def _migrate(conn):
         conn.exec_driver_sql("ALTER TABLE users ADD COLUMN token_usage INTEGER NOT NULL DEFAULT 0")
     if "ip_address" not in existing:
         conn.exec_driver_sql("ALTER TABLE users ADD COLUMN ip_address TEXT")
+
+    msg_result = conn.exec_driver_sql("PRAGMA table_info(messages)")
+    msg_cols = {row[1] for row in msg_result}
+    if "status" not in msg_cols:
+        conn.exec_driver_sql("ALTER TABLE messages ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'done'")
 
     conv_result = conn.exec_driver_sql("PRAGMA table_info(conversations)")
     conv_cols = {row[1] for row in conv_result}

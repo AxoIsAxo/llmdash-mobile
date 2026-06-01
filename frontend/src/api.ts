@@ -266,5 +266,45 @@ export const api = {
         }
       }
     },
+    resume: async function* (convId: number, signal?: AbortSignal) {
+      const token = getToken();
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const response = await fetch(`${BASE}/chat/resume/${convId}`, {
+        method: 'POST',
+        headers,
+        signal,
+      });
+      if (!response.ok) {
+        let detail = ''
+        try { const err = await response.json(); detail = err.detail ? `: ${err.detail}` : '' } catch {}
+        throw new Error(`Resume error ${response.status}${detail}`)
+      }
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No response body');
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6).trim();
+            if (data === '[DONE]') return;
+            try {
+              yield JSON.parse(data) as import('./types').StreamEvent;
+            } catch { /* skip malformed */ }
+          }
+        }
+      }
+    },
+    cancel: (convId: number) =>
+      request<{ status: string }>(`/chat/cancel/${convId}`, { method: 'POST' }),
+    generationStatus: (convId: number) =>
+      request<import('./types').GenerateStatus>(`/conversations/${convId}/generation-status`),
   },
 };

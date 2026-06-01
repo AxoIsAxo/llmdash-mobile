@@ -16,12 +16,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
 
 from . import config as app_config
-from .database import init_db, get_db, ModelConfig, Conversation, Message, User, TokenUsageLog, SubscriptionPlan, PlanModelLimit, UserSubscription
+from .database import init_db, get_db, async_session, ModelConfig, Conversation, Message, User, TokenUsageLog, SubscriptionPlan, PlanModelLimit, UserSubscription
 from .models import (
     ModelConfigCreate, ModelConfigUpdate, ModelConfigResponse,
     ConversationCreate, ConversationResponse,
     ChatRequest, MessageResponse, BranchRequest,
-    EnvUpdateRequest, EnvStatusResponse,
+    EnvUpdateRequest, EnvStatusResponse, GenerateStatusResponse,
 )
 from .ai import get_provider, ToolDef
 from .tools import get_tool_definitions, execute_tool
@@ -30,6 +30,30 @@ from .routers.auth import router as auth_router, get_current_user, require_role,
 from .routers.subscriptions import router as subscriptions_router
 
 router = APIRouter(prefix="/api")
+
+active_generations: dict[int, dict] = {}
+"""Per-conversation active generation state.
+Schema: {conv_id: {"queues": set[asyncio.Queue], "task": asyncio.Task, "message_id": int}}"""
+
+
+def _push_to_queues(conv_id: int, event: str):
+    gen = active_generations.get(conv_id)
+    if gen:
+        for q in list(gen.get("queues", [])):
+            try:
+                q.put_nowait(event)
+            except asyncio.QueueFull:
+                pass
+
+
+def _cleanup_generation(conv_id: int):
+    gen = active_generations.pop(conv_id, None)
+    if gen:
+        for q in gen.get("queues", []):
+            try:
+                q.put_nowait("data: [DONE]\n\n")
+            except Exception:
+                pass
 
 
 def get_active_provider_configs():
@@ -259,6 +283,7 @@ async def get_messages(conv_id: int, current_user: dict = Depends(get_current_us
             tool_calls_json=json.loads(m.tool_calls_json) if m.tool_calls_json else None,
             tool_call_id=m.tool_call_id, tool_name=m.tool_name,
             reasoning_content=m.reasoning_content,
+            status=m.status or "done",
             created_at=m.created_at.isoformat() if m.created_at else "",
         )
         for m in msgs
@@ -453,14 +478,11 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
         if model_limit and model_limit.token_limit is not None:
             model_subscription_limit = model_limit.token_limit
 
-        if subscription_limit is None and free_plan and free_plan.token_limit is not None:
-            subscription_limit = free_plan.token_limit
-
     if not active_sub_row:
         if free_plan and free_plan.token_limit is not None:
             subscription_limit = free_plan.token_limit
 
-    if free_plan and model_subscription_limit is None:
+    if not active_sub_row and free_plan and model_subscription_limit is None:
         model_limit_result = await db.execute(
             select(PlanModelLimit).where(
                 PlanModelLimit.plan_id == free_plan.id,
@@ -520,101 +542,50 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
     await db.commit()
     messages.append({"role": "user", "content": req.message})
 
-    async def generate_title():
-        try:
-            title_msgs = [
-                {"role": "system", "content": "Generate a very short, concise title (maximum 6 words) for a conversation that starts with this message. Return ONLY the title, no quotes or explanations."},
-                {"role": "user", "content": req.message}
-            ]
-            result = await provider.chat(title_msgs, [], model)
-            return result.content.strip()[:255] or "New Chat"
-        except Exception:
-            return "New Chat"
-
-    title_task = asyncio.create_task(generate_title()) if not db_messages else None
-
     tool_defs = get_tool_definitions()
     tools = [ToolDef(**t) for t in tool_defs]
 
-    async def event_stream():
-        accumulated_content = ""
-        accumulated_reasoning = ""
-        final_tool_calls = []
-        total_prompt_tokens = 0
-        total_completion_tokens = 0
-        total_total_tokens = 0
+    my_queue: asyncio.Queue = asyncio.Queue()
 
-        try:
-            async for chunk in provider.stream_chat(messages, tools, model):
-                if chunk.content_delta:
-                    accumulated_content += chunk.content_delta
-                    yield f"data: {json.dumps({'type': 'content_delta', 'content': chunk.content_delta})}\n\n"
-                if chunk.reasoning_content_delta:
-                    accumulated_reasoning += chunk.reasoning_content_delta
-                if chunk.tool_calls is not None:
-                    final_tool_calls = chunk.tool_calls
-                if chunk.usage:
-                    total_prompt_tokens += chunk.usage["prompt_tokens"]
-                    total_completion_tokens += chunk.usage["completion_tokens"]
-                    total_total_tokens += chunk.usage["total_tokens"]
-
-            tool_round = 0
-            while final_tool_calls and tool_round < 5:
-                tool_round += 1
-
-                assistant_msg = Message(
-                    conversation_id=req.conversation_id,
-                    role="assistant",
-                    content=accumulated_content or "",
-                    tool_calls_json=json.dumps([
-                        {"id": tc["id"], "name": tc["name"], "arguments": tc["arguments"]}
-                        for tc in final_tool_calls
-                    ]),
-                    reasoning_content=accumulated_reasoning or None,
-                )
-                db.add(assistant_msg)
-                await db.commit()
-
-                yield f"data: {json.dumps({'type': 'tool_calls', 'tool_calls': final_tool_calls, 'content': accumulated_content})}\n\n"
-
-                tool_results = []
-                for tc in final_tool_calls:
-                    yield f"data: {json.dumps({'type': 'tool_start', 'name': tc['name'], 'id': tc['id']})}\n\n"
-                    result = await execute_tool(tc["name"], tc["arguments"])
-                    tool_results.append({"tool_call_id": tc["id"], "content": result})
-                    yield f"data: {json.dumps({'type': 'tool_result', 'name': tc['name'], 'id': tc['id'], 'result': result})}\n\n"
-
-                assistant_entry = {
-                    "role": "assistant",
-                    "content": accumulated_content or "",
-                    "tool_calls_json": json.dumps([
-                        {"id": tc["id"], "name": tc["name"], "arguments": tc["arguments"]}
-                        for tc in final_tool_calls
-                    ]),
-                }
-                if accumulated_reasoning:
-                    assistant_entry["reasoning_content"] = accumulated_reasoning
-                messages.append(assistant_entry)
-                for tr in tool_results:
-                    tool_msg = Message(
-                        conversation_id=req.conversation_id,
-                        role="tool",
-                        content=tr["content"],
-                        tool_call_id=tr["tool_call_id"],
-                    )
-                    db.add(tool_msg)
-                    await db.commit()
-                    messages.append({"role": "tool", "tool_call_id": tr["tool_call_id"], "content": tr["content"]})
-
+    async def run_ai_chat():
+        async with async_session() as sess:
+            streaming_msg_id = None
+            try:
                 accumulated_content = ""
                 accumulated_reasoning = ""
                 final_tool_calls = []
+                total_prompt_tokens = 0
+                total_completion_tokens = 0
+                total_total_tokens = 0
 
-                next_tools = tools if tool_round == 1 else []
-                async for chunk in provider.stream_chat_with_results(messages, next_tools, model, tool_results):
-                    if chunk.content_delta:
+                draft = Message(
+                    conversation_id=req.conversation_id,
+                    role="assistant",
+                    content="",
+                    status="generating",
+                )
+                sess.add(draft)
+                await sess.commit()
+                streaming_msg_id = draft.id
+
+                last_save_len = 0
+
+                async def push_event(event_type: str, **kwargs):
+                    evt = {"type": event_type, **kwargs}
+                    _push_to_queues(req.conversation_id, f"data: {json.dumps(evt)}\n\n")
+
+                async def save_draft_progress(force=False):
+                    nonlocal last_save_len
+                    if force or len(accumulated_content) - last_save_len >= 5:
+                        draft.content = accumulated_content
+                        await sess.commit()
+                        last_save_len = len(accumulated_content)
+
+                async for chunk in provider.stream_chat(messages, tools, model):
+                    if chunk.content_delta and chunk.content_delta.strip():
                         accumulated_content += chunk.content_delta
-                        yield f"data: {json.dumps({'type': 'content_delta', 'content': chunk.content_delta})}\n\n"
+                        await push_event("content_delta", content=chunk.content_delta)
+                        await save_draft_progress()
                     if chunk.reasoning_content_delta:
                         accumulated_reasoning += chunk.reasoning_content_delta
                     if chunk.tool_calls is not None:
@@ -624,56 +595,274 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                         total_completion_tokens += chunk.usage["completion_tokens"]
                         total_total_tokens += chunk.usage["total_tokens"]
 
-            if not db_messages and title_task:
+                tool_round = 0
+                while final_tool_calls and tool_round < 5:
+                    tool_round += 1
+
+                    draft.content = accumulated_content or ""
+                    draft.tool_calls_json = json.dumps([
+                        {"id": tc["id"], "name": tc["name"], "arguments": tc["arguments"]}
+                        for tc in final_tool_calls
+                    ])
+                    draft.reasoning_content = accumulated_reasoning or None
+                    await sess.commit()
+
+                    await push_event("tool_calls", tool_calls=final_tool_calls, content=accumulated_content)
+
+                    tool_results = []
+                    for tc in final_tool_calls:
+                        await push_event("tool_start", name=tc["name"], id=tc["id"])
+                        result = await execute_tool(tc["name"], tc["arguments"])
+                        tool_results.append({"tool_call_id": tc["id"], "content": result})
+                        await push_event("tool_result", name=tc["name"], id=tc["id"], result=result)
+
+                    assistant_entry = {
+                        "role": "assistant",
+                        "content": accumulated_content or "",
+                        "tool_calls_json": json.dumps([
+                            {"id": tc["id"], "name": tc["name"], "arguments": tc["arguments"]}
+                            for tc in final_tool_calls
+                        ]),
+                    }
+                    if accumulated_reasoning:
+                        assistant_entry["reasoning_content"] = accumulated_reasoning
+                    messages.append(assistant_entry)
+                    for tr in tool_results:
+                        tool_msg = Message(
+                            conversation_id=req.conversation_id,
+                            role="tool",
+                            content=tr["content"],
+                            tool_call_id=tr["tool_call_id"],
+                        )
+                        sess.add(tool_msg)
+                        await sess.commit()
+                        messages.append({"role": "tool", "tool_call_id": tr["tool_call_id"], "content": tr["content"]})
+
+                    accumulated_content = ""
+                    accumulated_reasoning = ""
+                    final_tool_calls = []
+                    last_save_len = 0
+
+                    next_tools = tools if tool_round == 1 else []
+                    async for chunk in provider.stream_chat_with_results(messages, next_tools, model, tool_results):
+                        if chunk.content_delta and chunk.content_delta.strip():
+                            accumulated_content += chunk.content_delta
+                            await push_event("content_delta", content=chunk.content_delta)
+                            await save_draft_progress()
+                        if chunk.reasoning_content_delta:
+                            accumulated_reasoning += chunk.reasoning_content_delta
+                        if chunk.tool_calls is not None:
+                            final_tool_calls = chunk.tool_calls
+                        if chunk.usage:
+                            total_prompt_tokens += chunk.usage["prompt_tokens"]
+                            total_completion_tokens += chunk.usage["completion_tokens"]
+                            total_total_tokens += chunk.usage["total_tokens"]
+
+                if streaming_msg_id is not None:
+                    draft.content = accumulated_content or ""
+                    draft.status = "done"
+                    if final_tool_calls:
+                        draft.tool_calls_json = json.dumps([
+                            {"id": tc["id"], "name": tc["name"], "arguments": tc["arguments"]}
+                            for tc in final_tool_calls
+                        ])
+                    await sess.commit()
+                else:
+                    sess.add(Message(
+                        conversation_id=req.conversation_id,
+                        role="assistant",
+                        content=accumulated_content or "",
+                        status="done",
+                    ))
+                    await sess.commit()
+                if accumulated_content:
+                    await push_event("content", content=accumulated_content)
+
+                if not db_messages and accumulated_content:
+                    try:
+                        title_msgs = [
+                            {"role": "system", "content": "Generate a very short, concise title (maximum 6 words) for a conversation that starts with this message. Return ONLY the title, no quotes or explanations."},
+                            {"role": "user", "content": accumulated_content}
+                        ]
+                        result = await provider.chat(title_msgs, [], model)
+                        new_title = result.content.strip()[:255] or "New Chat"
+                    except Exception:
+                        new_title = accumulated_content[:80].replace("\n", " ") or "New Chat"
+                    await sess.execute(
+                        update(Conversation).where(Conversation.id == req.conversation_id).values(title=new_title)
+                    )
+                    await sess.commit()
+
+                if total_total_tokens == 0:
+                    total_total_tokens = max(1, len(req.message) // 4)
+                    total_prompt_tokens = total_total_tokens
                 try:
-                    title = await title_task
-                    conversation.title = title
-                except Exception:
-                    conversation.title = req.message[:80].replace("\n", " ") or "New Chat"
-                await db.commit()
-
-            if accumulated_content:
-
-                assistant_msg = Message(
-                    conversation_id=req.conversation_id,
-                    role="assistant",
-                    content=accumulated_content or "",
-                )
-                db.add(assistant_msg)
-                await db.commit()
-
-                yield f"data: {json.dumps({'type': 'content', 'content': accumulated_content})}\n\n"
-
-        except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
-        finally:
-            if total_total_tokens == 0:
-                total_total_tokens = max(1, len(req.message) // 4)
-                total_prompt_tokens = total_total_tokens
-            try:
-                usage_log = TokenUsageLog(
-                    user_id=current_user["user_id"],
-                    model_id=model_id,
-                    prompt_tokens=total_prompt_tokens,
-                    completion_tokens=total_completion_tokens,
-                    total_tokens=total_total_tokens,
-                )
-                db.add(usage_log)
-                if user:
-                    await db.execute(
+                    sess.add(TokenUsageLog(
+                        user_id=current_user["user_id"],
+                        model_id=model_id,
+                        prompt_tokens=total_prompt_tokens,
+                        completion_tokens=total_completion_tokens,
+                        total_tokens=total_total_tokens,
+                    ))
+                    await sess.execute(
                         update(User)
-                        .where(User.id == user.id)
+                        .where(User.id == current_user["user_id"])
                         .values(token_usage=User.token_usage + total_total_tokens)
                     )
-                await db.commit()
+                    await sess.commit()
+                except Exception as exc:
+                    print(f"Token usage recording failed: {exc}", flush=True)
+
+            except asyncio.CancelledError:
+                try:
+                    if streaming_msg_id is not None:
+                        draft.content = accumulated_content
+                        draft.status = "cancelled"
+                        await sess.commit()
+                except Exception:
+                    pass
+                raise
             except Exception as e:
-                print(f"Token usage recording failed: {e}", flush=True)
-            yield "data: [DONE]\n\n"
+                try:
+                    await push_event("error", error=str(e))
+                except Exception:
+                    pass
+                try:
+                    if streaming_msg_id is not None:
+                        draft.content = accumulated_content
+                        draft.status = "done"
+                        await sess.commit()
+                except Exception:
+                    pass
+            finally:
+                _cleanup_generation(req.conversation_id)
+
+    if req.conversation_id in active_generations:
+        raise HTTPException(409, "A generation is already in progress for this conversation")
+
+    my_queue_final = my_queue
+    active_generations[req.conversation_id] = {
+        "queues": {my_queue_final},
+        "task": None,
+    }
+    task = asyncio.create_task(run_ai_chat())
+    active_generations[req.conversation_id]["task"] = task
+
+    async def event_stream():
+        try:
+            while True:
+                event = await my_queue.get()
+                if event is None:
+                    break
+                yield event
+                if event == "data: [DONE]\n\n":
+                    break
+        except asyncio.CancelledError:
+            pass
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-# --- File Serving ---
+@router.post("/chat/resume/{conv_id}")
+async def chat_resume(conv_id: int, current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    conv_result = await db.execute(
+        select(Conversation).where(Conversation.id == conv_id, Conversation.user_id == current_user["user_id"])
+    )
+    if not conv_result.scalar_one_or_none():
+        raise HTTPException(404, "Conversation not found")
+
+    gen = active_generations.get(conv_id)
+    if not gen:
+        raise HTTPException(404, "No active generation for this conversation")
+
+    my_queue: asyncio.Queue = asyncio.Queue()
+    gen["queues"].add(my_queue)
+
+    result = await db.execute(
+        select(Message).where(Message.conversation_id == conv_id, Message.status == "generating").order_by(Message.id.desc()).limit(1)
+    )
+    draft = result.scalar_one_or_none()
+    if draft:
+        catchup = {"type": "content", "content": draft.content or ""}
+        if draft.tool_calls_json:
+            catchup["tool_calls"] = json.loads(draft.tool_calls_json)
+        try:
+            my_queue.put_nowait(f"data: {json.dumps(catchup)}\n\n")
+        except asyncio.QueueFull:
+            pass
+
+    async def resume_stream():
+        try:
+            while True:
+                event = await my_queue.get()
+                if event is None:
+                    break
+                yield event
+                if event == "data: [DONE]\n\n":
+                    break
+        except asyncio.CancelledError:
+            pass
+        finally:
+            gen["queues"].discard(my_queue)
+
+    return StreamingResponse(resume_stream(), media_type="text/event-stream")
+
+
+@router.post("/chat/cancel/{conv_id}")
+async def chat_cancel(conv_id: int, current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    conv_result = await db.execute(
+        select(Conversation).where(Conversation.id == conv_id, Conversation.user_id == current_user["user_id"])
+    )
+    if not conv_result.scalar_one_or_none():
+        raise HTTPException(404, "Conversation not found")
+
+    gen = active_generations.get(conv_id)
+    if gen:
+        gen["task"].cancel()
+        _push_to_queues(conv_id, "data: [DONE]\n\n")
+        return {"status": "cancelled"}
+
+    result = await db.execute(
+        select(Message).where(Message.conversation_id == conv_id, Message.status == "generating")
+    )
+    draft = result.scalar_one_or_none()
+    if draft:
+        async with async_session() as sess:
+            result = await sess.execute(
+                select(Message).where(Message.id == draft.id)
+            )
+            msg = result.scalar_one_or_none()
+            if msg:
+                msg.status = "cancelled"
+                await sess.commit()
+        return {"status": "cancelled"}
+
+    return {"status": "no_active_generation"}
+
+
+@router.get("/conversations/{conv_id}/generation-status", response_model=GenerateStatusResponse)
+async def generation_status(conv_id: int, current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    conv_result = await db.execute(
+        select(Conversation).where(Conversation.id == conv_id, Conversation.user_id == current_user["user_id"])
+    )
+    if not conv_result.scalar_one_or_none():
+        raise HTTPException(404, "Conversation not found")
+
+    result = await db.execute(
+        select(Message).where(Message.conversation_id == conv_id).order_by(Message.id.desc()).limit(1)
+    )
+    latest = result.scalar_one_or_none()
+
+    if latest and latest.status == "generating":
+        return GenerateStatusResponse(
+            generating=True,
+            message_id=latest.id,
+            message_content=latest.content,
+            tool_calls_json=json.loads(latest.tool_calls_json) if latest.tool_calls_json else None,
+            status=latest.status,
+        )
+
+    return GenerateStatusResponse(generating=False)
 
 @router.get("/files/{filename}")
 async def serve_file(filename: str, current_user: dict = Depends(get_current_user)):

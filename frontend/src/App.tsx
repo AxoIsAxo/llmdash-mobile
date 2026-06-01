@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { api } from './api'
-import type { ModelConfig, Conversation, Message, StreamEvent, ToolCall, User, AuthStatus } from './types'
+import type { ModelConfig, Conversation, Message, StreamEvent, ToolCall, User, AuthStatus, GenerateStatus } from './types'
+
+const LAST_ACTIVE_CONV_KEY = 'llmdash_active_conv'
 
 interface SidePanel {
   html: string
@@ -47,7 +49,11 @@ function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const loadConversations = useCallback(async () => {
-    try { setConversations(await api.conversations.list()) } catch {}
+    try {
+      const convs = await api.conversations.list()
+      setConversations(convs)
+      return convs as Conversation[]
+    } catch { return [] as Conversation[] }
   }, [])
 
   const loadModels = useCallback(async () => {
@@ -90,14 +96,32 @@ function App() {
 
   useEffect(() => {
     if (currentUser) {
-      loadConversations()
+      const init = async () => {
+        const convs = await loadConversations()
+        const savedConvId = localStorage.getItem(LAST_ACTIVE_CONV_KEY)
+        if (savedConvId) {
+          const conv = convs.find(c => c.id === parseInt(savedConvId))
+          if (conv) {
+            selectConv(conv)
+          } else {
+            localStorage.removeItem(LAST_ACTIVE_CONV_KEY)
+          }
+        }
+      }
+      init()
       loadModels()
     }
-  }, [currentUser, loadConversations, loadModels])
+  }, [currentUser, loadConversations, loadModels])  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  useEffect(() => {
+    if (activeConv) {
+      localStorage.setItem(LAST_ACTIVE_CONV_KEY, String(activeConv.id))
+    }
+  }, [activeConv])
 
   useEffect(() => {
     if (!showModelPickerFooter && !showModelPickerEmpty) return
@@ -117,6 +141,7 @@ function App() {
     setConversations([])
     setActiveConv(null)
     setMessages([])
+    localStorage.removeItem(LAST_ACTIVE_CONV_KEY)
     try {
       const status = await api.auth.status()
       setAuthStatus(status)
@@ -140,14 +165,108 @@ function App() {
     try {
       await api.conversations.delete(id)
       setConversations(prev => prev.filter(c => c.id !== id))
-      if (activeConv?.id === id) { setActiveConv(null); setMessages([]) }
+      if (activeConv?.id === id) { setActiveConv(null); setMessages([]); localStorage.removeItem(LAST_ACTIVE_CONV_KEY) }
     } catch { /* ignore */ }
   }
 
   const selectConv = async (conv: Conversation) => {
     setActiveConv(conv)
     setSidePanel(null)
-    try { setMessages(await api.conversations.messages(conv.id)) } catch { setMessages([]) }
+    localStorage.setItem(LAST_ACTIVE_CONV_KEY, String(conv.id))
+    try {
+      const msgs = await api.conversations.messages(conv.id)
+      setMessages(msgs)
+      const lastAssistant = msgs.filter((m: Message) => m.role === 'assistant').pop()
+      if (lastAssistant && lastAssistant.status === 'generating') {
+        setStreaming(true)
+        resumeGeneration(conv.id, lastAssistant)
+      } else {
+        setStreaming(false)
+      }
+    } catch { setMessages([]) }
+  }
+
+  const resumeGeneration = async (convId: number, draftMsg?: Message) => {
+    const controller = new AbortController()
+    setAbortController(controller)
+
+    let generationResumed = false
+    try {
+      for await (const event of api.chat.resume(convId, controller.signal)) {
+        generationResumed = true
+        if (event.type === 'content') {
+          const content = event.content || ''
+          setMessages(prev => {
+            const idx = prev.findIndex(m => m.role === 'assistant' && m.status === 'generating')
+            if (idx >= 0) {
+              const updated = [...prev]
+              updated[idx] = { ...updated[idx], content, tool_calls_json: event.tool_calls || null }
+              return updated
+            }
+            return prev
+          })
+        } else if (event.type === 'content_delta') {
+          setMessages(prev => {
+            const idx = prev.findIndex(m => m.role === 'assistant' && m.status === 'generating')
+            if (idx >= 0) {
+              const updated = [...prev]
+              updated[idx] = { ...updated[idx], content: (updated[idx].content || '') + (event.content || '') }
+              return updated
+            }
+            return [...prev, {
+              id: convId * -1, role: 'assistant' as const,
+              content: event.content || '', tool_calls_json: null,
+              tool_call_id: null, tool_name: null, status: 'generating',
+              created_at: new Date().toISOString()
+            }]
+          })
+        } else if (event.type === 'tool_calls') {
+          setMessages(prev => {
+            const idx = prev.findIndex(m => m.role === 'assistant' && m.status === 'generating')
+            const tc = (event as any).tool_calls || null
+            if (idx >= 0) {
+              const updated = [...prev]
+              updated[idx] = { ...updated[idx], content: event.content || updated[idx].content || '', tool_calls_json: tc, id: Date.now() }
+              return updated
+            }
+            return [...prev, {
+              id: Date.now(), role: 'assistant' as const,
+              content: event.content || '', tool_calls_json: tc,
+              tool_call_id: null, tool_name: null, status: 'generating',
+              created_at: new Date().toISOString()
+            }]
+          })
+        } else if (event.type === 'tool_start') {
+          if (event.id) setExecutingTools(prev => new Set(prev).add(event.id!))
+        } else if (event.type === 'tool_result') {
+          if (event.id) setExecutingTools(prev => { const next = new Set(prev); next.delete(event.id!); return next })
+          setMessages(prev => [...prev, {
+            id: Date.now(), role: 'tool' as const, content: event.result || '',
+            tool_calls_json: null, tool_call_id: event.id || null,
+            tool_name: event.name || null, created_at: new Date().toISOString()
+          }])
+        } else if (event.type === 'error') {
+          setMessages(prev => [...prev, {
+            id: Date.now(), role: 'assistant' as const,
+            content: `Error: ${event.error}`, tool_calls_json: null,
+            tool_call_id: null, tool_name: null, created_at: new Date().toISOString()
+          }])
+        }
+      }
+    } catch (e: any) {
+      if (e.name === 'AbortError') return
+      if (!generationResumed) {
+        pollForCompletion(convId, Date.now(), draftMsg?.id)
+      }
+    } finally {
+      setExecutingTools(new Set())
+      setStreaming(false)
+      setAbortController(null)
+      loadConversations()
+      if (currentUser) {
+        try { setCurrentUser(await api.auth.me()) } catch {}
+      }
+    }
   }
 
   const handleSend = async () => {
@@ -281,11 +400,44 @@ function App() {
     }
   }
 
+  const pollForCompletion = (convId: number, sentAt: number, draftMsgId?: number) => {
+    let lastMsgId = 0
+    const interval = setInterval(async () => {
+      if (Date.now() - sentAt > 600000) { clearInterval(interval); return }
+      try {
+        const status = await api.chat.generationStatus(convId)
+        if (!status.generating) {
+          clearInterval(interval)
+          if (convId === activeConv?.id) {
+            setStreaming(false)
+            setExecutingTools(new Set())
+          }
+          const full = await api.conversations.messages(convId)
+          setMessages(full)
+          loadConversations()
+          return
+        }
+        const msgs = await api.conversations.messages(convId)
+        const lastAssistant = msgs.filter((m: Message) => m.role === 'assistant').pop()
+        if (lastAssistant && lastAssistant.id !== lastMsgId) {
+          lastMsgId = lastAssistant.id
+          setMessages(msgs)
+        }
+      } catch { /* keep polling */ }
+    }, 500)
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
   }
 
-  const handleCancel = () => { abortController?.abort(); setSidePanel(null) }
+  const handleCancel = async () => {
+    if (activeConv) {
+      try { await api.chat.cancel(activeConv.id) } catch {}
+    }
+    abortController?.abort()
+    setSidePanel(null)
+  }
 
   const handleCopy = async (content: string, id: number) => {
     try { await navigator.clipboard.writeText(content); setCopiedId(id); setTimeout(() => setCopiedId(null), 2000) } catch {}

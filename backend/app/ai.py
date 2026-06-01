@@ -80,10 +80,11 @@ class OpenAICompatibleProvider(AIProvider):
         for m in messages:
             entry = {"role": m["role"]}
             if m["role"] == "assistant":
-                entry["content"] = m.get("content") or None
+                has_tools = bool(m.get("tool_calls_json"))
+                entry["content"] = (m.get("content") or None) if not has_tools else None
                 if m.get("reasoning_content"):
                     entry["reasoning_content"] = m["reasoning_content"]
-                if m.get("tool_calls_json"):
+                if has_tools:
                     tcs = json.loads(m["tool_calls_json"]) if isinstance(m["tool_calls_json"], str) else m["tool_calls_json"]
                     entry["tool_calls"] = [
                         {
@@ -272,9 +273,10 @@ class AnthropicProvider(AIProvider):
                 continue
             if m["role"] == "assistant":
                 content_parts = []
-                if m.get("content"):
+                has_tools = bool(m.get("tool_calls_json"))
+                if not has_tools and m.get("content"):
                     content_parts.append({"type": "text", "text": m["content"]})
-                if m.get("tool_calls_json"):
+                if has_tools:
                     tcs = json.loads(m["tool_calls_json"]) if isinstance(m["tool_calls_json"], str) else m["tool_calls_json"]
                     for tc in tcs:
                         content_parts.append({
@@ -355,7 +357,7 @@ class AnthropicProvider(AIProvider):
         async with client.messages.stream(**kwargs) as stream:
             async for event in stream:
                 if event.type == "content_block_delta":
-                    if event.delta.type == "text_delta":
+                    if event.delta.type == "text_delta" and event.delta.text and event.delta.text.strip():
                         yield StreamChunk(content_delta=event.delta.text)
 
             final = stream.get_final_message()

@@ -151,7 +151,15 @@ class MessageResponse(BaseModel):
     tool_call_id: Optional[str] = None
     tool_name: Optional[str] = None
     reasoning_content: Optional[str] = None
+    status: str = "done"
     created_at: str
+
+class GenerateStatusResponse(BaseModel):
+    generating: bool
+    message_id: Optional[int] = None
+    message_content: Optional[str] = None
+    tool_calls_json: Optional[Any] = None
+    status: str = "done"
 
 
 class EnvUpdateRequest(BaseModel):
