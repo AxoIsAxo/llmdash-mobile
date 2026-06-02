@@ -106,6 +106,7 @@ export interface ScannedModel {
   id: string;
   name: string;
   suggested_type: string;
+  supports_vision: boolean;
 }
 
 export interface ScannedProvider {

@@ -439,11 +439,13 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
     setToggling(prev => new Set(prev).add(key))
     try {
       if (turnOn) {
+        const foundModel = provider.models.find(m => m.id === modelId)
         await api.models.create({
           name: `${provider.provider_name} — ${modelId}`,
           provider: provider.provider_type,
           model_name: modelId,
-          model_type: (provider.models.find(m => m.id === modelId)?.suggested_type) || 'chat',
+          model_type: foundModel?.suggested_type || 'chat',
+          vision_enabled: foundModel?.supports_vision || false,
           base_url: provider.base_url,
           api_key_env: provider.env_var,
           temperature: 0.7,
