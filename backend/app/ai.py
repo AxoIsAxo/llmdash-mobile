@@ -34,6 +34,13 @@ class StreamChunk:
     reasoning_tokens: int = 0
 
 
+@dataclass
+class ImageGenerationResult:
+    images: list[str]
+    revised_prompt: Optional[str] = None
+    text_content: str = ""
+
+
 class AIProvider(ABC):
     @abstractmethod
     async def chat(self, messages: list[dict], tools: list[ToolDef], model_config) -> AIResponse:
@@ -49,6 +56,10 @@ class AIProvider(ABC):
 
     @abstractmethod
     async def stream_chat_with_results(self, messages: list[dict], tools: list[ToolDef], model_config, tool_results: list[dict]) -> AsyncGenerator[StreamChunk, None]:
+        ...
+
+    @abstractmethod
+    async def generate_image(self, prompt: str, model_config, size: str = "1024x1024", n: int = 1) -> ImageGenerationResult:
         ...
 
 
@@ -264,6 +275,50 @@ class OpenAICompatibleProvider(AIProvider):
         async for chunk in self._stream_openai(messages, tools, model_config):
             yield chunk
 
+    async def generate_image(self, prompt: str, model_config, size: str = "1024x1024", n: int = 1) -> ImageGenerationResult:
+        client = await self._get_client(model_config)
+        base_url = (model_config.base_url or "").lower()
+        if "openrouter" in base_url:
+            image_config = {"image_size": "1K"}
+            size_to_config = {
+                "1024x1024": {"aspect_ratio": "1:1", "image_size": "1K"},
+                "1792x1024": {"aspect_ratio": "16:9", "image_size": "1K"},
+                "1024x1792": {"aspect_ratio": "9:16", "image_size": "1K"},
+            }
+            if size in size_to_config:
+                image_config = size_to_config[size]
+            response = await client.chat.completions.create(
+                model=model_config.model_name,
+                messages=[{"role": "user", "content": prompt}],
+                stream=False,
+                extra_body={"modalities": ["image"], "image_config": image_config},
+            )
+        else:
+            response = await client.images.generate(
+                model=model_config.model_name,
+                prompt=prompt,
+                size=size,
+                n=n,
+            )
+        if hasattr(response, "data"):
+            images = [img.url or img.b64_json or "" for img in response.data]
+            revised = getattr(response, "revised_prompt", None) or None
+            return ImageGenerationResult(images=images, revised_prompt=revised)
+        msg = response.choices[0].message
+        images = []
+        raw_images = getattr(msg, "images", None) or []
+        for img in raw_images:
+            if hasattr(img, "image_url") and img.image_url:
+                url = getattr(img.image_url, "url", "") or ""
+                if url:
+                    images.append(url)
+            elif isinstance(img, dict):
+                iu = img.get("image_url", {})
+                u = iu.get("url", "") if isinstance(iu, dict) else ""
+                if u:
+                    images.append(u)
+        return ImageGenerationResult(images=images, text_content=msg.content or "")
+
 
 class AnthropicProvider(AIProvider):
     async def _get_client(self, model_config):
@@ -444,6 +499,9 @@ class AnthropicProvider(AIProvider):
     async def stream_chat_with_results(self, messages: list[dict], tools: list[ToolDef], model_config, tool_results: list[dict]) -> AsyncGenerator[StreamChunk, None]:
         async for chunk in self.stream_chat(messages, tools, model_config):
             yield chunk
+
+    async def generate_image(self, prompt: str, model_config, size: str = "1024x1024", n: int = 1) -> ImageGenerationResult:
+        raise NotImplementedError("Image generation is not supported on the Anthropic provider. Use an OpenAI-compatible provider.")
 
 
 _providers: dict[str, AIProvider] = {

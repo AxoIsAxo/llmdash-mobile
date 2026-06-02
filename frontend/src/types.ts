@@ -4,6 +4,8 @@ export interface User {
   role: 'owner' | 'admin' | 'user';
   token_limit: number | null;
   token_usage: number;
+  image_limit: number | null;
+  image_usage: number;
   created_at: string;
 }
 
@@ -22,6 +24,7 @@ export interface ModelConfig {
   name: string;
   provider: 'openai_compatible' | 'anthropic';
   model_name: string;
+  model_type: string;
   base_url: string | null;
   api_key_env: string | null;
   temperature: number;
@@ -71,7 +74,7 @@ export interface ToolCall {
 }
 
 export interface StreamEvent {
-  type: 'content' | 'content_delta' | 'reasoning_delta' | 'tool_calls' | 'tool_start' | 'tool_result' | 'error';
+  type: 'content' | 'content_delta' | 'reasoning_delta' | 'tool_calls' | 'tool_start' | 'tool_result' | 'error' | 'image_result';
   content?: string;
   reasoning_content_delta?: string;
   reasoning_content?: string;
@@ -80,6 +83,10 @@ export interface StreamEvent {
   id?: string;
   result?: string;
   error?: string;
+  images?: string[];
+  revised_prompt?: string;
+  prompt?: string;
+  size?: string;
 }
 
 export interface ConfigStatus {
@@ -96,6 +103,7 @@ export interface EnvStatus {
 export interface ScannedModel {
   id: string;
   name: string;
+  suggested_type: string;
 }
 
 export interface ScannedProvider {
@@ -130,6 +138,7 @@ export interface SubscriptionPlan {
   price_sats: number;
   duration_days: number;
   token_limit: number | null;
+  image_limit: number | null;
   enabled: boolean;
   created_at: string;
 }
@@ -140,6 +149,7 @@ export interface PlanModelLimit {
   model_id: number;
   model_name: string;
   token_limit: number | null;
+  image_limit: number | null;
 }
 
 export interface UserSubscription {
@@ -148,12 +158,14 @@ export interface UserSubscription {
   plan_id: number | null;
   plan_name: string | null;
   plan_token_limit: number | null;
+  plan_image_limit: number | null;
   status: 'pending' | 'active' | 'expired' | 'cancelled';
   started_at: string | null;
   expires_at: string | null;
   payment_checking_id: string | null;
   payment_request: string | null;
   token_usage: number;
+  image_usage: number;
   created_at: string;
 }
 

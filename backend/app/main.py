@@ -23,6 +23,7 @@ from .models import (
     ChatRequest, MessageResponse, BranchRequest,
     EnvUpdateRequest, EnvStatusResponse, GenerateStatusResponse,
     ModelReorderRequest,
+    ImageGenerationRequest, ImageGenerationResponse,
 )
 from .ai import get_provider, ToolDef
 from .tools import get_tool_definitions, execute_tool
@@ -92,7 +93,8 @@ async def list_models(current_user: dict = Depends(get_current_user), db: AsyncS
     return [
         ModelConfigResponse(
             id=m.id, name=m.name, provider=m.provider,
-            model_name=m.model_name, base_url=m.base_url,
+            model_name=m.model_name, model_type=getattr(m, "model_type", "chat") or "chat",
+            base_url=m.base_url,
             api_key_env=m.api_key_env, temperature=m.temperature or 0.7,
             max_tokens=m.max_tokens or 4096,
             thinking_enabled=bool(getattr(m, "thinking_enabled", False)),
@@ -115,9 +117,13 @@ async def create_model(cfg: ModelConfigCreate, current_user: dict = Depends(requ
         sort_order = max_sort + 1
     else:
         sort_order = cfg.sort_order
+    model_type_val = getattr(cfg, "model_type", "chat")
+    if hasattr(model_type_val, "value"):
+        model_type_val = model_type_val.value
     model = ModelConfig(
         name=cfg.name, provider=cfg.provider.value,
-        model_name=cfg.model_name, base_url=cfg.base_url,
+        model_name=cfg.model_name, model_type=model_type_val or "chat",
+        base_url=cfg.base_url,
         api_key_env=cfg.api_key_env, temperature=cfg.temperature,
         max_tokens=cfg.max_tokens,
         thinking_enabled=getattr(cfg, "thinking_enabled", False),
@@ -150,11 +156,47 @@ async def update_model(model_id: int, cfg: ModelConfigUpdate, current_user: dict
     update_data = cfg.model_dump(exclude_unset=True)
     if "provider" in update_data and update_data["provider"] is not None:
         update_data["provider"] = update_data["provider"].value
+    if "model_type" in update_data and update_data["model_type"] is not None:
+        if hasattr(update_data["model_type"], "value"):
+            update_data["model_type"] = update_data["model_type"].value
     for key, value in update_data.items():
         setattr(model, key, value)
     model.updated_at = datetime.now(timezone.utc)
     await db.commit()
     return {"status": "updated"}
+
+
+IMAGE_MODEL_PATTERNS = [
+    "dall-e", "dalle", "imagen", "flux", "stable-diffusion", "sdxl", "sd3",
+    "midjourney", "recraft", "playground", "runwayml", "proteus", "dreamshaper",
+    "animagine", "anything-v", "sweetai", "pg-", "rvr", "openjourney",
+    "epicrealism", "juggernaut", "artifusion", "luna-diffusion", "pixart",
+    "kolors", "hunyuan-3d", "janus", "seedream", "wai-", "noobai", "crystal-clear",
+    "realistic-vision", "meinamix", "majicmix", "ghostmix", "babes", "perfectly-",
+    "counterfeit", "aingdiffusion", "deliberate", "disney-", "dreamlike",
+    "pfg-art", "citrine-dream", "photonic", "realism-engine", "aniverse",
+    "flat-", "samaritan", "pixar-", "retro-", "hasdx",
+    "image", "img-gen", "txt2img", "img2img",
+    "sdxl", "sd-", "turbo", "lightning", "hyper",
+]
+IMAGE_MODEL_LOWERS = [p.lower() for p in IMAGE_MODEL_PATTERNS]
+
+
+def _detect_model_type(model_id: str, raw_entry: dict | None = None) -> str:
+    if raw_entry:
+        arch = raw_entry.get("architecture", {}) or {}
+        out_mods = arch.get("output_modalities", []) or []
+        if out_mods and "image" in out_mods:
+            modality = arch.get("modality", "")
+            if "->image" in modality:
+                return "image"
+    lower = model_id.lower()
+    if "/" in lower:
+        lower = lower.split("/", 1)[1]
+    for pat in IMAGE_MODEL_LOWERS:
+        if pat in lower:
+            return "image"
+    return "chat"
 
 
 @router.get("/models/scan")
@@ -178,12 +220,34 @@ async def scan_models(current_user: dict = Depends(require_role("owner", "admin"
                         data = resp.json()
                         raw = data.get("data", data.get("models", []))
                         for m in raw:
+                            mid = m.get("id", m.get("name", ""))
                             models.append({
-                                "id": m.get("id", m.get("name", "")),
+                                "id": mid,
                                 "name": m.get("id", m.get("name", "")),
+                                "suggested_type": _detect_model_type(mid, m),
                             })
                     else:
                         error = f"HTTP {resp.status_code}"
+                    try:
+                        img_resp = await client.get(
+                            f"{pc['base_url']}/models",
+                            headers={"Authorization": f"Bearer {api_key}"},
+                            params={"output_modalities": "image"},
+                        )
+                        if img_resp.status_code == 200:
+                            img_data = img_resp.json()
+                            img_raw = img_data.get("data", img_data.get("models", []))
+                            seen_ids = {m["id"] for m in models}
+                            for m in img_raw:
+                                mid = m.get("id", m.get("name", ""))
+                                if mid not in seen_ids:
+                                    models.append({
+                                        "id": mid,
+                                        "name": m.get("id", m.get("name", "")),
+                                        "suggested_type": "image",
+                                    })
+                    except Exception:
+                        pass
             elif pc["type"] == "anthropic":
                 async with httpx.AsyncClient(timeout=15) as client:
                     resp = await client.get(
@@ -196,9 +260,11 @@ async def scan_models(current_user: dict = Depends(require_role("owner", "admin"
                     if resp.status_code == 200:
                         data = resp.json()
                         for m in data.get("data", []):
+                            mid = m.get("id", m.get("name", ""))
                             models.append({
-                                "id": m.get("id", m.get("name", "")),
+                                "id": mid,
                                 "name": m.get("display_name", m.get("id", "")),
+                                "suggested_type": _detect_model_type(mid),
                             })
                     else:
                         error = f"HTTP {resp.status_code}"
@@ -236,7 +302,8 @@ async def get_model(model_id: int, current_user: dict = Depends(get_current_user
         raise HTTPException(404, "Model not found")
     return ModelConfigResponse(
         id=model.id, name=model.name, provider=model.provider,
-        model_name=model.model_name, base_url=model.base_url,
+        model_name=model.model_name, model_type=getattr(model, "model_type", "chat") or "chat",
+        base_url=model.base_url,
         api_key_env=model.api_key_env, temperature=model.temperature or 0.7,
         max_tokens=model.max_tokens or 4096,
         thinking_enabled=bool(getattr(model, "thinking_enabled", False)),
@@ -464,6 +531,10 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
         raise HTTPException(404, "Model not found")
     if not model.enabled:
         raise HTTPException(400, "Model is disabled")
+
+    model_type = getattr(model, "model_type", "chat") or "chat"
+    if model_type != "chat":
+        raise HTTPException(400, "This model is not a chat model. Use /api/chat/image for image generation models.")
 
     provider = get_provider(model.provider)
     if not provider:
@@ -917,6 +988,134 @@ async def generation_status(conv_id: int, current_user: dict = Depends(get_curre
         )
 
     return GenerateStatusResponse(generating=False)
+
+
+# --- Image Generation ---
+
+@router.post("/chat/image", response_model=ImageGenerationResponse)
+async def generate_image(req: ImageGenerationRequest, current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    conv_result = await db.execute(
+        select(Conversation).where(Conversation.id == req.conversation_id, Conversation.user_id == current_user["user_id"])
+    )
+    conversation = conv_result.scalar_one_or_none()
+    if not conversation:
+        raise HTTPException(404, "Conversation not found")
+
+    model_result = await db.execute(select(ModelConfig).where(ModelConfig.id == req.model_id))
+    model = model_result.scalar_one_or_none()
+    if not model:
+        raise HTTPException(404, "Model not found")
+    if not model.enabled:
+        raise HTTPException(400, "Model is disabled")
+    model_type = getattr(model, "model_type", "chat") or "chat"
+    if model_type != "image":
+        raise HTTPException(400, "This model is not an image generation model")
+
+    provider = get_provider(model.provider)
+    if not provider:
+        raise HTTPException(400, f"Unknown provider: {model.provider}")
+
+    if model.api_key_env:
+        env_attr = model.api_key_env.lower()
+        key_val = getattr(app_config.settings, env_attr, None)
+        if not key_val:
+            raise HTTPException(400, f"API key not configured for {model.name}")
+
+    user_result = await db.execute(select(User).where(User.id == current_user["user_id"]))
+    user = user_result.scalar_one_or_none()
+
+    subscription_image_limit = None
+    model_sub_image_limit = None
+    subscription_result = await db.execute(
+        select(UserSubscription, SubscriptionPlan)
+        .join(SubscriptionPlan, UserSubscription.plan_id == SubscriptionPlan.id)
+        .where(
+            UserSubscription.user_id == current_user["user_id"],
+            UserSubscription.status == "active",
+        )
+        .where(
+            (UserSubscription.expires_at > datetime.now(timezone.utc))
+            | (UserSubscription.expires_at == None)
+        )
+    )
+    active_sub_row = subscription_result.first()
+    free_plan = None
+    free_plan_result = await db.execute(
+        select(SubscriptionPlan).where(SubscriptionPlan.name == "Free")
+    )
+    free_plan = free_plan_result.scalar_one_or_none()
+
+    if active_sub_row:
+        sub, plan = active_sub_row
+        sub_image_limit_val = getattr(plan, "image_limit", None)
+        if sub_image_limit_val is not None:
+            subscription_image_limit = sub_image_limit_val
+        model_limit_result = await db.execute(
+            select(PlanModelLimit).where(
+                PlanModelLimit.plan_id == plan.id,
+                PlanModelLimit.model_id == req.model_id,
+            )
+        )
+        model_limit = model_limit_result.scalar_one_or_none()
+        if model_limit and getattr(model_limit, "image_limit", None) is not None:
+            model_sub_image_limit = model_limit.image_limit
+    else:
+        if free_plan:
+            free_image_limit = getattr(free_plan, "image_limit", None)
+            if free_image_limit is not None:
+                subscription_image_limit = free_image_limit
+            model_limit_result = await db.execute(
+                select(PlanModelLimit).where(
+                    PlanModelLimit.plan_id == free_plan.id,
+                    PlanModelLimit.model_id == req.model_id,
+                )
+            )
+            model_limit = model_limit_result.scalar_one_or_none()
+            if model_limit and getattr(model_limit, "image_limit", None) is not None:
+                model_sub_image_limit = model_limit.image_limit
+
+    effective_image_limit = None
+    if user and getattr(user, "image_limit", None) is not None:
+        effective_image_limit = user.image_limit
+    if subscription_image_limit is not None:
+        effective_image_limit = subscription_image_limit if effective_image_limit is None else min(effective_image_limit, subscription_image_limit)
+    if model_sub_image_limit is not None:
+        effective_image_limit = model_sub_image_limit if effective_image_limit is None else min(effective_image_limit, model_sub_image_limit)
+
+    user_image_usage = getattr(user, "image_usage", 0) or 0
+    if effective_image_limit is not None and user_image_usage >= effective_image_limit * req.n:
+        raise HTTPException(403, f"Image limit reached ({user_image_usage}/{effective_image_limit}). Upgrade your plan or contact an admin.")
+
+    user_prompt_msg = Message(conversation_id=req.conversation_id, role="user", content=f"[Image Generation] {req.prompt}")
+    db.add(user_prompt_msg)
+    await db.commit()
+
+    try:
+        result = await provider.generate_image(req.prompt, model, req.size, req.n)
+    except NotImplementedError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Image generation failed: {str(e)}")
+
+    assistant_msg = Message(
+        conversation_id=req.conversation_id,
+        role="assistant",
+        content=json.dumps({"images": result.images, "revised_prompt": result.revised_prompt, "prompt": req.prompt, "size": req.size}),
+    )
+    db.add(assistant_msg)
+    await db.commit()
+
+    try:
+        await db.execute(
+            update(User)
+            .where(User.id == current_user["user_id"])
+            .values(image_usage=User.image_usage + req.n)
+        )
+        await db.commit()
+    except Exception:
+        pass
+
+    return ImageGenerationResponse(images=result.images, revised_prompt=result.revised_prompt)
 
 @router.get("/files/{filename}")
 async def serve_file(filename: str, current_user: dict = Depends(get_current_user)):

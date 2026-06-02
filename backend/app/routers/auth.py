@@ -52,6 +52,7 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
     return {
         "user_id": user.id, "username": user.username, "role": user.role,
         "token_usage": user.token_usage or 0, "token_limit": user.token_limit,
+        "image_usage": getattr(user, "image_usage", 0) or 0, "image_limit": getattr(user, "image_limit", None),
     }
 
 
@@ -93,7 +94,7 @@ async def setup_owner(req: AuthSetupRequest, db: AsyncSession = Depends(get_db))
     await db.refresh(user)
 
     token = create_token(user.id, user.username, user.role)
-    return {"token": token, "user": {"id": user.id, "username": user.username, "role": user.role, "token_usage": user.token_usage or 0, "token_limit": user.token_limit}}
+    return {"token": token, "user": {"id": user.id, "username": user.username, "role": user.role, "token_usage": user.token_usage or 0, "token_limit": user.token_limit, "image_usage": getattr(user, "image_usage", 0) or 0, "image_limit": getattr(user, "image_limit", None)}}
 
 
 @router.post("/login")
@@ -104,7 +105,7 @@ async def login(req: AuthLoginRequest, db: AsyncSession = Depends(get_db)):
         raise HTTPException(401, "Invalid username or password")
 
     token = create_token(user.id, user.username, user.role)
-    return {"token": token, "user": {"id": user.id, "username": user.username, "role": user.role, "token_usage": user.token_usage or 0, "token_limit": user.token_limit}}
+    return {"token": token, "user": {"id": user.id, "username": user.username, "role": user.role, "token_usage": user.token_usage or 0, "token_limit": user.token_limit, "image_usage": getattr(user, "image_usage", 0) or 0, "image_limit": getattr(user, "image_limit", None)}}
 
 
 @router.post("/register")
@@ -152,6 +153,7 @@ async def list_users(current_user: dict = Depends(require_role("owner", "admin")
         UserResponse(
             id=u.id, username=u.username, role=u.role,
             token_limit=u.token_limit, token_usage=u.token_usage or 0,
+            image_limit=getattr(u, "image_limit", None), image_usage=getattr(u, "image_usage", 0) or 0,
             created_at=u.created_at.isoformat() if u.created_at else "",
         )
         for u in users
@@ -191,6 +193,7 @@ async def create_user(
     return {
         "id": user.id, "username": user.username, "role": user.role,
         "token_limit": user.token_limit, "token_usage": user.token_usage or 0,
+        "image_limit": getattr(user, "image_limit", None), "image_usage": getattr(user, "image_usage", 0) or 0,
         "created_at": user.created_at.isoformat() if user.created_at else "",
     }
 
@@ -238,6 +241,9 @@ async def update_user(
 
     if req.token_limit is not None:
         target.token_limit = req.token_limit if req.token_limit > 0 else None
+
+    if req.image_limit is not None:
+        target.image_limit = req.image_limit if req.image_limit > 0 else None
 
     await db.commit()
     return {"status": "updated"}
@@ -357,6 +363,7 @@ async def reset_user_usage(
         raise HTTPException(403, "Admins cannot modify other admin or owner accounts")
 
     target.token_usage = 0
+    target.image_usage = 0
     await db.commit()
     return {"status": "reset"}
 

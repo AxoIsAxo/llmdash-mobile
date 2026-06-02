@@ -50,6 +50,7 @@ async def list_plans(current_user: dict = Depends(get_current_user), db: AsyncSe
         SubscriptionPlanResponse(
             id=p.id, name=p.name, price_sats=p.price_sats,
             duration_days=p.duration_days, token_limit=p.token_limit,
+            image_limit=getattr(p, "image_limit", None),
             enabled=p.enabled,
             created_at=p.created_at.isoformat() if p.created_at else "",
         )
@@ -67,6 +68,7 @@ async def list_public_plans(db: AsyncSession = Depends(get_db)):
         SubscriptionPlanResponse(
             id=p.id, name=p.name, price_sats=p.price_sats,
             duration_days=p.duration_days, token_limit=p.token_limit,
+            image_limit=getattr(p, "image_limit", None),
             enabled=p.enabled,
             created_at=p.created_at.isoformat() if p.created_at else "",
         )
@@ -86,6 +88,7 @@ async def create_plan(
     plan = SubscriptionPlan(
         name=req.name, price_sats=req.price_sats,
         duration_days=req.duration_days, token_limit=req.token_limit,
+        image_limit=getattr(req, "image_limit", None),
         enabled=req.enabled,
     )
     db.add(plan)
@@ -155,6 +158,7 @@ async def list_plan_limits(
             id=limit.id, plan_id=limit.plan_id, model_id=limit.model_id,
             model_name=model_name or f"Model #{limit.model_id}",
             token_limit=limit.token_limit,
+            image_limit=getattr(limit, "image_limit", None),
         )
         for limit, model_name in rows
     ]
@@ -175,7 +179,7 @@ async def set_plan_limits(
     await db.execute(delete(PlanModelLimit).where(PlanModelLimit.plan_id == plan_id))
 
     for item in req:
-        limit = PlanModelLimit(plan_id=plan_id, model_id=item.model_id, token_limit=item.token_limit)
+        limit = PlanModelLimit(plan_id=plan_id, model_id=item.model_id, token_limit=item.token_limit, image_limit=getattr(item, "image_limit", None))
         db.add(limit)
 
     await db.commit()
@@ -190,7 +194,7 @@ async def get_my_subscription(
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(UserSubscription, SubscriptionPlan.name, User.token_usage)
+        select(UserSubscription, SubscriptionPlan.name, User.token_usage, User.image_usage)
         .join(SubscriptionPlan, UserSubscription.plan_id == SubscriptionPlan.id, isouter=True)
         .join(User, UserSubscription.user_id == User.id)
         .where(UserSubscription.user_id == current_user["user_id"])
@@ -201,7 +205,7 @@ async def get_my_subscription(
     if not row:
         return None
 
-    sub, plan_name, token_usage = row
+    sub, plan_name, token_usage, image_usage = row
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     if sub.status == "active" and sub.expires_at and sub.expires_at.replace(tzinfo=None) < now:
         sub.status = "expired"
@@ -227,6 +231,7 @@ async def get_my_subscription(
             pass
 
     plan_token_limit = None
+    plan_image_limit = None
     if sub.plan_id:
         plan_result = await db.execute(
             select(SubscriptionPlan).where(SubscriptionPlan.id == sub.plan_id)
@@ -234,6 +239,7 @@ async def get_my_subscription(
         plan = plan_result.scalar_one_or_none()
         if plan:
             plan_token_limit = plan.token_limit
+            plan_image_limit = getattr(plan, "image_limit", None)
 
     if plan_token_limit is None:
         free_plan_result = await db.execute(
@@ -245,12 +251,14 @@ async def get_my_subscription(
 
     return UserSubscriptionResponse(
         id=sub.id, user_id=sub.user_id, plan_id=sub.plan_id,
-        plan_name=plan_name, plan_token_limit=plan_token_limit, status=sub.status,
+        plan_name=plan_name, plan_token_limit=plan_token_limit,
+        plan_image_limit=plan_image_limit, status=sub.status,
         started_at=sub.started_at.isoformat() if sub.started_at else None,
         expires_at=sub.expires_at.isoformat() if sub.expires_at else None,
         payment_checking_id=sub.payment_checking_id,
         payment_request=sub.payment_request,
         token_usage=token_usage or 0,
+        image_usage=image_usage or 0,
         created_at=sub.created_at.isoformat() if sub.created_at else "",
     )
 
@@ -426,7 +434,7 @@ async def admin_list_subscriptions(
     db: AsyncSession = Depends(get_db),
 ):
     query = (
-        select(UserSubscription, SubscriptionPlan.name, User.username, User.token_usage)
+        select(UserSubscription, SubscriptionPlan.name, User.username, User.token_usage, User.image_usage)
         .join(SubscriptionPlan, UserSubscription.plan_id == SubscriptionPlan.id, isouter=True)
         .join(User, UserSubscription.user_id == User.id)
     )
@@ -445,9 +453,10 @@ async def admin_list_subscriptions(
             payment_checking_id=sub.payment_checking_id,
             payment_request=sub.payment_request,
             token_usage=token_usage or 0,
+            image_usage=image_usage or 0,
             created_at=sub.created_at.isoformat() if sub.created_at else "",
         )
-        for sub, plan_name, _username, token_usage in rows
+        for sub, plan_name, _username, token_usage, image_usage in rows
     ]
 
 

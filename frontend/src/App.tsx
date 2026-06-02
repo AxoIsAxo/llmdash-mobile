@@ -13,7 +13,7 @@ import {
   Send, Plus, Key, MessageSquare, Trash2, ChevronLeft,
   ChevronRight, Wrench, Bot, Loader2, Terminal, Globe, FileText, Eye, Search,
   Copy, Check, RefreshCw, Square, ChevronUp, ChevronDown, Download,
-  Shield, LogOut, Settings, Minus, CreditCard, Brain
+  Shield, LogOut, Settings, Minus, CreditCard, Brain, Image
 } from 'lucide-react'
 import MarkdownRenderer from './components/MarkdownRenderer'
 import SetupWizard from './components/SetupWizard'
@@ -33,6 +33,7 @@ function App() {
   const [selectedModelId, setSelectedModelId] = useState<number | null>(null)
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
+  const [imageGenSize, setImageGenSize] = useState('1024x1024')
   const [showSidebar, setShowSidebar] = useState(true)
   const [showAdmin, setShowAdmin] = useState(false)
   const [showSubscription, setShowSubscription] = useState(false)
@@ -290,6 +291,54 @@ function App() {
     setSidePanel(null)
     const modelId = selectedModelId
     if (!modelId) { alert('No enabled model configured. Ask an admin to set one up.'); return }
+
+    const selectedModel = models.find(m => m.id === modelId)
+
+    if (selectedModel?.model_type === 'image') {
+      let conv = activeConv
+      if (!conv) {
+        try {
+          conv = await api.conversations.create({ title: 'New Chat', model_id: modelId })
+          setConversations(prev => [conv!, ...prev])
+          setActiveConv(conv!)
+        } catch { return }
+      }
+
+      setMessages(prev => [...prev, {
+        id: Date.now(), role: 'user', content: input,
+        tool_calls_json: null, tool_call_id: null, tool_name: null, created_at: new Date().toISOString()
+      }])
+      const prompt = input
+      setInput('')
+      setStreaming(true)
+
+      try {
+        const result = await api.chat.generateImage(conv.id, prompt, modelId, imageGenSize, 1)
+        const images: string[] = result.images || []
+        const imgMsg: Message = {
+          id: Date.now() + 1,
+          role: 'assistant',
+          content: JSON.stringify({ images, revised_prompt: result.revised_prompt, prompt, size: imageGenSize }),
+          tool_calls_json: null, tool_call_id: null, tool_name: null,
+          created_at: new Date().toISOString()
+        }
+        setMessages(prev => [...prev, imgMsg])
+      } catch (e: any) {
+        setMessages(prev => [...prev, {
+          id: Date.now() + 1, role: 'assistant' as const,
+          content: `Error: ${e.message}`, tool_calls_json: null,
+          tool_call_id: null, tool_name: null, created_at: new Date().toISOString()
+        }])
+      } finally {
+        setStreaming(false)
+        setAbortController(null)
+        loadConversations()
+        if (currentUser) {
+          try { setCurrentUser(await api.auth.me()) } catch {}
+        }
+      }
+      return
+    }
 
     let conv = activeConv
     if (!conv) {
@@ -697,7 +746,9 @@ function App() {
         </div>
         {models.find(m => m.id === selectedModelId) && (
           <div className="px-3 py-2 border-t border-gray-800 text-xs text-gray-500 flex items-center gap-2">
-            <Bot className="w-3 h-3 text-emerald-400" />
+            {models.find(m => m.id === selectedModelId)?.model_type === 'image'
+              ? <Image className="w-3 h-3 text-purple-400" />
+              : <Bot className="w-3 h-3 text-emerald-400" />}
             <span className="truncate">{models.find(m => m.id === selectedModelId)?.name}</span>
           </div>
         )}
@@ -725,6 +776,12 @@ function App() {
             <span className="font-mono">{(currentUser.token_usage || 0).toLocaleString()}</span> tokens used
             {currentUser.token_limit && (
               <span> / <span className={currentUser.token_usage >= currentUser.token_limit ? 'text-red-400' : ''}>{currentUser.token_limit.toLocaleString()}</span></span>
+            )}
+          </div>
+          <div className="px-3 py-1 text-xs text-gray-500">
+            <span className="font-mono">{(currentUser.image_usage || 0).toLocaleString()}</span> images used
+            {currentUser.image_limit && (
+              <span> / <span className={currentUser.image_usage >= currentUser.image_limit ? 'text-red-400' : ''}>{currentUser.image_limit.toLocaleString()}</span></span>
             )}
           </div>
         </div>
@@ -759,7 +816,9 @@ function App() {
                     onClick={(e) => { e.stopPropagation(); setShowModelPickerEmpty(!showModelPickerEmpty) }}
                     className="flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-xs transition-colors"
                   >
-                    <Bot className="w-3.5 h-3.5 text-emerald-400" />
+                    {models.find(m => m.id === selectedModelId)?.model_type === 'image'
+                      ? <Image className="w-3.5 h-3.5 text-purple-400" />
+                      : <Bot className="w-3.5 h-3.5 text-emerald-400" />}
                     <span>{models.find(m => m.id === selectedModelId)?.name || 'Select model'}</span>
                     <ChevronDown className="w-3 h-3" />
                   </button>
@@ -771,7 +830,9 @@ function App() {
                           onClick={() => { setSelectedModelId(m.id); closeModelPickers() }}
                           className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-700 transition-colors flex items-center gap-2 ${m.id === selectedModelId ? 'bg-gray-700 text-emerald-400' : 'text-gray-300'}`}
                         >
-                          <Bot className="w-3 h-3 shrink-0" />
+                          {m.model_type === 'image'
+                            ? <Image className="w-3 h-3 shrink-0 text-purple-400" />
+                            : <Bot className="w-3 h-3 shrink-0 text-emerald-400" />}
                           <span className="truncate">{m.name}</span>
                           {m.id === selectedModelId && <Check className="w-3 h-3 shrink-0 ml-auto" />}
                         </button>
@@ -857,26 +918,41 @@ function App() {
                   onClick={(e) => { e.stopPropagation(); setShowModelPickerFooter(!showModelPickerFooter) }}
                   className="flex items-center gap-1.5 px-2 py-1 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors text-gray-400 hover:text-gray-300"
                 >
-                  <Bot className="w-3 h-3 text-emerald-400" />
+                  {models.find(m => m.id === selectedModelId)?.model_type === 'image'
+                    ? <Image className="w-3 h-3 text-purple-400" />
+                    : <Bot className="w-3 h-3 text-emerald-400" />}
                   <span>{models.find(m => m.id === selectedModelId)?.name || 'Select'}</span>
                   <ChevronDown className="w-3 h-3" />
                 </button>
               )}
-              {showModelPickerFooter && models.length > 0 && (
-                <div onClick={e => e.stopPropagation()} className="absolute bottom-full left-0 mb-1 w-64 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 overflow-hidden">
-                  {models.map(m => (
-                    <button
-                      key={m.id}
-                      onClick={() => { setSelectedModelId(m.id); closeModelPickers() }}
-                      className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-700 transition-colors flex items-center gap-2 ${m.id === selectedModelId ? 'bg-gray-700 text-emerald-400' : 'text-gray-300'}`}
-                    >
-                      <Bot className="w-3 h-3 shrink-0" />
-                      <span className="truncate">{m.name}</span>
-                      {m.id === selectedModelId && <Check className="w-3 h-3 shrink-0 ml-auto" />}
-                    </button>
-                  ))}
-                </div>
+              {models.length > 0 && models.find(m => m.id === selectedModelId)?.model_type === 'image' && (
+                <select
+                  value={imageGenSize}
+                  onChange={e => setImageGenSize(e.target.value)}
+                  className="bg-gray-800 rounded-lg px-2 py-1 text-xs text-gray-400 border border-gray-700 focus:outline-none focus:border-purple-500"
+                >
+                  <option value="1024x1024">1024x1024</option>
+                  <option value="1792x1024">1792x1024</option>
+                  <option value="1024x1792">1024x1792</option>
+                </select>
               )}
+              {showModelPickerFooter && models.length > 0 && (
+                    <div onClick={e => e.stopPropagation()} className="absolute bottom-full left-0 mb-1 w-64 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 overflow-hidden">
+                      {models.map(m => (
+                        <button
+                          key={m.id}
+                          onClick={() => { setSelectedModelId(m.id); closeModelPickers() }}
+                          className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-700 transition-colors flex items-center gap-2 ${m.id === selectedModelId ? 'bg-gray-700 text-emerald-400' : 'text-gray-300'}`}
+                        >
+                          {m.model_type === 'image'
+                            ? <Image className="w-3 h-3 shrink-0 text-purple-400" />
+                            : <Bot className="w-3 h-3 shrink-0 text-emerald-400" />}
+                          <span className="truncate">{m.name}</span>
+                          {m.id === selectedModelId && <Check className="w-3 h-3 shrink-0 ml-auto" />}
+                        </button>
+                      ))}
+                    </div>
+                  )}
             </div>
           </div>
         </div>
@@ -1157,6 +1233,51 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
 
   const content = message.content || ''
   const hasHtmlRender = content.includes('HTML_RENDER:')
+
+  let imageData: { images: string[]; revised_prompt?: string; prompt?: string; size?: string } | null = null
+  if (isAssistant && content.trim().startsWith('{')) {
+    try {
+      const parsed = JSON.parse(content)
+      if (parsed.images && Array.isArray(parsed.images)) {
+        imageData = parsed
+      }
+    } catch {}
+  }
+
+  if (imageData) {
+    return (
+      <div>
+        <div className="flex justify-start">
+          <div className="max-w-[80%] bg-gray-800 rounded-xl px-4 py-3 space-y-3">
+            <div className="flex items-center gap-2 text-xs text-gray-400">
+              <Image className="w-3.5 h-3.5 text-purple-400" />
+              <span>Image Generation{imageData.size ? ` (${imageData.size})` : ''}</span>
+            </div>
+            {imageData.prompt && (
+              <div className="text-xs text-gray-500 italic">Prompt: {imageData.prompt}</div>
+            )}
+            {imageData.revised_prompt && (
+              <div className="text-xs text-gray-500 italic">Revised: {imageData.revised_prompt}</div>
+            )}
+            <div className="flex flex-wrap gap-2">
+              {imageData.images.map((img, i) => (
+                <div key={i} className="rounded-lg overflow-hidden border border-gray-700 max-w-sm">
+                  <img src={img} alt={`Generated ${i + 1}`} className="w-full object-contain" />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        {message.content && (
+          <div className="flex gap-1 mt-0.5 justify-start ml-10">
+            <button onClick={() => onCopy(message.content || '', message.id)} className="p-1 hover:bg-gray-700 rounded transition-colors text-gray-500 hover:text-gray-300" title="Copy">
+              {copiedId === message.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+            </button>
+          </div>
+        )}
+      </div>
+    )
+  }
 
   if (hasHtmlRender) {
     const parts = content.split(/(HTML_RENDER:[A-Za-z0-9+/=]+)/)

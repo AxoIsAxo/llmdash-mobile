@@ -8,6 +8,11 @@ class ProviderType(str, Enum):
     anthropic = "anthropic"
 
 
+class ModelType(str, Enum):
+    chat = "chat"
+    image = "image"
+
+
 class UserRole(str, Enum):
     owner = "owner"
     admin = "admin"
@@ -35,6 +40,8 @@ class UserResponse(BaseModel):
     role: str
     token_limit: Optional[int] = None
     token_usage: int = 0
+    image_limit: Optional[int] = None
+    image_usage: int = 0
     created_at: str
 
 
@@ -43,6 +50,7 @@ class UserUpdateRequest(BaseModel):
     password: Optional[str] = Field(None, min_length=4, max_length=128)
     role: Optional[UserRole] = None
     token_limit: Optional[int] = None
+    image_limit: Optional[int] = None
 
 
 class IpLimitResponse(BaseModel):
@@ -75,6 +83,7 @@ class ModelConfigCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     provider: ProviderType
     model_name: str = Field(..., min_length=1)
+    model_type: ModelType = ModelType.chat
     base_url: Optional[str] = None
     api_key_env: Optional[str] = None
     temperature: float = 0.7
@@ -89,6 +98,7 @@ class ModelConfigUpdate(BaseModel):
     name: Optional[str] = None
     provider: Optional[ProviderType] = None
     model_name: Optional[str] = None
+    model_type: Optional[ModelType] = None
     base_url: Optional[str] = None
     api_key_env: Optional[str] = None
     temperature: Optional[float] = None
@@ -104,6 +114,7 @@ class ModelConfigResponse(BaseModel):
     name: str
     provider: str
     model_name: str
+    model_type: str = "chat"
     base_url: Optional[str] = None
     api_key_env: Optional[str] = None
     temperature: float = 0.7
@@ -138,6 +149,14 @@ class ChatRequest(BaseModel):
     conversation_id: int
     message: str = Field(..., min_length=1)
     model_id: Optional[int] = None
+
+
+class ImageGenerationRequest(BaseModel):
+    conversation_id: int
+    prompt: str = Field(..., min_length=1, max_length=4000)
+    model_id: int
+    size: Optional[str] = "1024x1024"
+    n: Optional[int] = 1
 
 
 class BranchRequest(BaseModel):
@@ -176,6 +195,11 @@ class GenerateStatusResponse(BaseModel):
     status: str = "done"
 
 
+class ImageGenerationResponse(BaseModel):
+    images: list[str]
+    revised_prompt: Optional[str] = None
+
+
 class EnvUpdateRequest(BaseModel):
     updates: dict[str, str]
 
@@ -195,6 +219,7 @@ class SubscriptionPlanCreate(BaseModel):
     price_sats: int = Field(..., ge=0)
     duration_days: int = Field(..., ge=0)
     token_limit: Optional[int] = None
+    image_limit: Optional[int] = None
     enabled: bool = True
 
 
@@ -203,6 +228,7 @@ class SubscriptionPlanUpdate(BaseModel):
     price_sats: Optional[int] = Field(None, ge=0)
     duration_days: Optional[int] = Field(None, ge=0)
     token_limit: Optional[int] = None
+    image_limit: Optional[int] = None
     enabled: Optional[bool] = None
 
 
@@ -212,6 +238,7 @@ class SubscriptionPlanResponse(BaseModel):
     price_sats: int
     duration_days: int
     token_limit: Optional[int] = None
+    image_limit: Optional[int] = None
     enabled: bool
     created_at: str
 
@@ -222,11 +249,13 @@ class PlanModelLimitResponse(BaseModel):
     model_id: int
     model_name: str
     token_limit: Optional[int] = None
+    image_limit: Optional[int] = None
 
 
 class PlanModelLimitSet(BaseModel):
     model_id: int
     token_limit: Optional[int] = None
+    image_limit: Optional[int] = None
 
 
 class UserSubscriptionResponse(BaseModel):
@@ -235,12 +264,14 @@ class UserSubscriptionResponse(BaseModel):
     plan_id: Optional[int] = None
     plan_name: Optional[str] = None
     plan_token_limit: Optional[int] = None
+    plan_image_limit: Optional[int] = None
     status: str
     started_at: Optional[str] = None
     expires_at: Optional[str] = None
     payment_checking_id: Optional[str] = None
     payment_request: Optional[str] = None
     token_usage: int = 0
+    image_usage: int = 0
     created_at: str
 
 

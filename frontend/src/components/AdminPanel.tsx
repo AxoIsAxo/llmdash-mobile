@@ -67,7 +67,7 @@ function UsersTab({ currentUser }: { currentUser: User }) {
   const [newUser, setNewUser] = useState('')
   const [newPass, setNewPass] = useState('')
   const [editingUser, setEditingUser] = useState<number | null>(null)
-  const [editData, setEditData] = useState({ username: '', password: '', role: '', token_limit: '' })
+  const [editData, setEditData] = useState({ username: '', password: '', role: '', token_limit: '', image_limit: '' })
   const [error, setError] = useState('')
 
   const load = async () => {
@@ -108,6 +108,9 @@ function UsersTab({ currentUser }: { currentUser: User }) {
       if (editData.role) updatePayload.role = editData.role
       if (editData.token_limit !== '') {
         updatePayload.token_limit = editData.token_limit ? parseInt(editData.token_limit) : null
+      }
+      if (editData.image_limit !== '') {
+        updatePayload.image_limit = editData.image_limit ? parseInt(editData.image_limit) : null
       }
       await api.auth.users.update(id, updatePayload)
       setEditingUser(null)
@@ -246,6 +249,13 @@ function UsersTab({ currentUser }: { currentUser: User }) {
                     placeholder="Token limit"
                     className="bg-gray-800 rounded px-2 py-1 text-sm w-28"
                   />
+                  <input
+                    value={editData.image_limit}
+                    onChange={e => setEditData(d => ({ ...d, image_limit: e.target.value }))}
+                    type="number"
+                    placeholder="Image limit"
+                    className="bg-gray-800 rounded px-2 py-1 text-sm w-28"
+                  />
                   <button onClick={() => handleUpdate(u.id)} className="p-1 hover:bg-emerald-800 rounded"><Check className="w-4 h-4 text-emerald-400" /></button>
                   <button onClick={() => setEditingUser(null)} className="p-1 hover:bg-gray-700 rounded"><X className="w-4 h-4 text-gray-400" /></button>
                 </>
@@ -284,6 +294,7 @@ function UsersTab({ currentUser }: { currentUser: User }) {
                         password: '',
                         role: u.role,
                         token_limit: u.token_limit != null ? String(u.token_limit) : '',
+                        image_limit: u.image_limit != null ? String(u.image_limit) : '',
                       })
                     }}
                     className="p-1.5 hover:bg-gray-700 rounded text-gray-500 hover:text-gray-300"
@@ -401,8 +412,8 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
   const [renaming, setRenaming] = useState<number | null>(null)
   const [renameVal, setRenameVal] = useState('')
   const [configuringId, setConfiguringId] = useState<number | null>(null)
-  const [configForm, setConfigForm] = useState<{ temperature: number; max_tokens: number; thinking_enabled: boolean; thinking_budget_tokens: number }>({
-    temperature: 0.7, max_tokens: 4096, thinking_enabled: false, thinking_budget_tokens: 4000,
+  const [configForm, setConfigForm] = useState<{ temperature: number; max_tokens: number; thinking_enabled: boolean; thinking_budget_tokens: number; model_type: string }>({
+    temperature: 0.7, max_tokens: 4096, thinking_enabled: false, thinking_budget_tokens: 4000, model_type: 'chat',
   })
   const [reordering, setReordering] = useState(false)
 
@@ -430,6 +441,7 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
           name: `${provider.provider_name} — ${modelId}`,
           provider: provider.provider_type,
           model_name: modelId,
+          model_type: (provider.models.find(m => m.id === modelId)?.suggested_type) || 'chat',
           base_url: provider.base_url,
           api_key_env: provider.env_var,
           temperature: 0.7,
@@ -464,6 +476,7 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
       max_tokens: model.max_tokens,
       thinking_enabled: model.thinking_enabled,
       thinking_budget_tokens: model.thinking_budget_tokens || 4000,
+      model_type: model.model_type || 'chat',
     })
   }
 
@@ -474,6 +487,7 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
         max_tokens: configForm.max_tokens,
         thinking_enabled: configForm.thinking_enabled,
         thinking_budget_tokens: configForm.thinking_enabled ? configForm.thinking_budget_tokens : null,
+        model_type: configForm.model_type,
       })
       setConfiguringId(null)
       loadAll()
@@ -595,7 +609,7 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
                           {model.name}
                         </div>
                       )}
-                      <div className="text-xs text-gray-500 truncate">{model.model_name} — {providerName}</div>
+                      <div className="text-xs text-gray-500 truncate">{model.model_name} — {providerName}{model.model_type === 'image' ? ' — Image Gen' : ''}</div>
                     </div>
                     <button
                       onClick={() => configuringId === model.id ? setConfiguringId(null) : startConfigure(model)}
@@ -660,6 +674,17 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
                           />
                         </div>
                       )}
+                      <div className="flex items-center gap-4">
+                        <label className="text-xs text-gray-400 w-24 shrink-0">Model Type</label>
+                        <select
+                          value={configForm.model_type}
+                          onChange={e => setConfigForm(f => ({ ...f, model_type: e.target.value }))}
+                          className="flex-1 bg-gray-700 rounded px-2 py-1 text-sm border border-gray-600 focus:outline-none focus:border-emerald-500"
+                        >
+                          <option value="chat">Chat</option>
+                          <option value="image">Image Generation</option>
+                        </select>
+                      </div>
                       <div className="flex gap-2 pt-1">
                         <button
                           onClick={() => handleConfigure(model.id)}
@@ -790,12 +815,13 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [creating, setCreating] = useState(false)
-  const [newPlan, setNewPlan] = useState({ name: '', price_sats: 0, duration_days: 30, token_limit: '' })
+  const [newPlan, setNewPlan] = useState({ name: '', price_sats: 0, duration_days: 30, token_limit: '', image_limit: '' })
   const [editingPlan, setEditingPlan] = useState<number | null>(null)
-  const [editPlanData, setEditPlanData] = useState({ name: '', price_sats: 0, duration_days: 30, token_limit: '' })
+  const [editPlanData, setEditPlanData] = useState({ name: '', price_sats: 0, duration_days: 30, token_limit: '', image_limit: '' })
   const [limitsPlan, setLimitsPlan] = useState<number | null>(null)
   const [limits, setLimits] = useState<PlanModelLimit[]>([])
   const [limitValues, setLimitValues] = useState<Record<number, string>>({})
+  const [limitImageValues, setLimitImageValues] = useState<Record<number, string>>({})
   const [savingLimits, setSavingLimits] = useState(false)
 
   const load = async () => {
@@ -819,8 +845,10 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
       const data = await api.subscriptions.plans.limits(planId)
       setLimits(data)
       const vals: Record<number, string> = {}
-      data.forEach(l => { vals[l.model_id] = l.token_limit?.toString() || '' })
+      const imgVals: Record<number, string> = {}
+      data.forEach(l => { vals[l.model_id] = l.token_limit?.toString() || ''; imgVals[l.model_id] = l.image_limit?.toString() || '' })
       setLimitValues(vals)
+      setLimitImageValues(imgVals)
     } catch (e) { console.error('loadLimits failed:', e) }
   }
 
@@ -835,8 +863,9 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
         price_sats: newPlan.price_sats,
         duration_days: newPlan.duration_days,
         token_limit: newPlan.token_limit ? parseInt(newPlan.token_limit) : null,
+        image_limit: newPlan.image_limit ? parseInt(newPlan.image_limit) : null,
       })
-      setNewPlan({ name: '', price_sats: 0, duration_days: 30, token_limit: '' })
+      setNewPlan({ name: '', price_sats: 0, duration_days: 30, token_limit: '', image_limit: '' })
       setCreating(false)
       load()
     } catch (e: any) { setError(e.message) }
@@ -850,6 +879,7 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
         price_sats: editPlanData.price_sats,
         duration_days: editPlanData.duration_days,
         token_limit: editPlanData.token_limit ? parseInt(editPlanData.token_limit) : null,
+        image_limit: editPlanData.image_limit ? parseInt(editPlanData.image_limit) : null,
       })
       setEditingPlan(null)
       load()
@@ -872,6 +902,7 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
       const entries = models.map(m => ({
         model_id: m.id,
         token_limit: limitValues[m.id] ? parseInt(limitValues[m.id]) : null,
+        image_limit: limitImageValues[m.id] ? parseInt(limitImageValues[m.id]) : null,
       }))
       await api.subscriptions.plans.setLimits(limitsPlan!, entries)
       setLimitsPlan(null)
@@ -951,6 +982,16 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
                   className="w-full bg-gray-800 rounded px-3 py-1.5 text-sm border border-gray-700 focus:outline-none focus:border-emerald-500 mt-1"
                 />
               </div>
+              <div>
+                <label className="text-xs text-gray-500">Global image limit (optional)</label>
+                <input
+                  type="number"
+                  value={newPlan.image_limit}
+                  onChange={e => setNewPlan(p => ({ ...p, image_limit: e.target.value }))}
+                  placeholder="Unlimited"
+                  className="w-full bg-gray-800 rounded px-3 py-1.5 text-sm border border-gray-700 focus:outline-none focus:border-emerald-500 mt-1"
+                />
+              </div>
             </div>
             <div className="flex gap-2">
               <button onClick={handleCreate} className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded text-sm">Create</button>
@@ -991,16 +1032,26 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
                         className="w-full bg-gray-800 rounded px-3 py-1.5 text-sm border border-gray-700 focus:outline-none focus:border-emerald-500 mt-1"
                       />
                     </div>
-                    <div>
-                      <label className="text-xs text-gray-500">Global token limit (optional)</label>
-                      <input
-                        type="number"
-                        value={editPlanData.token_limit}
-                        onChange={e => setEditPlanData(d => ({ ...d, token_limit: e.target.value }))}
-                        placeholder="Unlimited"
-                        className="w-full bg-gray-800 rounded px-3 py-1.5 text-sm border border-gray-700 focus:outline-none focus:border-emerald-500 mt-1"
-                      />
-                    </div>
+                  <div>
+                    <label className="text-xs text-gray-500">Global token limit (optional)</label>
+                    <input
+                      type="number"
+                      value={editPlanData.token_limit}
+                      onChange={e => setEditPlanData(d => ({ ...d, token_limit: e.target.value }))}
+                      placeholder="Unlimited"
+                      className="w-full bg-gray-800 rounded px-3 py-1.5 text-sm border border-gray-700 focus:outline-none focus:border-emerald-500 mt-1"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500">Global image limit (optional)</label>
+                    <input
+                      type="number"
+                      value={editPlanData.image_limit}
+                      onChange={e => setEditPlanData(d => ({ ...d, image_limit: e.target.value }))}
+                      placeholder="Unlimited"
+                      className="w-full bg-gray-800 rounded px-3 py-1.5 text-sm border border-gray-700 focus:outline-none focus:border-emerald-500 mt-1"
+                    />
+                  </div>
                   </div>
                   <div className="flex gap-2">
                     <button onClick={() => handleUpdate(plan.id)} className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded text-sm">Save</button>
@@ -1015,6 +1066,7 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
                       <span className="text-xs text-emerald-400">{plan.price_sats === 0 ? 'Free' : `${plan.price_sats.toLocaleString()} sats`}</span>
                       <span className="text-xs text-gray-500">{plan.duration_days > 0 ? `${plan.duration_days}d` : 'Unlimited'}</span>
                       {plan.token_limit && <span className="text-xs text-gray-500">{plan.token_limit.toLocaleString()} tokens</span>}
+                      {plan.image_limit && <span className="text-xs text-gray-500">{plan.image_limit.toLocaleString()} images</span>}
                       {!plan.enabled && <span className="text-xs px-1.5 py-0.5 bg-red-600/30 text-red-400 rounded">Disabled</span>}
                     </div>
                     <div className="flex items-center gap-1">
@@ -1033,6 +1085,7 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
                             price_sats: plan.price_sats,
                             duration_days: plan.duration_days,
                             token_limit: plan.token_limit?.toString() || '',
+                            image_limit: plan.image_limit?.toString() || '',
                           })
                         }}
                         className="p-1.5 hover:bg-gray-700 rounded text-gray-500 hover:text-gray-300"
@@ -1052,20 +1105,27 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
 
                   {limitsPlan === plan.id && (
                     <div className="mt-3 pt-3 border-t border-gray-700 space-y-2">
-                      <p className="text-xs text-gray-500">Per-model token limits for <span className="text-emerald-400">{plan.name}</span>. Empty = no limit.</p>
+                      <p className="text-xs text-gray-500">Per-model limits for <span className="text-emerald-400">{plan.name}</span>. Empty = no limit.</p>
                       {models.length === 0 ? (
                         <p className="text-xs text-gray-500">No enabled models</p>
                       ) : (
                         <>
                           {models.map(m => (
                             <div key={m.id} className="flex items-center gap-2">
-                              <span className="text-xs text-gray-400 w-40 truncate">{m.name}</span>
+                              <span className="text-xs text-gray-400 w-32 truncate">{m.name}</span>
                               <input
                                 type="number"
                                 value={limitValues[m.id] || ''}
                                 onChange={e => setLimitValues(v => ({ ...v, [m.id]: e.target.value }))}
-                                placeholder="Unlimited"
-                                className="w-24 bg-gray-800 rounded px-2 py-1 text-xs border border-gray-700 focus:outline-none focus:border-emerald-500"
+                                placeholder="Token lim"
+                                className="w-20 bg-gray-800 rounded px-2 py-1 text-xs border border-gray-700 focus:outline-none focus:border-emerald-500"
+                              />
+                              <input
+                                type="number"
+                                value={limitImageValues[m.id] || ''}
+                                onChange={e => setLimitImageValues(v => ({ ...v, [m.id]: e.target.value }))}
+                                placeholder="Image lim"
+                                className="w-20 bg-gray-800 rounded px-2 py-1 text-xs border border-gray-700 focus:outline-none focus:border-emerald-500"
                               />
                             </div>
                           ))}

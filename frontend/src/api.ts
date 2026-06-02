@@ -83,7 +83,7 @@ export const api = {
           method: 'POST',
           body: JSON.stringify({ username, password }),
         }),
-      update: (id: number, data: { username?: string; password?: string; role?: string; token_limit?: number | null }) =>
+      update: (id: number, data: { username?: string; password?: string; role?: string; token_limit?: number | null; image_limit?: number | null }) =>
         request<{ status: string }>(`/auth/users/${id}`, {
           method: 'PUT',
           body: JSON.stringify(data),
@@ -181,12 +181,12 @@ export const api = {
     plans: {
       list: () => request<import('./types').SubscriptionPlan[]>('/subscriptions/plans'),
       public: () => request<import('./types').SubscriptionPlan[]>('/subscriptions/plans/public'),
-      create: (data: { name: string; price_sats: number; duration_days: number; token_limit?: number | null; enabled?: boolean }) =>
+      create: (data: { name: string; price_sats: number; duration_days: number; token_limit?: number | null; image_limit?: number | null; enabled?: boolean }) =>
         request<{ id: number; status: string }>('/subscriptions/plans', {
           method: 'POST',
           body: JSON.stringify(data),
         }),
-      update: (id: number, data: { name?: string; price_sats?: number; duration_days?: number; token_limit?: number | null; enabled?: boolean }) =>
+      update: (id: number, data: { name?: string; price_sats?: number; duration_days?: number; token_limit?: number | null; image_limit?: number | null; enabled?: boolean }) =>
         request<{ status: string }>(`/subscriptions/plans/${id}`, {
           method: 'PUT',
           body: JSON.stringify(data),
@@ -194,7 +194,7 @@ export const api = {
       delete: (id: number) =>
         request<{ status: string }>(`/subscriptions/plans/${id}`, { method: 'DELETE' }),
       limits: (planId: number) => request<import('./types').PlanModelLimit[]>(`/subscriptions/plans/${planId}/limits`),
-      setLimits: (planId: number, limits: { model_id: number; token_limit: number | null }[]) =>
+      setLimits: (planId: number, limits: { model_id: number; token_limit: number | null; image_limit?: number | null }[]) =>
         request<{ status: string }>(`/subscriptions/plans/${planId}/limits`, {
           method: 'PUT',
           body: JSON.stringify(limits),
@@ -311,5 +311,21 @@ export const api = {
       request<{ status: string }>(`/chat/cancel/${convId}`, { method: 'POST' }),
     generationStatus: (convId: number) =>
       request<import('./types').GenerateStatus>(`/conversations/${convId}/generation-status`),
+    generateImage: async (convId: number, prompt: string, modelId: number, size: string = '1024x1024', n: number = 1) => {
+      const token = getToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const response = await fetch(`${BASE}/chat/image`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ conversation_id: convId, prompt, model_id: modelId, size, n }),
+      });
+      if (!response.ok) {
+        let detail = ''
+        try { const err = await response.json(); detail = err.detail ? `: ${err.detail}` : '' } catch {}
+        throw new Error(`Image generation error ${response.status}${detail}`)
+      }
+      return response.json() as Promise<{ images: string[]; revised_prompt?: string }>;
+    },
   },
 };

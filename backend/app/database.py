@@ -28,6 +28,8 @@ class User(Base):
     role = Column(String(16), nullable=False, default="user")
     token_limit = Column(Integer, nullable=True, default=None)
     token_usage = Column(Integer, nullable=False, default=0)
+    image_limit = Column(Integer, nullable=True, default=None)
+    image_usage = Column(Integer, nullable=False, default=0)
     ip_address = Column(String(45), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -53,6 +55,7 @@ class ModelConfig(Base):
     name = Column(String(255), nullable=False)
     provider = Column(String(64), nullable=False)
     model_name = Column(String(255), nullable=False)
+    model_type = Column(String(16), nullable=False, default="chat")
     base_url = Column(String(512), nullable=True)
     api_key_env = Column(String(128), nullable=True)
     temperature = Column(Float, default=0.7)
@@ -113,6 +116,7 @@ class SubscriptionPlan(Base):
     price_sats = Column(Integer, nullable=False, default=0)
     duration_days = Column(Integer, nullable=False, default=30)
     token_limit = Column(Integer, nullable=True)
+    image_limit = Column(Integer, nullable=True)
     enabled = Column(Boolean, default=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -124,6 +128,7 @@ class PlanModelLimit(Base):
     plan_id = Column(Integer, ForeignKey("subscription_plans.id", ondelete="CASCADE"), nullable=False)
     model_id = Column(Integer, ForeignKey("model_configs.id", ondelete="CASCADE"), nullable=False)
     token_limit = Column(Integer, nullable=True)
+    image_limit = Column(Integer, nullable=True)
 
 
 class UserSubscription(Base):
@@ -168,6 +173,10 @@ def _migrate(conn):
         conn.exec_driver_sql("ALTER TABLE users ADD COLUMN token_usage INTEGER NOT NULL DEFAULT 0")
     if "ip_address" not in existing:
         conn.exec_driver_sql("ALTER TABLE users ADD COLUMN ip_address TEXT")
+    if "image_limit" not in existing:
+        conn.exec_driver_sql("ALTER TABLE users ADD COLUMN image_limit INTEGER")
+    if "image_usage" not in existing:
+        conn.exec_driver_sql("ALTER TABLE users ADD COLUMN image_usage INTEGER NOT NULL DEFAULT 0")
 
     msg_result = conn.exec_driver_sql("PRAGMA table_info(messages)")
     msg_cols = {row[1] for row in msg_result}
@@ -182,6 +191,8 @@ def _migrate(conn):
         conn.exec_driver_sql("ALTER TABLE model_configs ADD COLUMN thinking_budget_tokens INTEGER")
     if "sort_order" not in model_cfg_cols:
         conn.exec_driver_sql("ALTER TABLE model_configs ADD COLUMN sort_order INTEGER")
+    if "model_type" not in model_cfg_cols:
+        conn.exec_driver_sql("ALTER TABLE model_configs ADD COLUMN model_type VARCHAR(16) NOT NULL DEFAULT 'chat'")
 
     token_result = conn.exec_driver_sql("PRAGMA table_info(token_usage_log)")
     token_cols = {row[1] for row in token_result}
@@ -235,6 +246,14 @@ def _migrate(conn):
             sub_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(user_subscriptions)").fetchall()}
             if "payment_request" not in sub_cols:
                 conn.exec_driver_sql("ALTER TABLE user_subscriptions ADD COLUMN payment_request TEXT")
+
+        sub_plan_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(subscription_plans)").fetchall()}
+        if "image_limit" not in sub_plan_cols:
+            conn.exec_driver_sql("ALTER TABLE subscription_plans ADD COLUMN image_limit INTEGER")
+
+        plan_limit_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(plan_model_limits)").fetchall()}
+        if "image_limit" not in plan_limit_cols:
+            conn.exec_driver_sql("ALTER TABLE plan_model_limits ADD COLUMN image_limit INTEGER")
     except Exception:
         pass
 
