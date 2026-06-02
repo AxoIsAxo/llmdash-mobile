@@ -481,44 +481,44 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
     } catch (e) { console.error('Configure failed:', e) }
   }
 
-  const handleMoveUp = async (idx: number) => {
-    console.log('handleMoveUp called, idx:', idx, 'reordering:', reordering)
-    if (idx <= 0 || reordering) return
-    setReordering(true)
-    const reordered = [...enabledModels]
-    ;[reordered[idx - 1], reordered[idx]] = [reordered[idx], reordered[idx - 1]]
-    const ids = reordered.map(m => m.id)
-    console.log('Reordering model IDs:', ids)
-    try {
-      await api.models.reorder(ids)
-      await loadAll()
-      onRefresh()
-    } catch (e) { console.error('Move up failed:', e) }
-    setReordering(false)
-  }
-
-  const handleMoveDown = async (idx: number) => {
-    console.log('handleMoveDown called, idx:', idx, 'reordering:', reordering)
-    if (idx >= enabledModels.length - 1 || reordering) return
-    setReordering(true)
-    const reordered = [...enabledModels]
-    ;[reordered[idx], reordered[idx + 1]] = [reordered[idx + 1], reordered[idx]]
-    const ids = reordered.map(m => m.id)
-    console.log('Reordering model IDs:', ids)
-    try {
-      await api.models.reorder(ids)
-      await loadAll()
-      onRefresh()
-    } catch (e) { console.error('Move down failed:', e) }
-    setReordering(false)
-  }
-
   const enabledModels = enabled.filter(m => m.enabled).sort((a, b) => {
     if (a.sort_order == null && b.sort_order == null) return a.id - b.id
     if (a.sort_order == null) return 1
     if (b.sort_order == null) return -1
     return a.sort_order - b.sort_order
   })
+
+  const handleMoveUp = async (idx: number) => {
+    console.log('handleMoveUp called, idx:', idx, 'reordering:', reordering)
+    if (idx <= 0 || reordering) return
+    setReordering(true)
+    try {
+      const reordered = [...enabledModels]
+      ;[reordered[idx - 1], reordered[idx]] = [reordered[idx], reordered[idx - 1]]
+      const ids = reordered.map(m => m.id)
+      console.log('Reordering model IDs:', ids)
+      await api.models.reorder(ids)
+      await loadAll()
+      onRefresh()
+    } catch (e) { console.error('Move up failed:', e) }
+    finally { setReordering(false) }
+  }
+
+  const handleMoveDown = async (idx: number) => {
+    console.log('handleMoveDown called, idx:', idx, 'reordering:', reordering)
+    if (idx >= enabledModels.length - 1 || reordering) return
+    setReordering(true)
+    try {
+      const reordered = [...enabledModels]
+      ;[reordered[idx], reordered[idx + 1]] = [reordered[idx + 1], reordered[idx]]
+      const ids = reordered.map(m => m.id)
+      console.log('Reordering model IDs:', ids)
+      await api.models.reorder(ids)
+      await loadAll()
+      onRefresh()
+    } catch (e) { console.error('Move down failed:', e) }
+    finally { setReordering(false) }
+  }
 
   return (
     <div className="space-y-6">
@@ -559,7 +559,7 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
                     <button
                       onClick={() => handleMoveUp(idx)}
                       disabled={idx === 0 || reordering}
-                      className="p-0.5 hover:bg-gray-700 rounded text-gray-500 hover:text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed"
+                      className="p-0.5 hover:bg-gray-700 rounded text-gray-500 hover:text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
                       title="Move up"
                     >
                       <ArrowUp className="w-3.5 h-3.5" />
@@ -567,7 +567,7 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
                     <button
                       onClick={() => handleMoveDown(idx)}
                       disabled={idx === enabledModels.length - 1 || reordering}
-                      className="p-0.5 hover:bg-gray-700 rounded text-gray-500 hover:text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed"
+                      className="p-0.5 hover:bg-gray-700 rounded text-gray-500 hover:text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
                       title="Move down"
                     >
                       <ArrowDown className="w-3.5 h-3.5" />

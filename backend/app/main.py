@@ -131,6 +131,16 @@ async def create_model(cfg: ModelConfigCreate, current_user: dict = Depends(requ
     return {"id": model.id, "status": "created"}
 
 
+@router.put("/models/reorder")
+async def reorder_models(req: ModelReorderRequest, current_user: dict = Depends(require_role("owner", "admin")), db: AsyncSession = Depends(get_db)):
+    for i, model_id in enumerate(req.model_ids):
+        await db.execute(
+            update(ModelConfig).where(ModelConfig.id == model_id).values(sort_order=i)
+        )
+    await db.commit()
+    return {"status": "reordered"}
+
+
 @router.put("/models/{model_id}")
 async def update_model(model_id: int, cfg: ModelConfigUpdate, current_user: dict = Depends(require_role("owner", "admin")), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(ModelConfig).where(ModelConfig.id == model_id))
@@ -216,16 +226,6 @@ async def delete_model(model_id: int, current_user: dict = Depends(require_role(
     await db.delete(model)
     await db.commit()
     return {"status": "deleted"}
-
-
-@router.put("/models/reorder")
-async def reorder_models(req: ModelReorderRequest, current_user: dict = Depends(require_role("owner", "admin")), db: AsyncSession = Depends(get_db)):
-    for i, model_id in enumerate(req.model_ids):
-        await db.execute(
-            update(ModelConfig).where(ModelConfig.id == model_id).values(sort_order=i)
-        )
-    await db.commit()
-    return {"status": "reordered"}
 
 
 @router.get("/models/{model_id}")
