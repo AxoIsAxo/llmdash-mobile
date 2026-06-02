@@ -412,7 +412,7 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
       const [s, e] = await Promise.all([api.models.scan(), api.models.list()])
       setScanned(s)
       setEnabled(e)
-    } catch {}
+    } catch (e) { console.error('loadAll failed:', e) }
     setLoading(false)
   }
 
@@ -444,7 +444,7 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
       }
       await loadAll()
       onRefresh()
-    } catch {}
+    } catch (e) { console.error('Toggle model failed:', e) }
     setToggling(prev => { const next = new Set(prev); next.delete(key); return next })
   }
 
@@ -454,7 +454,7 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
       setRenaming(null)
       loadAll()
       onRefresh()
-    } catch {}
+    } catch (e) { console.error('Rename failed:', e) }
   }
 
   const startConfigure = (model: ModelConfig) => {
@@ -478,34 +478,38 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
       setConfiguringId(null)
       loadAll()
       onRefresh()
-    } catch {}
+    } catch (e) { console.error('Configure failed:', e) }
   }
 
   const handleMoveUp = async (idx: number) => {
+    console.log('handleMoveUp called, idx:', idx, 'reordering:', reordering)
     if (idx <= 0 || reordering) return
     setReordering(true)
     const reordered = [...enabledModels]
     ;[reordered[idx - 1], reordered[idx]] = [reordered[idx], reordered[idx - 1]]
     const ids = reordered.map(m => m.id)
+    console.log('Reordering model IDs:', ids)
     try {
       await api.models.reorder(ids)
       await loadAll()
       onRefresh()
-    } catch {}
+    } catch (e) { console.error('Move up failed:', e) }
     setReordering(false)
   }
 
   const handleMoveDown = async (idx: number) => {
+    console.log('handleMoveDown called, idx:', idx, 'reordering:', reordering)
     if (idx >= enabledModels.length - 1 || reordering) return
     setReordering(true)
     const reordered = [...enabledModels]
     ;[reordered[idx], reordered[idx + 1]] = [reordered[idx + 1], reordered[idx]]
     const ids = reordered.map(m => m.id)
+    console.log('Reordering model IDs:', ids)
     try {
       await api.models.reorder(ids)
       await loadAll()
       onRefresh()
-    } catch {}
+    } catch (e) { console.error('Move down failed:', e) }
     setReordering(false)
   }
 
@@ -817,7 +821,7 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
       const vals: Record<number, string> = {}
       data.forEach(l => { vals[l.model_id] = l.token_limit?.toString() || '' })
       setLimitValues(vals)
-    } catch {}
+    } catch (e) { console.error('loadLimits failed:', e) }
   }
 
   useEffect(() => { load() }, [])
