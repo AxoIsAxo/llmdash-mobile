@@ -22,6 +22,7 @@ from .models import (
     ConversationCreate, ConversationResponse,
     ChatRequest, MessageResponse, BranchRequest,
     EnvUpdateRequest, EnvStatusResponse, GenerateStatusResponse,
+    ModelReorderRequest,
 )
 from .ai import get_provider, ToolDef
 from .tools import get_tool_definitions, execute_tool
@@ -83,7 +84,7 @@ app.include_router(subscriptions_router)
 
 @router.get("/models", response_model=list[ModelConfigResponse])
 async def list_models(current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    query = select(ModelConfig).order_by(ModelConfig.id)
+    query = select(ModelConfig).order_by(ModelConfig.sort_order.is_(None), ModelConfig.sort_order, ModelConfig.id)
     if current_user.get("role") not in ("owner", "admin"):
         query = query.where(ModelConfig.enabled == True)
     result = await db.execute(query)
@@ -97,6 +98,7 @@ async def list_models(current_user: dict = Depends(get_current_user), db: AsyncS
             thinking_enabled=bool(getattr(m, "thinking_enabled", False)),
             thinking_budget_tokens=getattr(m, "thinking_budget_tokens", None),
             enabled=m.enabled,
+            sort_order=getattr(m, "sort_order", None),
             created_at=m.created_at.isoformat() if m.created_at else "",
             updated_at=m.updated_at.isoformat() if m.updated_at else "",
         )
@@ -106,6 +108,13 @@ async def list_models(current_user: dict = Depends(get_current_user), db: AsyncS
 
 @router.post("/models", status_code=201)
 async def create_model(cfg: ModelConfigCreate, current_user: dict = Depends(require_role("owner", "admin")), db: AsyncSession = Depends(get_db)):
+    if cfg.sort_order is None:
+        max_result = await db.execute(select(ModelConfig).order_by(ModelConfig.sort_order.desc()).limit(1))
+        max_model = max_result.scalar_one_or_none()
+        max_sort = (max_model.sort_order or 0) if max_model else 0
+        sort_order = max_sort + 1
+    else:
+        sort_order = cfg.sort_order
     model = ModelConfig(
         name=cfg.name, provider=cfg.provider.value,
         model_name=cfg.model_name, base_url=cfg.base_url,
@@ -114,6 +123,7 @@ async def create_model(cfg: ModelConfigCreate, current_user: dict = Depends(requ
         thinking_enabled=getattr(cfg, "thinking_enabled", False),
         thinking_budget_tokens=getattr(cfg, "thinking_budget_tokens", None),
         enabled=cfg.enabled,
+        sort_order=sort_order,
     )
     db.add(model)
     await db.commit()
@@ -208,6 +218,16 @@ async def delete_model(model_id: int, current_user: dict = Depends(require_role(
     return {"status": "deleted"}
 
 
+@router.put("/models/reorder")
+async def reorder_models(req: ModelReorderRequest, current_user: dict = Depends(require_role("owner", "admin")), db: AsyncSession = Depends(get_db)):
+    for i, model_id in enumerate(req.model_ids):
+        await db.execute(
+            update(ModelConfig).where(ModelConfig.id == model_id).values(sort_order=i)
+        )
+    await db.commit()
+    return {"status": "reordered"}
+
+
 @router.get("/models/{model_id}")
 async def get_model(model_id: int, current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(ModelConfig).where(ModelConfig.id == model_id))
@@ -222,6 +242,7 @@ async def get_model(model_id: int, current_user: dict = Depends(get_current_user
         thinking_enabled=bool(getattr(model, "thinking_enabled", False)),
         thinking_budget_tokens=getattr(model, "thinking_budget_tokens", None),
         enabled=model.enabled,
+        sort_order=getattr(model, "sort_order", None),
         created_at=model.created_at.isoformat() if model.created_at else "",
         updated_at=model.updated_at.isoformat() if model.updated_at else "",
     )

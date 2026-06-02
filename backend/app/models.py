@@ -82,6 +82,7 @@ class ModelConfigCreate(BaseModel):
     thinking_enabled: bool = False
     thinking_budget_tokens: Optional[int] = None
     enabled: bool = True
+    sort_order: Optional[int] = None
 
 
 class ModelConfigUpdate(BaseModel):
@@ -95,6 +96,7 @@ class ModelConfigUpdate(BaseModel):
     thinking_enabled: Optional[bool] = None
     thinking_budget_tokens: Optional[int] = None
     enabled: Optional[bool] = None
+    sort_order: Optional[int] = None
 
 
 class ModelConfigResponse(BaseModel):
@@ -109,8 +111,13 @@ class ModelConfigResponse(BaseModel):
     thinking_enabled: bool = False
     thinking_budget_tokens: Optional[int] = None
     enabled: bool
+    sort_order: Optional[int] = None
     created_at: str
     updated_at: str
+
+
+class ModelReorderRequest(BaseModel):
+    model_ids: list[int]
 
 
 class ConversationCreate(BaseModel):

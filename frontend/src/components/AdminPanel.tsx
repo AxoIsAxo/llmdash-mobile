@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import {
   Users, UserPlus, Trash2, Key, Wrench, Shield, Globe,
-  Loader2, X, Check, Settings, RotateCcw, CreditCard, Plus, Edit3, Brain
+  Loader2, X, Check, Settings, RotateCcw, CreditCard, Plus, Edit3, Brain,
+  ArrowUp, ArrowDown
 } from 'lucide-react'
 import { api } from '../api'
 import type { User, ProviderConfig, ScannedProvider, ModelConfig, SubscriptionPlan, PlanModelLimit, UserSubscription as UserSub } from '../types'
@@ -403,6 +404,7 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
   const [configForm, setConfigForm] = useState<{ temperature: number; max_tokens: number; thinking_enabled: boolean; thinking_budget_tokens: number }>({
     temperature: 0.7, max_tokens: 4096, thinking_enabled: false, thinking_budget_tokens: 4000,
   })
+  const [reordering, setReordering] = useState(false)
 
   const loadAll = async () => {
     setLoading(true)
@@ -479,6 +481,41 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
     } catch {}
   }
 
+  const handleMoveUp = async (idx: number) => {
+    if (idx <= 0 || reordering) return
+    setReordering(true)
+    const reordered = [...enabled]
+    ;[reordered[idx - 1], reordered[idx]] = [reordered[idx], reordered[idx - 1]]
+    const ids = reordered.map(m => m.id)
+    try {
+      await api.models.reorder(ids)
+      await loadAll()
+      onRefresh()
+    } catch {}
+    setReordering(false)
+  }
+
+  const handleMoveDown = async (idx: number) => {
+    if (idx >= enabled.length - 1 || reordering) return
+    setReordering(true)
+    const reordered = [...enabled]
+    ;[reordered[idx], reordered[idx + 1]] = [reordered[idx + 1], reordered[idx]]
+    const ids = reordered.map(m => m.id)
+    try {
+      await api.models.reorder(ids)
+      await loadAll()
+      onRefresh()
+    } catch {}
+    setReordering(false)
+  }
+
+  const enabledModels = enabled.filter(m => m.enabled).sort((a, b) => {
+    if (a.sort_order == null && b.sort_order == null) return a.id - b.id
+    if (a.sort_order == null) return 1
+    if (b.sort_order == null) return -1
+    return a.sort_order - b.sort_order
+  })
+
   return (
     <div className="space-y-6">
       <div className="flex justify-end">
@@ -502,72 +539,81 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
         </div>
       )}
 
-      {scanned.map(provider => (
-        <div key={provider.provider_key}>
+      {enabledModels.length > 0 && (
+        <div>
           <div className="flex items-center gap-2 mb-3">
-            <h3 className="font-semibold text-sm">{provider.provider_name}</h3>
-            {provider.error && <span className="text-xs text-red-400">Scan error: {provider.error}</span>}
-            {!provider.error && <span className="text-xs text-gray-500">{provider.models.length} models</span>}
+            <h3 className="font-semibold text-sm text-emerald-400">Activated Models</h3>
+            <span className="text-xs text-gray-500">{enabledModels.length} active</span>
           </div>
-          {provider.error ? (
-            <div className="text-xs text-red-400 bg-red-900/20 rounded-lg px-3 py-2">Failed to fetch models: {provider.error}</div>
-          ) : (
-            <div className="space-y-1">
-              {provider.models.map(model => {
-                const on = isEnabled(provider, model.id)
-                const enabledModel = enabled.find(m => m.api_key_env === provider.env_var && m.model_name === model.id)
-                const busy = toggling.has(`${provider.provider_key}:${model.id}`)
-                return (
-                  <>
-                  <div key={model.id} className="flex items-center gap-3 px-3 py-2 bg-gray-800/30 rounded-lg hover:bg-gray-800/50 transition-colors">
+          <div className="space-y-1">
+            {enabledModels.map((model, idx) => {
+              const providerInfo = scanned.find(p => p.env_var === model.api_key_env)
+              const providerName = providerInfo?.provider_name || model.provider
+              return (
+                <div key={model.id}>
+                  <div className="flex items-center gap-2 px-3 py-2 bg-emerald-900/20 border border-emerald-800/30 rounded-lg hover:bg-emerald-900/30 transition-colors">
                     <button
-                      onClick={() => handleToggle(provider, model.id, !on)}
-                      disabled={busy}
-                      className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${busy ? 'opacity-50' : ''} ${on ? 'bg-emerald-600' : 'bg-gray-600'}`}
+                      onClick={() => handleMoveUp(idx)}
+                      disabled={idx === 0 || reordering}
+                      className="p-0.5 hover:bg-gray-700 rounded text-gray-500 hover:text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed"
+                      title="Move up"
                     >
-                      <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${on ? 'left-4' : 'left-0.5'}`} />
+                      <ArrowUp className="w-3.5 h-3.5" />
                     </button>
+                    <button
+                      onClick={() => handleMoveDown(idx)}
+                      disabled={idx === enabledModels.length - 1 || reordering}
+                      className="p-0.5 hover:bg-gray-700 rounded text-gray-500 hover:text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed"
+                      title="Move down"
+                    >
+                      <ArrowDown className="w-3.5 h-3.5" />
+                    </button>
+                    <span className="text-xs text-gray-600 w-5 text-center">{idx + 1}</span>
                     <div className="flex-1 min-w-0">
-                      {renaming === enabledModel?.id ? (
+                      {renaming === model.id ? (
                         <div className="flex gap-1">
                           <input
                             value={renameVal}
                             onChange={e => setRenameVal(e.target.value)}
                             autoFocus
                             className="bg-gray-800 rounded px-2 py-0.5 text-sm w-full"
-                            onKeyDown={e => { if (e.key === 'Enter') handleRename(enabledModel!.id) }}
+                            onKeyDown={e => { if (e.key === 'Enter') handleRename(model.id) }}
                           />
-                          <button onClick={() => handleRename(enabledModel!.id)} className="p-1 hover:bg-emerald-800 rounded"><Check className="w-3.5 h-3.5 text-emerald-400" /></button>
+                          <button onClick={() => handleRename(model.id)} className="p-1 hover:bg-emerald-800 rounded"><Check className="w-3.5 h-3.5 text-emerald-400" /></button>
                           <button onClick={() => setRenaming(null)} className="p-1 hover:bg-gray-700 rounded"><X className="w-3.5 h-3.5 text-gray-400" /></button>
                         </div>
                       ) : (
                         <div
-                          className={`text-sm font-medium truncate ${on ? 'cursor-pointer hover:text-emerald-400' : 'text-gray-500'}`}
-                          onClick={() => {
-                            if (on && enabledModel) {
-                              setRenaming(enabledModel.id)
-                              setRenameVal(enabledModel.name)
-                            }
-                          }}
-                          title={on ? 'Click to rename' : undefined}
+                          className="text-sm font-medium truncate cursor-pointer hover:text-emerald-400"
+                          onClick={() => { setRenaming(model.id); setRenameVal(model.name) }}
+                          title="Click to rename"
                         >
-                          {on ? enabledModel?.name || model.name : model.name}
+                          {model.name}
                         </div>
                       )}
-                      <div className="text-xs text-gray-500 truncate">{model.id}</div>
+                      <div className="text-xs text-gray-500 truncate">{model.model_name} — {providerName}</div>
                     </div>
-                    {on && enabledModel && (
-                      <button
-                        onClick={() => configuringId === enabledModel.id ? setConfiguringId(null) : startConfigure(enabledModel)}
-                        className="p-1.5 hover:bg-gray-700 rounded-lg transition-colors shrink-0"
-                        title="Configure"
-                      >
-                        <Settings className="w-3.5 h-3.5 text-gray-400 hover:text-gray-200" />
-                      </button>
-                    )}
+                    <button
+                      onClick={() => configuringId === model.id ? setConfiguringId(null) : startConfigure(model)}
+                      className="p-1.5 hover:bg-gray-700 rounded-lg transition-colors shrink-0"
+                      title="Configure"
+                    >
+                      <Settings className="w-3.5 h-3.5 text-gray-400 hover:text-gray-200" />
+                    </button>
+                    <button
+                      onClick={async () => {
+                        await api.models.delete(model.id).catch(() => {})
+                        await loadAll()
+                        onRefresh()
+                      }}
+                      className="p-1.5 hover:bg-red-800/30 rounded-lg transition-colors shrink-0"
+                      title="Deactivate"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-gray-400 hover:text-red-400" />
+                    </button>
                   </div>
-                  {on && enabledModel && configuringId === enabledModel.id && (
-                    <div className="ml-11 mt-1 mb-2 p-3 bg-gray-800/50 rounded-lg border border-gray-700/50 space-y-3">
+                  {configuringId === model.id && (
+                    <div className="ml-0 mt-1 mb-2 p-3 bg-gray-800/50 rounded-lg border border-gray-700/50 space-y-3">
                       <div className="flex items-center gap-4">
                         <label className="text-xs text-gray-400 w-24 shrink-0">Temperature</label>
                         <input
@@ -612,7 +658,7 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
                       )}
                       <div className="flex gap-2 pt-1">
                         <button
-                          onClick={() => handleConfigure(enabledModel.id)}
+                          onClick={() => handleConfigure(model.id)}
                           className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-xs font-medium"
                         >
                           Save Config
@@ -625,8 +671,42 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
                         </button>
                       </div>
                     </div>
-                    )}
-                  </>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {scanned.map(provider => (
+        <div key={provider.provider_key}>
+          <div className="flex items-center gap-2 mb-3">
+            <h3 className="font-semibold text-sm">{provider.provider_name}</h3>
+            {provider.error && <span className="text-xs text-red-400">Scan error: {provider.error}</span>}
+            {!provider.error && <span className="text-xs text-gray-500">{provider.models.length} models</span>}
+          </div>
+          {provider.error ? (
+            <div className="text-xs text-red-400 bg-red-900/20 rounded-lg px-3 py-2">Failed to fetch models: {provider.error}</div>
+          ) : (
+            <div className="space-y-1">
+              {provider.models.map(model => {
+                const on = isEnabled(provider, model.id)
+                const busy = toggling.has(`${provider.provider_key}:${model.id}`)
+                return (
+                  <div key={model.id} className="flex items-center gap-3 px-3 py-2 bg-gray-800/30 rounded-lg hover:bg-gray-800/50 transition-colors">
+                    <button
+                      onClick={() => handleToggle(provider, model.id, !on)}
+                      disabled={busy}
+                      className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${busy ? 'opacity-50' : ''} ${on ? 'bg-emerald-600' : 'bg-gray-600'}`}
+                    >
+                      <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${on ? 'left-4' : 'left-0.5'}`} />
+                    </button>
+                    <div className="flex-1 min-w-0">
+                      <div className={`text-sm font-medium truncate ${on ? 'text-emerald-400' : 'text-gray-500'}`}>{model.name}</div>
+                      <div className="text-xs text-gray-500 truncate">{model.id}</div>
+                    </div>
+                  </div>
                 )
               })}
             </div>

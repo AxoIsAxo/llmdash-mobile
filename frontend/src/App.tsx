@@ -242,7 +242,7 @@ function App() {
             const tc = (event as any).tool_calls || null
             if (idx >= 0) {
               const updated = [...prev]
-              updated[idx] = { ...updated[idx], content: event.content || updated[idx].content || '', tool_calls_json: tc, id: Date.now() }
+              updated[idx] = { ...updated[idx], content: event.content || updated[idx].content || '', tool_calls_json: tc }
               return updated
             }
             return [...prev, {
@@ -320,9 +320,11 @@ function App() {
           if (event.type === 'content_delta') {
             assistantContent += (event.content || '')
             setMessages(prev => {
-              const last = prev[prev.length - 1]
-              if (last?.role === 'assistant' && last.id === (conv?.id || 0) * -1) {
-                return [...prev.slice(0, -1), { ...last, content: assistantContent, reasoning_content: assistantReasoning || last.reasoning_content }]
+              const idx = prev.findIndex(m => m.id === (conv?.id || 0) * -1)
+              if (idx >= 0) {
+                const updated = [...prev]
+                updated[idx] = { ...updated[idx], content: assistantContent, reasoning_content: assistantReasoning || updated[idx].reasoning_content }
+                return updated
               }
               return [...prev, {
                 id: (conv?.id || 0) * -1, role: 'assistant' as const,
@@ -333,9 +335,11 @@ function App() {
           } else if (event.type === 'reasoning_delta') {
             assistantReasoning += (event.content || '')
             setMessages(prev => {
-              const last = prev[prev.length - 1]
-              if (last?.role === 'assistant' && last.id === (conv?.id || 0) * -1) {
-                return [...prev.slice(0, -1), { ...last, reasoning_content: assistantReasoning }]
+              const idx = prev.findIndex(m => m.id === (conv?.id || 0) * -1)
+              if (idx >= 0) {
+                const updated = [...prev]
+                updated[idx] = { ...updated[idx], reasoning_content: assistantReasoning }
+                return updated
               }
               return [...prev, {
                 id: (conv?.id || 0) * -1, role: 'assistant' as const,
@@ -347,9 +351,11 @@ function App() {
             assistantContent = event.content || ''
             assistantReasoning = event.reasoning_content || assistantReasoning
             setMessages(prev => {
-              const last = prev[prev.length - 1]
-              if (last?.role === 'assistant' && last.id === (conv?.id || 0) * -1) {
-                return [...prev.slice(0, -1), { ...last, content: assistantContent, reasoning_content: assistantReasoning || last.reasoning_content }]
+              const idx = prev.findIndex(m => m.id === (conv?.id || 0) * -1)
+              if (idx >= 0) {
+                const updated = [...prev]
+                updated[idx] = { ...updated[idx], content: assistantContent, reasoning_content: assistantReasoning || updated[idx].reasoning_content }
+                return updated
               }
               return [...prev, {
                 id: (conv?.id || 0) * -1, role: 'assistant' as const,
@@ -361,9 +367,11 @@ function App() {
             toolCalls.length = 0
             toolCalls.push(...(event.tool_calls || []))
             setMessages(prev => {
-              const last = prev[prev.length - 1]
-              if (last?.role === 'assistant' && last.id === (conv?.id || 0) * -1) {
-                return [...prev.slice(0, -1), { ...last, content: assistantContent, tool_calls_json: event.tool_calls || null, id: Date.now() }]
+              const idx = prev.findIndex(m => m.id === (conv?.id || 0) * -1)
+              if (idx >= 0) {
+                const updated = [...prev]
+                updated[idx] = { ...updated[idx], content: assistantContent, tool_calls_json: event.tool_calls || null }
+                return updated
               }
               return [...prev, {
                 id: Date.now(), role: 'assistant' as const,
@@ -403,7 +411,7 @@ function App() {
         }
 
         setMessages(prev => {
-          if (assistantContent && prev[prev.length - 1]?.content !== assistantContent) {
+          if (assistantContent && prev.findIndex(m => m.id === (conv?.id || 0) * -1) < 0) {
             return [...prev, {
               id: Date.now(), role: 'assistant' as const,
               content: assistantContent, tool_calls_json: null,
@@ -511,12 +519,14 @@ function App() {
         let assistantReasoning = ''
         const toolCalls: ToolCall[] = []
         for await (const event of api.chat.send(branch.id, content, modelId, controller.signal)) {
-          if (event.type === 'content_delta') {
+           if (event.type === 'content_delta') {
             assistantContent += (event.content || '')
             setMessages(prev => {
-              const last = prev[prev.length - 1]
-              if (last?.role === 'assistant' && last.id === branch.id * -1) {
-                return [...prev.slice(0, -1), { ...last, content: assistantContent, reasoning_content: assistantReasoning || last.reasoning_content }]
+              const idx = prev.findIndex(m => m.id === branch.id * -1)
+              if (idx >= 0) {
+                const updated = [...prev]
+                updated[idx] = { ...updated[idx], content: assistantContent, reasoning_content: assistantReasoning || updated[idx].reasoning_content }
+                return updated
               }
               return [...prev, {
                 id: branch.id * -1, role: 'assistant' as const,
@@ -527,9 +537,11 @@ function App() {
           } else if (event.type === 'reasoning_delta') {
             assistantReasoning += (event.content || '')
             setMessages(prev => {
-              const last = prev[prev.length - 1]
-              if (last?.role === 'assistant' && last.id === branch.id * -1) {
-                return [...prev.slice(0, -1), { ...last, reasoning_content: assistantReasoning }]
+              const idx = prev.findIndex(m => m.id === branch.id * -1)
+              if (idx >= 0) {
+                const updated = [...prev]
+                updated[idx] = { ...updated[idx], reasoning_content: assistantReasoning }
+                return updated
               }
               return [...prev, {
                 id: branch.id * -1, role: 'assistant' as const,
@@ -541,9 +553,11 @@ function App() {
             assistantContent = event.content || ''
             assistantReasoning = event.reasoning_content || assistantReasoning
             setMessages(prev => {
-              const last = prev[prev.length - 1]
-              if (last?.role === 'assistant' && last.id === branch.id * -1) {
-                return [...prev.slice(0, -1), { ...last, content: assistantContent, reasoning_content: assistantReasoning || last.reasoning_content }]
+              const idx = prev.findIndex(m => m.id === branch.id * -1)
+              if (idx >= 0) {
+                const updated = [...prev]
+                updated[idx] = { ...updated[idx], content: assistantContent, reasoning_content: assistantReasoning || updated[idx].reasoning_content }
+                return updated
               }
               return [...prev, {
                 id: branch.id * -1, role: 'assistant' as const,
@@ -555,9 +569,11 @@ function App() {
             toolCalls.length = 0
             toolCalls.push(...(event.tool_calls || []))
             setMessages(prev => {
-              const last = prev[prev.length - 1]
-              if (last?.role === 'assistant' && last.id === branch.id * -1) {
-                return [...prev.slice(0, -1), { ...last, content: assistantContent, tool_calls_json: event.tool_calls || null, id: Date.now() }]
+              const idx = prev.findIndex(m => m.id === branch.id * -1)
+              if (idx >= 0) {
+                const updated = [...prev]
+                updated[idx] = { ...updated[idx], content: assistantContent, tool_calls_json: event.tool_calls || null }
+                return updated
               }
               return [...prev, {
                 id: Date.now(), role: 'assistant' as const,
@@ -596,7 +612,7 @@ function App() {
           }
         }
         setMessages(prev => {
-          if (assistantContent && prev[prev.length - 1]?.content !== assistantContent) {
+          if (assistantContent && prev.findIndex(m => m.id === branch.id * -1) < 0) {
             return [...prev, {
               id: Date.now(), role: 'assistant' as const,
               content: assistantContent, tool_calls_json: null,

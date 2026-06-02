@@ -60,6 +60,7 @@ class ModelConfig(Base):
     thinking_enabled = Column(Boolean, default=False)
     thinking_budget_tokens = Column(Integer, nullable=True)
     enabled = Column(Boolean, default=True)
+    sort_order = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -179,6 +180,8 @@ def _migrate(conn):
         conn.exec_driver_sql("ALTER TABLE model_configs ADD COLUMN thinking_enabled BOOLEAN DEFAULT 0")
     if "thinking_budget_tokens" not in model_cfg_cols:
         conn.exec_driver_sql("ALTER TABLE model_configs ADD COLUMN thinking_budget_tokens INTEGER")
+    if "sort_order" not in model_cfg_cols:
+        conn.exec_driver_sql("ALTER TABLE model_configs ADD COLUMN sort_order INTEGER")
 
     token_result = conn.exec_driver_sql("PRAGMA table_info(token_usage_log)")
     token_cols = {row[1] for row in token_result}

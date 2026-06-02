@@ -29,6 +29,7 @@ export interface ModelConfig {
   thinking_enabled: boolean;
   thinking_budget_tokens: number | null;
   enabled: boolean;
+  sort_order: number | null;
   created_at: string;
   updated_at: string;
 }

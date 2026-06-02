@@ -137,6 +137,11 @@ export const api = {
       }),
     delete: (id: number) =>
       request<{ status: string }>(`/models/${id}`, { method: 'DELETE' }),
+    reorder: (modelIds: number[]) =>
+      request<{ status: string }>('/models/reorder', {
+        method: 'PUT',
+        body: JSON.stringify({ model_ids: modelIds }),
+      }),
     scan: () => request<import('./types').ScannedProvider[]>('/models/scan'),
   },
 
