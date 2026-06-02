@@ -274,7 +274,7 @@ async def get_messages(conv_id: int, current_user: dict = Depends(get_current_us
         raise HTTPException(404, "Conversation not found")
 
     result = await db.execute(
-        select(Message).where(Message.conversation_id == conv_id).order_by(Message.id)
+        select(Message).where(Message.conversation_id == conv_id).order_by(Message.created_at)
     )
     msgs = result.scalars().all()
     return [
@@ -312,7 +312,7 @@ async def branch_conversation(conv_id: int, req: BranchRequest, current_user: di
         raise HTTPException(404, "Conversation not found")
 
     msg_result = await db.execute(
-        select(Message).where(Message.conversation_id == conv_id).order_by(Message.id)
+        select(Message).where(Message.conversation_id == conv_id).order_by(Message.created_at)
     )
     messages = msg_result.scalars().all()
     limit = req.message_index
@@ -357,7 +357,8 @@ async def list_env_vars(current_user: dict = Depends(require_role("owner", "admi
 
 @router.post("/config/env")
 async def update_env_vars(req: EnvUpdateRequest, current_user: dict = Depends(require_role("owner", "admin"))):
-    env_path = ".env"
+    env_path = "data/.env"
+    os.makedirs("data", exist_ok=True)
     existing = {}
     if os.path.exists(env_path) and not os.path.isdir(env_path):
         try:
@@ -440,6 +441,12 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
     if not provider:
         raise HTTPException(400, f"Unknown provider: {model.provider}")
 
+    if model.api_key_env:
+        env_attr = model.api_key_env.lower()
+        key_val = getattr(app_config.settings, env_attr, None)
+        if not key_val:
+            raise HTTPException(400, f"API key not configured for {model.name}. Set the {model.api_key_env} environment variable in Settings.")
+
     user_result = await db.execute(select(User).where(User.id == current_user["user_id"]))
     user = user_result.scalar_one_or_none()
 
@@ -505,7 +512,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
         raise HTTPException(403, f"Token limit reached ({user.token_usage}/{effective_limit}). Upgrade your plan or contact an admin.")
 
     msg_result = await db.execute(
-        select(Message).where(Message.conversation_id == req.conversation_id).order_by(Message.id)
+        select(Message).where(Message.conversation_id == req.conversation_id).order_by(Message.created_at)
     )
     db_messages = msg_result.scalars().all()
 
@@ -661,11 +668,14 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                 if streaming_msg_id is not None:
                     draft.content = accumulated_content or ""
                     draft.status = "done"
+                    draft.created_at = datetime.now(timezone.utc)
                     if final_tool_calls:
                         draft.tool_calls_json = json.dumps([
                             {"id": tc["id"], "name": tc["name"], "arguments": tc["arguments"]}
                             for tc in final_tool_calls
                         ])
+                    else:
+                        draft.tool_calls_json = None
                     await sess.commit()
                 else:
                     sess.add(Message(
@@ -677,6 +687,8 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                     await sess.commit()
                 if accumulated_content:
                     await push_event("content", content=accumulated_content)
+                elif not final_tool_calls:
+                    await push_event("error", error="Received an empty response from the model. Please verify your API key and model configuration.")
 
                 if not db_messages and accumulated_content:
                     try:
@@ -723,13 +735,14 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                     pass
                 raise
             except Exception as e:
+                error_msg = f"Error: {str(e)}"
                 try:
                     await push_event("error", error=str(e))
                 except Exception:
                     pass
                 try:
                     if streaming_msg_id is not None:
-                        draft.content = accumulated_content
+                        draft.content = accumulated_content or error_msg
                         draft.status = "done"
                         await sess.commit()
                 except Exception:

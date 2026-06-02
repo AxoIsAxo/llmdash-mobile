@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     lnbits_url: Optional[str] = None
     lnbits_invoice_key: Optional[str] = None
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
+    model_config = {"env_file": "data/.env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 settings = Settings()

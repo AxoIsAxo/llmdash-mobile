@@ -375,7 +375,7 @@ function App() {
           if (assistantContent && prev[prev.length - 1]?.content !== assistantContent) {
             return [...prev, {
               id: Date.now(), role: 'assistant' as const,
-              content: assistantContent, tool_calls_json: toolCalls.length ? toolCalls : null,
+              content: assistantContent, tool_calls_json: null,
               tool_call_id: null, tool_name: null, created_at: new Date().toISOString()
             }]
           }
@@ -553,7 +553,7 @@ function App() {
           if (assistantContent && prev[prev.length - 1]?.content !== assistantContent) {
             return [...prev, {
               id: Date.now(), role: 'assistant' as const,
-              content: assistantContent, tool_calls_json: toolCalls.length ? toolCalls : null,
+              content: assistantContent, tool_calls_json: null,
               tool_call_id: null, tool_name: null, created_at: new Date().toISOString()
             }]
           }
