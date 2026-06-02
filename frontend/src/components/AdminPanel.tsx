@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import {
   Users, UserPlus, Trash2, Key, Wrench, Shield, Globe,
-  Loader2, X, Check, Settings, RotateCcw, CreditCard, Plus, Edit3
+  Loader2, X, Check, Settings, RotateCcw, CreditCard, Plus, Edit3, Brain
 } from 'lucide-react'
 import { api } from '../api'
 import type { User, ProviderConfig, ScannedProvider, ModelConfig, SubscriptionPlan, PlanModelLimit, UserSubscription as UserSub } from '../types'
@@ -399,6 +399,10 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
   const [toggling, setToggling] = useState<Set<string>>(new Set())
   const [renaming, setRenaming] = useState<number | null>(null)
   const [renameVal, setRenameVal] = useState('')
+  const [configuringId, setConfiguringId] = useState<number | null>(null)
+  const [configForm, setConfigForm] = useState<{ temperature: number; max_tokens: number; thinking_enabled: boolean; thinking_budget_tokens: number }>({
+    temperature: 0.7, max_tokens: 4096, thinking_enabled: false, thinking_budget_tokens: 4000,
+  })
 
   const loadAll = async () => {
     setLoading(true)
@@ -451,6 +455,30 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
     } catch {}
   }
 
+  const startConfigure = (model: ModelConfig) => {
+    setConfiguringId(model.id)
+    setConfigForm({
+      temperature: model.temperature,
+      max_tokens: model.max_tokens,
+      thinking_enabled: model.thinking_enabled,
+      thinking_budget_tokens: model.thinking_budget_tokens || 4000,
+    })
+  }
+
+  const handleConfigure = async (id: number) => {
+    try {
+      await api.models.update(id, {
+        temperature: configForm.temperature,
+        max_tokens: configForm.max_tokens,
+        thinking_enabled: configForm.thinking_enabled,
+        thinking_budget_tokens: configForm.thinking_enabled ? configForm.thinking_budget_tokens : null,
+      })
+      setConfiguringId(null)
+      loadAll()
+      onRefresh()
+    } catch {}
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex justify-end">
@@ -490,6 +518,7 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
                 const enabledModel = enabled.find(m => m.api_key_env === provider.env_var && m.model_name === model.id)
                 const busy = toggling.has(`${provider.provider_key}:${model.id}`)
                 return (
+                  <>
                   <div key={model.id} className="flex items-center gap-3 px-3 py-2 bg-gray-800/30 rounded-lg hover:bg-gray-800/50 transition-colors">
                     <button
                       onClick={() => handleToggle(provider, model.id, !on)}
@@ -527,7 +556,77 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
                       )}
                       <div className="text-xs text-gray-500 truncate">{model.id}</div>
                     </div>
+                    {on && enabledModel && (
+                      <button
+                        onClick={() => configuringId === enabledModel.id ? setConfiguringId(null) : startConfigure(enabledModel)}
+                        className="p-1.5 hover:bg-gray-700 rounded-lg transition-colors shrink-0"
+                        title="Configure"
+                      >
+                        <Settings className="w-3.5 h-3.5 text-gray-400 hover:text-gray-200" />
+                      </button>
+                    )}
                   </div>
+                  {on && enabledModel && configuringId === enabledModel.id && (
+                    <div className="ml-11 mt-1 mb-2 p-3 bg-gray-800/50 rounded-lg border border-gray-700/50 space-y-3">
+                      <div className="flex items-center gap-4">
+                        <label className="text-xs text-gray-400 w-24 shrink-0">Temperature</label>
+                        <input
+                          type="range" min="0" max="2" step="0.1"
+                          value={configForm.temperature}
+                          onChange={e => setConfigForm(f => ({ ...f, temperature: parseFloat(e.target.value) }))}
+                          className="flex-1 h-1.5 rounded-full appearance-none bg-gray-600 accent-emerald-500 cursor-pointer"
+                        />
+                        <span className="text-xs text-gray-300 w-8 text-right">{configForm.temperature.toFixed(1)}</span>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <label className="text-xs text-gray-400 w-24 shrink-0">Max Tokens</label>
+                        <input
+                          type="number" min="1" max="200000"
+                          value={configForm.max_tokens}
+                          onChange={e => setConfigForm(f => ({ ...f, max_tokens: parseInt(e.target.value) || 4096 }))}
+                          className="flex-1 bg-gray-700 rounded px-2 py-1 text-sm border border-gray-600 focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <label className="text-xs text-gray-400 w-24 shrink-0 flex items-center gap-1">
+                          <Brain className="w-3 h-3" /> Thinking
+                        </label>
+                        <button
+                          onClick={() => setConfigForm(f => ({ ...f, thinking_enabled: !f.thinking_enabled }))}
+                          className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${configForm.thinking_enabled ? 'bg-purple-600' : 'bg-gray-600'}`}
+                        >
+                          <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${configForm.thinking_enabled ? 'left-4' : 'left-0.5'}`} />
+                        </button>
+                        <span className="text-xs text-gray-500">{configForm.thinking_enabled ? 'Enabled' : 'Disabled'}</span>
+                      </div>
+                      {configForm.thinking_enabled && (
+                        <div className="flex items-center gap-4">
+                          <label className="text-xs text-gray-400 w-24 shrink-0">Budget Tokens</label>
+                          <input
+                            type="number" min="1024" max="100000"
+                            value={configForm.thinking_budget_tokens}
+                            onChange={e => setConfigForm(f => ({ ...f, thinking_budget_tokens: parseInt(e.target.value) || 4000 }))}
+                            className="flex-1 bg-gray-700 rounded px-2 py-1 text-sm border border-gray-600 focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+                      )}
+                      <div className="flex gap-2 pt-1">
+                        <button
+                          onClick={() => handleConfigure(enabledModel.id)}
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-xs font-medium"
+                        >
+                          Save Config
+                        </button>
+                        <button
+                          onClick={() => setConfiguringId(null)}
+                          className="px-3 py-1.5 hover:bg-gray-700 rounded-lg text-xs"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                    )}
+                  </>
                 )
               })}
             </div>

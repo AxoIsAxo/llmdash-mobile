@@ -57,6 +57,8 @@ class ModelConfig(Base):
     api_key_env = Column(String(128), nullable=True)
     temperature = Column(Float, default=0.7)
     max_tokens = Column(Integer, default=4096)
+    thinking_enabled = Column(Boolean, default=False)
+    thinking_budget_tokens = Column(Integer, nullable=True)
     enabled = Column(Boolean, default=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
@@ -97,6 +99,7 @@ class TokenUsageLog(Base):
     model_id = Column(Integer, ForeignKey("model_configs.id", ondelete="SET NULL"), nullable=True)
     prompt_tokens = Column(Integer, nullable=False, default=0)
     completion_tokens = Column(Integer, nullable=False, default=0)
+    reasoning_tokens = Column(Integer, nullable=True, default=0)
     total_tokens = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -169,6 +172,18 @@ def _migrate(conn):
     msg_cols = {row[1] for row in msg_result}
     if "status" not in msg_cols:
         conn.exec_driver_sql("ALTER TABLE messages ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'done'")
+
+    model_cfg_result = conn.exec_driver_sql("PRAGMA table_info(model_configs)")
+    model_cfg_cols = {row[1] for row in model_cfg_result}
+    if "thinking_enabled" not in model_cfg_cols:
+        conn.exec_driver_sql("ALTER TABLE model_configs ADD COLUMN thinking_enabled BOOLEAN DEFAULT 0")
+    if "thinking_budget_tokens" not in model_cfg_cols:
+        conn.exec_driver_sql("ALTER TABLE model_configs ADD COLUMN thinking_budget_tokens INTEGER")
+
+    token_result = conn.exec_driver_sql("PRAGMA table_info(token_usage_log)")
+    token_cols = {row[1] for row in token_result}
+    if "reasoning_tokens" not in token_cols:
+        conn.exec_driver_sql("ALTER TABLE token_usage_log ADD COLUMN reasoning_tokens INTEGER DEFAULT 0")
 
     conv_result = conn.exec_driver_sql("PRAGMA table_info(conversations)")
     conv_cols = {row[1] for row in conv_result}

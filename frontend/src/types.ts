@@ -26,6 +26,8 @@ export interface ModelConfig {
   api_key_env: string | null;
   temperature: number;
   max_tokens: number;
+  thinking_enabled: boolean;
+  thinking_budget_tokens: number | null;
   enabled: boolean;
   created_at: string;
   updated_at: string;
@@ -47,6 +49,7 @@ export interface Message {
   tool_calls_json: ToolCall[] | null;
   tool_call_id: string | null;
   tool_name: string | null;
+  reasoning_content?: string | null;
   status?: string;
   created_at: string;
 }
@@ -56,6 +59,7 @@ export interface GenerateStatus {
   message_id: number | null;
   message_content: string | null;
   tool_calls_json: ToolCall[] | null;
+  reasoning_content: string | null;
   status: string;
 }
 
@@ -66,8 +70,10 @@ export interface ToolCall {
 }
 
 export interface StreamEvent {
-  type: 'content' | 'content_delta' | 'tool_calls' | 'tool_start' | 'tool_result' | 'error';
+  type: 'content' | 'content_delta' | 'reasoning_delta' | 'tool_calls' | 'tool_start' | 'tool_result' | 'error';
   content?: string;
+  reasoning_content_delta?: string;
+  reasoning_content?: string;
   tool_calls?: ToolCall[];
   name?: string;
   id?: string;

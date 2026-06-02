@@ -79,6 +79,8 @@ class ModelConfigCreate(BaseModel):
     api_key_env: Optional[str] = None
     temperature: float = 0.7
     max_tokens: int = 4096
+    thinking_enabled: bool = False
+    thinking_budget_tokens: Optional[int] = None
     enabled: bool = True
 
 
@@ -90,6 +92,8 @@ class ModelConfigUpdate(BaseModel):
     api_key_env: Optional[str] = None
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
+    thinking_enabled: Optional[bool] = None
+    thinking_budget_tokens: Optional[int] = None
     enabled: Optional[bool] = None
 
 
@@ -102,6 +106,8 @@ class ModelConfigResponse(BaseModel):
     api_key_env: Optional[str] = None
     temperature: float = 0.7
     max_tokens: int = 4096
+    thinking_enabled: bool = False
+    thinking_budget_tokens: Optional[int] = None
     enabled: bool
     created_at: str
     updated_at: str
@@ -159,6 +165,7 @@ class GenerateStatusResponse(BaseModel):
     message_id: Optional[int] = None
     message_content: Optional[str] = None
     tool_calls_json: Optional[Any] = None
+    reasoning_content: Optional[str] = None
     status: str = "done"
 
 

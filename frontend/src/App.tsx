@@ -13,7 +13,7 @@ import {
   Send, Plus, Key, MessageSquare, Trash2, ChevronLeft,
   ChevronRight, Wrench, Bot, Loader2, Terminal, Globe, FileText, Eye, Search,
   Copy, Check, RefreshCw, Square, ChevronUp, ChevronDown, Download,
-  Shield, LogOut, Settings, Minus, CreditCard
+  Shield, LogOut, Settings, Minus, CreditCard, Brain
 } from 'lucide-react'
 import MarkdownRenderer from './components/MarkdownRenderer'
 import SetupWizard from './components/SetupWizard'
@@ -196,11 +196,12 @@ function App() {
         generationResumed = true
         if (event.type === 'content') {
           const content = event.content || ''
+          const reasoning = event.reasoning_content || null
           setMessages(prev => {
             const idx = prev.findIndex(m => m.role === 'assistant' && m.status === 'generating')
             if (idx >= 0) {
               const updated = [...prev]
-              updated[idx] = { ...updated[idx], content, tool_calls_json: event.tool_calls || null }
+              updated[idx] = { ...updated[idx], content, reasoning_content: reasoning || updated[idx].reasoning_content, tool_calls_json: event.tool_calls || null }
               return updated
             }
             return prev
@@ -216,6 +217,21 @@ function App() {
             return [...prev, {
               id: convId * -1, role: 'assistant' as const,
               content: event.content || '', tool_calls_json: null,
+              tool_call_id: null, tool_name: null, status: 'generating',
+              created_at: new Date().toISOString()
+            }]
+          })
+        } else if (event.type === 'reasoning_delta') {
+          setMessages(prev => {
+            const idx = prev.findIndex(m => m.role === 'assistant' && m.status === 'generating')
+            if (idx >= 0) {
+              const updated = [...prev]
+              updated[idx] = { ...updated[idx], reasoning_content: (updated[idx].reasoning_content || '') + (event.content || '') }
+              return updated
+            }
+            return [...prev, {
+              id: convId * -1, role: 'assistant' as const,
+              content: '', reasoning_content: event.content || '', tool_calls_json: null,
               tool_call_id: null, tool_name: null, status: 'generating',
               created_at: new Date().toISOString()
             }]
@@ -297,6 +313,7 @@ function App() {
 
     try {
       let assistantContent = ''
+      let assistantReasoning = ''
       const toolCalls: ToolCall[] = []
 
       for await (const event of api.chat.send(conv.id, userMsg.content || '', modelId, controller.signal)) {
@@ -305,25 +322,39 @@ function App() {
             setMessages(prev => {
               const last = prev[prev.length - 1]
               if (last?.role === 'assistant' && last.id === (conv?.id || 0) * -1) {
-                return [...prev.slice(0, -1), { ...last, content: assistantContent }]
+                return [...prev.slice(0, -1), { ...last, content: assistantContent, reasoning_content: assistantReasoning || last.reasoning_content }]
               }
               return [...prev, {
                 id: (conv?.id || 0) * -1, role: 'assistant' as const,
-                content: assistantContent, tool_calls_json: null,
-                tool_call_id: null, tool_name: null, created_at: new Date().toISOString()
+                content: assistantContent, reasoning_content: assistantReasoning, tool_calls_json: null,
+                tool_call_id: null, tool_name: null, status: 'generating', created_at: new Date().toISOString()
+              }]
+            })
+          } else if (event.type === 'reasoning_delta') {
+            assistantReasoning += (event.content || '')
+            setMessages(prev => {
+              const last = prev[prev.length - 1]
+              if (last?.role === 'assistant' && last.id === (conv?.id || 0) * -1) {
+                return [...prev.slice(0, -1), { ...last, reasoning_content: assistantReasoning }]
+              }
+              return [...prev, {
+                id: (conv?.id || 0) * -1, role: 'assistant' as const,
+                content: '', reasoning_content: assistantReasoning, tool_calls_json: null,
+                tool_call_id: null, tool_name: null, status: 'generating', created_at: new Date().toISOString()
               }]
             })
           } else if (event.type === 'content') {
             assistantContent = event.content || ''
+            assistantReasoning = event.reasoning_content || assistantReasoning
             setMessages(prev => {
               const last = prev[prev.length - 1]
               if (last?.role === 'assistant' && last.id === (conv?.id || 0) * -1) {
-                return [...prev.slice(0, -1), { ...last, content: assistantContent }]
+                return [...prev.slice(0, -1), { ...last, content: assistantContent, reasoning_content: assistantReasoning || last.reasoning_content }]
               }
               return [...prev, {
                 id: (conv?.id || 0) * -1, role: 'assistant' as const,
-                content: assistantContent, tool_calls_json: null,
-                tool_call_id: null, tool_name: null, created_at: new Date().toISOString()
+                content: assistantContent, reasoning_content: assistantReasoning, tool_calls_json: null,
+                tool_call_id: null, tool_name: null, status: 'generating', created_at: new Date().toISOString()
               }]
             })
           } else if (event.type === 'tool_calls') {
@@ -337,7 +368,7 @@ function App() {
               return [...prev, {
                 id: Date.now(), role: 'assistant' as const,
                 content: event.content || '', tool_calls_json: event.tool_calls || null,
-                tool_call_id: null, tool_name: null, created_at: new Date().toISOString()
+                tool_call_id: null, tool_name: null, status: 'generating', created_at: new Date().toISOString()
               }]
             })
           } else if (event.type === 'tool_start') {
@@ -376,7 +407,7 @@ function App() {
             return [...prev, {
               id: Date.now(), role: 'assistant' as const,
               content: assistantContent, tool_calls_json: null,
-              tool_call_id: null, tool_name: null, created_at: new Date().toISOString()
+              tool_call_id: null, tool_name: null, status: 'generating', created_at: new Date().toISOString()
             }]
           }
           return prev
@@ -477,6 +508,7 @@ function App() {
 
       try {
         let assistantContent = ''
+        let assistantReasoning = ''
         const toolCalls: ToolCall[] = []
         for await (const event of api.chat.send(branch.id, content, modelId, controller.signal)) {
           if (event.type === 'content_delta') {
@@ -484,25 +516,39 @@ function App() {
             setMessages(prev => {
               const last = prev[prev.length - 1]
               if (last?.role === 'assistant' && last.id === branch.id * -1) {
-                return [...prev.slice(0, -1), { ...last, content: assistantContent }]
+                return [...prev.slice(0, -1), { ...last, content: assistantContent, reasoning_content: assistantReasoning || last.reasoning_content }]
               }
               return [...prev, {
                 id: branch.id * -1, role: 'assistant' as const,
-                content: assistantContent, tool_calls_json: null,
-                tool_call_id: null, tool_name: null, created_at: new Date().toISOString()
+                content: assistantContent, reasoning_content: assistantReasoning, tool_calls_json: null,
+                tool_call_id: null, tool_name: null, status: 'generating', created_at: new Date().toISOString()
+              }]
+            })
+          } else if (event.type === 'reasoning_delta') {
+            assistantReasoning += (event.content || '')
+            setMessages(prev => {
+              const last = prev[prev.length - 1]
+              if (last?.role === 'assistant' && last.id === branch.id * -1) {
+                return [...prev.slice(0, -1), { ...last, reasoning_content: assistantReasoning }]
+              }
+              return [...prev, {
+                id: branch.id * -1, role: 'assistant' as const,
+                content: '', reasoning_content: assistantReasoning, tool_calls_json: null,
+                tool_call_id: null, tool_name: null, status: 'generating', created_at: new Date().toISOString()
               }]
             })
           } else if (event.type === 'content') {
             assistantContent = event.content || ''
+            assistantReasoning = event.reasoning_content || assistantReasoning
             setMessages(prev => {
               const last = prev[prev.length - 1]
               if (last?.role === 'assistant' && last.id === branch.id * -1) {
-                return [...prev.slice(0, -1), { ...last, content: assistantContent }]
+                return [...prev.slice(0, -1), { ...last, content: assistantContent, reasoning_content: assistantReasoning || last.reasoning_content }]
               }
               return [...prev, {
                 id: branch.id * -1, role: 'assistant' as const,
-                content: assistantContent, tool_calls_json: null,
-                tool_call_id: null, tool_name: null, created_at: new Date().toISOString()
+                content: assistantContent, reasoning_content: assistantReasoning, tool_calls_json: null,
+                tool_call_id: null, tool_name: null, status: 'generating', created_at: new Date().toISOString()
               }]
             })
           } else if (event.type === 'tool_calls') {
@@ -516,7 +562,7 @@ function App() {
               return [...prev, {
                 id: Date.now(), role: 'assistant' as const,
                 content: event.content || '', tool_calls_json: event.tool_calls || null,
-                tool_call_id: null, tool_name: null, created_at: new Date().toISOString()
+                tool_call_id: null, tool_name: null, status: 'generating', created_at: new Date().toISOString()
               }]
             })
           } else if (event.type === 'tool_start') {
@@ -554,7 +600,7 @@ function App() {
             return [...prev, {
               id: Date.now(), role: 'assistant' as const,
               content: assistantContent, tool_calls_json: null,
-              tool_call_id: null, tool_name: null, created_at: new Date().toISOString()
+              tool_call_id: null, tool_name: null, status: 'generating', created_at: new Date().toISOString()
             }]
           }
           return prev
@@ -885,6 +931,15 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
   const isTool = message.role === 'tool'
   const isAssistant = message.role === 'assistant'
   const toolCalls = message.tool_calls_json
+  const [thinkingExpanded, setThinkingExpanded] = useState(false)
+
+  useEffect(() => {
+    if (message.status === 'generating' && message.reasoning_content) {
+      setThinkingExpanded(true)
+    } else if (message.status !== 'generating' && message.status !== undefined) {
+      setThinkingExpanded(false)
+    }
+  }, [message.status, message.reasoning_content])
 
   if (isTool && message.content) {
     const isHtmlRender = message.content.startsWith('HTML_RENDER:')
@@ -1127,6 +1182,29 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
 
   return (
     <div>
+      {isAssistant && message.reasoning_content && (
+        <div className="flex justify-start mb-1">
+          <div className="w-8 shrink-0" />
+          <div className="max-w-[75%] min-w-0">
+            <button
+              onClick={() => setThinkingExpanded(!thinkingExpanded)}
+              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 transition-colors py-0.5 w-full"
+            >
+              {message.status === 'generating' ? (
+                <><Loader2 className="w-3 h-3 animate-spin text-purple-400" /><span className="text-purple-400">Thinking...</span></>
+              ) : (
+                <><Brain className="w-3 h-3 text-purple-400" /><span>Reasoning</span></>
+              )}
+              {thinkingExpanded ? <ChevronUp className="w-3 h-3 ml-auto" /> : <ChevronDown className="w-3 h-3 ml-auto" />}
+            </button>
+            {thinkingExpanded && (
+              <div className="mt-1 rounded-xl bg-gray-800/50 border border-gray-700/50 px-3 py-2 text-sm text-gray-400 italic">
+                <MarkdownRenderer content={message.reasoning_content || ''} />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
         {isAssistant && (
           <div className="w-8 h-8 rounded-full bg-emerald-600 flex items-center justify-center mr-2 mt-0.5 shrink-0">

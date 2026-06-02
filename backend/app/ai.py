@@ -31,6 +31,7 @@ class StreamChunk:
     tool_calls: Optional[list[dict]] = None
     finish_reason: Optional[str] = None
     usage: Optional[dict] = None
+    reasoning_tokens: int = 0
 
 
 class AIProvider(ABC):
@@ -114,6 +115,8 @@ class OpenAICompatibleProvider(AIProvider):
             "temperature": model_config.temperature or 0.7,
             "max_tokens": model_config.max_tokens or 4096,
         }
+        if getattr(model_config, "thinking_enabled", False):
+            kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
         openai_tools = build_tool_specs(tools)
         if openai_tools:
             kwargs["tools"] = openai_tools
@@ -134,7 +137,7 @@ class OpenAICompatibleProvider(AIProvider):
         return AIResponse(
             content=msg.content or "",
             tool_calls=tool_calls,
-            reasoning_content=getattr(msg, "reasoning_content", "") or "",
+            reasoning_content=getattr(msg, "reasoning_content", "") or getattr(msg, "reasoning", "") or "",
         )
 
     async def chat_with_results(self, messages: list[dict], tools: list[ToolDef], model_config, tool_results: list[dict]) -> AIResponse:
@@ -147,6 +150,8 @@ class OpenAICompatibleProvider(AIProvider):
             "temperature": model_config.temperature or 0.7,
             "max_tokens": model_config.max_tokens or 4096,
         }
+        if getattr(model_config, "thinking_enabled", False):
+            kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
         if openai_tools:
             kwargs["tools"] = openai_tools
 
@@ -165,7 +170,7 @@ class OpenAICompatibleProvider(AIProvider):
         return AIResponse(
             content=msg.content or "",
             tool_calls=tool_calls,
-            reasoning_content=getattr(msg, "reasoning_content", "") or "",
+            reasoning_content=getattr(msg, "reasoning_content", "") or getattr(msg, "reasoning", "") or "",
         )
 
     async def _stream_openai(self, messages: list[dict], tools: list[ToolDef], model_config) -> AsyncGenerator[StreamChunk, None]:
@@ -179,6 +184,8 @@ class OpenAICompatibleProvider(AIProvider):
             "stream": True,
             "stream_options": {"include_usage": True},
         }
+        if getattr(model_config, "thinking_enabled", False):
+            kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
         openai_tools = build_tool_specs(tools)
         if openai_tools:
             kwargs["tools"] = openai_tools
@@ -189,6 +196,7 @@ class OpenAICompatibleProvider(AIProvider):
         tool_call_accumulator: dict[int, dict] = {}
         finish_reason = None
         usage = None
+        reasoning_tokens = 0
 
         async for chunk in stream:
             if not chunk.choices:
@@ -199,8 +207,12 @@ class OpenAICompatibleProvider(AIProvider):
             if delta and delta.content:
                 yield StreamChunk(content_delta=delta.content)
 
-            if delta and getattr(delta, "reasoning_content", None):
-                yield StreamChunk(reasoning_content_delta=delta.reasoning_content)
+            reasoning_delta = (
+                getattr(delta, "reasoning_content", None)
+                or getattr(delta, "reasoning", None)
+            )
+            if delta and reasoning_delta:
+                yield StreamChunk(reasoning_content_delta=reasoning_delta)
 
             if delta and delta.tool_calls:
                 for tc in delta.tool_calls:
@@ -221,6 +233,9 @@ class OpenAICompatibleProvider(AIProvider):
                     "completion_tokens": chunk.usage.completion_tokens,
                     "total_tokens": chunk.usage.total_tokens,
                 }
+                reasoning_tokens = getattr(chunk.usage, "completion_tokens_details", None)
+                if reasoning_tokens:
+                    reasoning_tokens = getattr(reasoning_tokens, "reasoning_tokens", 0) or 0
 
         accumulated_tool_calls = []
         for tc_data in tool_call_accumulator.values():
@@ -238,6 +253,7 @@ class OpenAICompatibleProvider(AIProvider):
             tool_calls=accumulated_tool_calls if accumulated_tool_calls else None,
             finish_reason=finish_reason,
             usage=usage,
+            reasoning_tokens=reasoning_tokens,
         )
 
     async def stream_chat(self, messages: list[dict], tools: list[ToolDef], model_config) -> AsyncGenerator[StreamChunk, None]:
@@ -318,11 +334,18 @@ class AnthropicProvider(AIProvider):
             kwargs["system"] = system
         if anthropic_tools:
             kwargs["tools"] = anthropic_tools
+        if getattr(model_config, "thinking_enabled", False):
+            budget = getattr(model_config, "thinking_budget_tokens", None) or 4000
+            max_tok = model_config.max_tokens or 4096
+            if budget >= max_tok:
+                raise ValueError(f"thinking_budget_tokens ({budget}) must be less than max_tokens ({max_tok})")
+            kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
 
         response = await client.messages.create(**kwargs)
 
         content = ""
         tool_calls = []
+        reasoning_content = ""
         for block in response.content:
             if block.type == "text":
                 content += block.text
@@ -332,8 +355,12 @@ class AnthropicProvider(AIProvider):
                     "name": block.name,
                     "arguments": block.input if isinstance(block.input, dict) else {},
                 })
+            elif block.type == "thinking":
+                reasoning_content = getattr(block, "thinking", "")
+            elif block.type == "redacted_thinking":
+                reasoning_content = "[Thinking redacted by provider]"
 
-        return AIResponse(content=content, tool_calls=tool_calls)
+        return AIResponse(content=content, tool_calls=tool_calls, reasoning_content=reasoning_content)
 
     async def chat_with_results(self, messages: list[dict], tools: list[ToolDef], model_config, tool_results: list[dict]) -> AIResponse:
         return await self.chat(messages, tools, model_config)
@@ -353,16 +380,36 @@ class AnthropicProvider(AIProvider):
             kwargs["system"] = system
         if anthropic_tools:
             kwargs["tools"] = anthropic_tools
+        thinking_enabled = getattr(model_config, "thinking_enabled", False)
+        if thinking_enabled:
+            budget = getattr(model_config, "thinking_budget_tokens", None) or 4000
+            max_tok = model_config.max_tokens or 4096
+            if budget >= max_tok:
+                raise ValueError(f"thinking_budget_tokens ({budget}) must be less than max_tokens ({max_tok})")
+            kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
+
+        accumulated_thinking = ""
+        accumulated_signature = ""
 
         async with client.messages.stream(**kwargs) as stream:
             async for event in stream:
                 if event.type == "content_block_delta":
-                    if event.delta.type == "text_delta" and event.delta.text and event.delta.text.strip():
-                        yield StreamChunk(content_delta=event.delta.text)
+                    delta_type = getattr(event.delta, "type", None)
+                    if delta_type == "text_delta":
+                        text = getattr(event.delta, "text", "") or ""
+                        if text.strip():
+                            yield StreamChunk(content_delta=text)
+                    elif delta_type == "thinking_delta":
+                        thinking_text = getattr(event.delta, "thinking", "") or ""
+                        accumulated_thinking += thinking_text
+                        yield StreamChunk(reasoning_content_delta=thinking_text)
+                    elif delta_type == "signature_delta":
+                        accumulated_signature += getattr(event.delta, "signature", "") or ""
 
             final = stream.get_final_message()
 
             tool_calls = []
+            reasoning_content = ""
             for block in final.content:
                 if block.type == "tool_use":
                     tool_calls.append({
@@ -370,6 +417,15 @@ class AnthropicProvider(AIProvider):
                         "name": block.name,
                         "arguments": block.input if isinstance(block.input, dict) else {},
                     })
+                elif block.type == "thinking":
+                    reasoning_content = getattr(block, "thinking", "") or ""
+                    accumulated_signature = getattr(block, "signature", "") or ""
+                elif block.type == "redacted_thinking":
+                    reasoning_content = "[Thinking redacted by provider]"
+
+            if reasoning_content and not accumulated_thinking:
+                accumulated_thinking = reasoning_content
+                yield StreamChunk(reasoning_content_delta=reasoning_content)
 
             usage = None
             if final.usage:

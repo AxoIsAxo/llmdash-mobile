@@ -94,6 +94,8 @@ async def list_models(current_user: dict = Depends(get_current_user), db: AsyncS
             model_name=m.model_name, base_url=m.base_url,
             api_key_env=m.api_key_env, temperature=m.temperature or 0.7,
             max_tokens=m.max_tokens or 4096,
+            thinking_enabled=bool(getattr(m, "thinking_enabled", False)),
+            thinking_budget_tokens=getattr(m, "thinking_budget_tokens", None),
             enabled=m.enabled,
             created_at=m.created_at.isoformat() if m.created_at else "",
             updated_at=m.updated_at.isoformat() if m.updated_at else "",
@@ -108,7 +110,10 @@ async def create_model(cfg: ModelConfigCreate, current_user: dict = Depends(requ
         name=cfg.name, provider=cfg.provider.value,
         model_name=cfg.model_name, base_url=cfg.base_url,
         api_key_env=cfg.api_key_env, temperature=cfg.temperature,
-        max_tokens=cfg.max_tokens, enabled=cfg.enabled,
+        max_tokens=cfg.max_tokens,
+        thinking_enabled=getattr(cfg, "thinking_enabled", False),
+        thinking_budget_tokens=getattr(cfg, "thinking_budget_tokens", None),
+        enabled=cfg.enabled,
     )
     db.add(model)
     await db.commit()
@@ -214,6 +219,8 @@ async def get_model(model_id: int, current_user: dict = Depends(get_current_user
         model_name=model.model_name, base_url=model.base_url,
         api_key_env=model.api_key_env, temperature=model.temperature or 0.7,
         max_tokens=model.max_tokens or 4096,
+        thinking_enabled=bool(getattr(model, "thinking_enabled", False)),
+        thinking_budget_tokens=getattr(model, "thinking_budget_tokens", None),
         enabled=model.enabled,
         created_at=model.created_at.isoformat() if model.created_at else "",
         updated_at=model.updated_at.isoformat() if model.updated_at else "",
@@ -564,6 +571,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                 total_prompt_tokens = 0
                 total_completion_tokens = 0
                 total_total_tokens = 0
+                total_reasoning_tokens = 0
 
                 draft = Message(
                     conversation_id=req.conversation_id,
@@ -595,12 +603,14 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                         await save_draft_progress()
                     if chunk.reasoning_content_delta:
                         accumulated_reasoning += chunk.reasoning_content_delta
+                        await push_event("reasoning_delta", content=chunk.reasoning_content_delta)
                     if chunk.tool_calls is not None:
                         final_tool_calls = chunk.tool_calls
                     if chunk.usage:
                         total_prompt_tokens += chunk.usage["prompt_tokens"]
                         total_completion_tokens += chunk.usage["completion_tokens"]
                         total_total_tokens += chunk.usage["total_tokens"]
+                    total_reasoning_tokens += chunk.reasoning_tokens
 
                 tool_round = 0
                 while final_tool_calls and tool_round < 5:
@@ -658,15 +668,18 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                             await save_draft_progress()
                         if chunk.reasoning_content_delta:
                             accumulated_reasoning += chunk.reasoning_content_delta
+                            await push_event("reasoning_delta", content=chunk.reasoning_content_delta)
                         if chunk.tool_calls is not None:
                             final_tool_calls = chunk.tool_calls
                         if chunk.usage:
                             total_prompt_tokens += chunk.usage["prompt_tokens"]
                             total_completion_tokens += chunk.usage["completion_tokens"]
                             total_total_tokens += chunk.usage["total_tokens"]
+                        total_reasoning_tokens += chunk.reasoning_tokens
 
                 if streaming_msg_id is not None:
                     draft.content = accumulated_content or ""
+                    draft.reasoning_content = accumulated_reasoning or None
                     draft.status = "done"
                     draft.created_at = datetime.now(timezone.utc)
                     if final_tool_calls:
@@ -682,11 +695,12 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                         conversation_id=req.conversation_id,
                         role="assistant",
                         content=accumulated_content or "",
+                        reasoning_content=accumulated_reasoning or None,
                         status="done",
                     ))
                     await sess.commit()
                 if accumulated_content:
-                    await push_event("content", content=accumulated_content)
+                    await push_event("content", content=accumulated_content, reasoning_content=accumulated_reasoning or None)
                 elif not final_tool_calls:
                     await push_event("error", error="Received an empty response from the model. Please verify your API key and model configuration.")
 
@@ -714,6 +728,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                         model_id=model_id,
                         prompt_tokens=total_prompt_tokens,
                         completion_tokens=total_completion_tokens,
+                        reasoning_tokens=total_reasoning_tokens or None,
                         total_tokens=total_total_tokens,
                     ))
                     await sess.execute(
@@ -729,6 +744,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                 try:
                     if streaming_msg_id is not None:
                         draft.content = accumulated_content
+                        draft.reasoning_content = accumulated_reasoning or None
                         draft.status = "cancelled"
                         await sess.commit()
                 except Exception:
@@ -743,6 +759,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                 try:
                     if streaming_msg_id is not None:
                         draft.content = accumulated_content or error_msg
+                        draft.reasoning_content = accumulated_reasoning or None
                         draft.status = "done"
                         await sess.commit()
                 except Exception:
@@ -799,6 +816,8 @@ async def chat_resume(conv_id: int, current_user: dict = Depends(get_current_use
         catchup = {"type": "content", "content": draft.content or ""}
         if draft.tool_calls_json:
             catchup["tool_calls"] = json.loads(draft.tool_calls_json)
+        if draft.reasoning_content:
+            catchup["reasoning_content"] = draft.reasoning_content
         try:
             my_queue.put_nowait(f"data: {json.dumps(catchup)}\n\n")
         except asyncio.QueueFull:
@@ -872,6 +891,7 @@ async def generation_status(conv_id: int, current_user: dict = Depends(get_curre
             message_id=latest.id,
             message_content=latest.content,
             tool_calls_json=json.loads(latest.tool_calls_json) if latest.tool_calls_json else None,
+            reasoning_content=latest.reasoning_content,
             status=latest.status,
         )
 
