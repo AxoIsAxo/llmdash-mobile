@@ -306,14 +306,19 @@ async def subscribe(
     }
 
     try:
+        url = lnbits_url("/api/v1/payments")
+        print(f"[LLMDash] LNBits request URL: {url}", flush=True)
+        print(f"[LLMDash] LNBits payload: {payload}", flush=True)
         async with httpx.AsyncClient(timeout=LNBITS_TIMEOUT) as client:
             resp = await client.post(
-                lnbits_url("/api/v1/payments"),
+                url,
                 json=payload,
                 headers=lnbits_headers(),
             )
+            print(f"[LLMDash] LNBits response status: {resp.status_code}", flush=True)
+            print(f"[LLMDash] LNBits response body: {resp.text}", flush=True)
             if resp.status_code not in (200, 201):
-                raise HTTPException(502, f"LNBits error: {resp.text}")
+                raise HTTPException(502, f"LNBits error ({resp.status_code}): {resp.text}")
             data = resp.json()
     except httpx.HTTPError as e:
         raise HTTPException(502, f"LNBits connection error: {str(e)}")

@@ -30,6 +30,8 @@ frontend/.vite/
 # --- Data ---
 data/documents/*
 !data/documents/.gitkeep
+data/uploads/*
+!data/uploads/.gitkeep
 
 # --- IDE ---
 .vscode/

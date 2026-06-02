@@ -1,12 +1,14 @@
 import asyncio
+import base64
 import json
 import os
 import sys
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import FastAPI, Depends, HTTPException, Query, APIRouter, Request
+from fastapi import FastAPI, Depends, HTTPException, Query, APIRouter, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -24,10 +26,12 @@ from .models import (
     EnvUpdateRequest, EnvStatusResponse, GenerateStatusResponse,
     ModelReorderRequest,
     ImageGenerationRequest, ImageGenerationResponse,
+    UploadResponse, FileUploadSettings, FileUploadSettingsUpdate,
 )
 from .ai import get_provider, ToolDef
 from .tools import get_tool_definitions, execute_tool
 from .sandbox import is_docker_available
+from .ocr import process_uploaded_file, is_allowed_file, is_image_file, ocr_image, IMAGE_EXTENSIONS, is_ocr_available
 from .routers.auth import router as auth_router, get_current_user, require_role, load_provider_configs
 from .routers.subscriptions import router as subscriptions_router
 
@@ -99,6 +103,7 @@ async def list_models(current_user: dict = Depends(get_current_user), db: AsyncS
             max_tokens=m.max_tokens or 4096,
             thinking_enabled=bool(getattr(m, "thinking_enabled", False)),
             thinking_budget_tokens=getattr(m, "thinking_budget_tokens", None),
+            vision_enabled=bool(getattr(m, "vision_enabled", False)),
             enabled=m.enabled,
             sort_order=getattr(m, "sort_order", None),
             created_at=m.created_at.isoformat() if m.created_at else "",
@@ -128,6 +133,7 @@ async def create_model(cfg: ModelConfigCreate, current_user: dict = Depends(requ
         max_tokens=cfg.max_tokens,
         thinking_enabled=getattr(cfg, "thinking_enabled", False),
         thinking_budget_tokens=getattr(cfg, "thinking_budget_tokens", None),
+        vision_enabled=getattr(cfg, "vision_enabled", False),
         enabled=cfg.enabled,
         sort_order=sort_order,
     )
@@ -181,6 +187,23 @@ IMAGE_MODEL_PATTERNS = [
 ]
 IMAGE_MODEL_LOWERS = [p.lower() for p in IMAGE_MODEL_PATTERNS]
 
+VISION_MODEL_PATTERNS = [
+    "gpt-4o", "gpt-4-turbo", "gpt-4-vision", "vision",
+    "claude-3", "claude-3.5", "claude-3.7",
+    "gemini-2", "gemini-1.5", "gemini-pro-vision",
+    "pixtral", "llava", "bakllava", "cogvlm", "fuyu",
+    "qwen-vl", "qwen2-vl", "qwen2.5-vl",
+    "deepseek-vl", "deepseek-vl2",
+    "minimax-vl", "minimax-vision",
+    "glm-4v", "cogview",
+    "internvl", "internlm-xcomposer",
+    "phi-3-vision", "phi-3.5-vision",
+    "llama-3.2-vision", "llama-vision",
+    "molmo", "idefics", "paligemma",
+    "yi-vision", "yi-vl",
+]
+VISION_MODEL_LOWERS = [p.lower() for p in VISION_MODEL_PATTERNS]
+
 
 def _detect_model_type(model_id: str, raw_entry: dict | None = None) -> str:
     if raw_entry:
@@ -197,6 +220,21 @@ def _detect_model_type(model_id: str, raw_entry: dict | None = None) -> str:
         if pat in lower:
             return "image"
     return "chat"
+
+
+def _detect_vision_capability(model_id: str, raw_entry: dict | None = None) -> bool:
+    if raw_entry:
+        arch = raw_entry.get("architecture", {}) or {}
+        in_mods = arch.get("input_modalities", []) or arch.get("modalities", []) or []
+        if "image" in in_mods or "image_url" in in_mods:
+            return True
+    lower = model_id.lower()
+    if "/" in lower:
+        lower = lower.split("/", 1)[1]
+    for pat in VISION_MODEL_LOWERS:
+        if pat in lower:
+            return True
+    return False
 
 
 @router.get("/models/scan")
@@ -225,6 +263,7 @@ async def scan_models(current_user: dict = Depends(require_role("owner", "admin"
                                 "id": mid,
                                 "name": m.get("id", m.get("name", "")),
                                 "suggested_type": _detect_model_type(mid, m),
+                                "supports_vision": _detect_vision_capability(mid, m),
                             })
                     else:
                         error = f"HTTP {resp.status_code}"
@@ -245,6 +284,7 @@ async def scan_models(current_user: dict = Depends(require_role("owner", "admin"
                                         "id": mid,
                                         "name": m.get("id", m.get("name", "")),
                                         "suggested_type": "image",
+                                        "supports_vision": _detect_vision_capability(mid, m),
                                     })
                     except Exception:
                         pass
@@ -265,6 +305,7 @@ async def scan_models(current_user: dict = Depends(require_role("owner", "admin"
                                 "id": mid,
                                 "name": m.get("display_name", m.get("id", "")),
                                 "suggested_type": _detect_model_type(mid),
+                                "supports_vision": _detect_vision_capability(mid),
                             })
                     else:
                         error = f"HTTP {resp.status_code}"
@@ -308,6 +349,7 @@ async def get_model(model_id: int, current_user: dict = Depends(get_current_user
         max_tokens=model.max_tokens or 4096,
         thinking_enabled=bool(getattr(model, "thinking_enabled", False)),
         thinking_budget_tokens=getattr(model, "thinking_budget_tokens", None),
+        vision_enabled=bool(getattr(model, "vision_enabled", False)),
         enabled=model.enabled,
         sort_order=getattr(model, "sort_order", None),
         created_at=model.created_at.isoformat() if model.created_at else "",
@@ -375,6 +417,7 @@ async def get_messages(conv_id: int, current_user: dict = Depends(get_current_us
     return [
         MessageResponse(
             id=m.id, role=m.role, content=m.content,
+            attachments_json=json.loads(m.attachments_json) if m.attachments_json else None,
             tool_calls_json=json.loads(m.tool_calls_json) if m.tool_calls_json else None,
             tool_call_id=m.tool_call_id, tool_name=m.tool_name,
             reasoning_content=m.reasoning_content,
@@ -424,6 +467,7 @@ async def branch_conversation(conv_id: int, req: BranchRequest, current_user: di
             conversation_id=branch.id,
             role=m.role,
             content=m.content,
+            attachments_json=m.attachments_json,
             tool_calls_json=m.tool_calls_json,
             tool_call_id=m.tool_call_id,
             tool_name=m.tool_name,
@@ -507,7 +551,121 @@ async def config_status(current_user: dict = Depends(get_current_user)):
             "minimax": bool(app_config.settings.minimax_api_key),
             "openrouter": bool(app_config.settings.openrouter_api_key),
         },
+        "ocr_available": is_ocr_available(),
+        "uploads": {
+            "enabled": app_config.settings.file_upload_enabled,
+            "ocr_enabled": app_config.settings.ocr_enabled,
+            "ocr_strategy": app_config.settings.ocr_strategy,
+        },
     }
+
+
+@router.get("/config/uploads", response_model=FileUploadSettings)
+async def get_upload_settings(current_user: dict = Depends(require_role("owner", "admin"))):
+    return FileUploadSettings(
+        file_upload_enabled=app_config.settings.file_upload_enabled,
+        ocr_enabled=app_config.settings.ocr_enabled,
+        ocr_strategy=app_config.settings.ocr_strategy,
+    )
+
+
+@router.put("/config/uploads", response_model=FileUploadSettings)
+async def update_upload_settings(req: FileUploadSettingsUpdate, current_user: dict = Depends(require_role("owner", "admin"))):
+    updates = {}
+    if req.file_upload_enabled is not None:
+        updates["FILE_UPLOAD_ENABLED"] = str(req.file_upload_enabled).lower()
+    if req.ocr_enabled is not None:
+        updates["OCR_ENABLED"] = str(req.ocr_enabled).lower()
+    if req.ocr_strategy is not None:
+        updates["OCR_STRATEGY"] = req.ocr_strategy
+
+    if updates:
+        env_path = "data/.env"
+        os.makedirs("data", exist_ok=True)
+        existing = {}
+        if os.path.exists(env_path) and not os.path.isdir(env_path):
+            try:
+                with open(env_path) as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            k, v = line.split("=", 1)
+                            existing[k.strip()] = v.strip()
+            except (OSError, IOError):
+                existing = {}
+        for key, value in updates.items():
+            existing[key] = value
+        lines = []
+        for k, v in existing.items():
+            if v:
+                if " " in v or "#" in v:
+                    lines.append(f'{k}="{v}"')
+                else:
+                    lines.append(f"{k}={v}")
+            else:
+                lines.append(f"{k}=")
+        lines.append("")
+        with open(env_path, "w") as f:
+            f.write("\n".join(lines))
+        app_config.reload_settings()
+
+    return FileUploadSettings(
+        file_upload_enabled=app_config.settings.file_upload_enabled,
+        ocr_enabled=app_config.settings.ocr_enabled,
+        ocr_strategy=app_config.settings.ocr_strategy,
+    )
+
+
+@router.post("/chat/upload", response_model=UploadResponse)
+async def upload_file(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
+    if not app_config.settings.file_upload_enabled:
+        raise HTTPException(403, "File uploads are disabled by the admin")
+
+    if not file.filename:
+        raise HTTPException(400, "No filename provided")
+
+    safe_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in file.filename)
+    if not is_allowed_file(safe_name):
+        raise HTTPException(400, "File type not allowed")
+
+    uploads_dir = app_config.settings.uploads_dir
+    os.makedirs(uploads_dir, exist_ok=True)
+
+    file_id = uuid.uuid4().hex[:12]
+    stored_name = f"{file_id}_{safe_name}"
+    file_path = os.path.join(uploads_dir, stored_name)
+
+    content = await file.read()
+    max_size = 20 * 1024 * 1024
+    if len(content) > max_size:
+        raise HTTPException(400, f"File too large (max {max_size // (1024*1024)}MB)")
+
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    force_ocr = not app_config.settings.ocr_enabled
+    result = process_uploaded_file(file_path, file.filename, force_ocr=False)
+
+    return UploadResponse(
+        filename=stored_name,
+        file_path=f"/api/uploads/{stored_name}",
+        file_type=result["file_type"],
+        file_size=result["file_size"],
+        ocr_text=result.get("ocr_text"),
+    )
+
+
+@router.get("/uploads/{filename}")
+async def serve_upload(filename: str, current_user: dict = Depends(get_current_user)):
+    safe_name = os.path.basename(filename)
+    uploads_dir = os.path.realpath(app_config.settings.uploads_dir)
+    filepath = os.path.join(uploads_dir, safe_name)
+    if not os.path.exists(filepath):
+        raise HTTPException(404, "File not found")
+    real = os.path.realpath(filepath)
+    if not real.startswith(uploads_dir):
+        raise HTTPException(404, "File not found")
+    return FileResponse(filepath, filename=safe_name)
 
 
 # --- Chat ---
@@ -643,10 +801,113 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
     )
     messages.insert(0, {"role": "system", "content": system_prompt})
 
-    user_msg = Message(conversation_id=req.conversation_id, role="user", content=req.message)
-    db.add(user_msg)
-    await db.commit()
-    messages.append({"role": "user", "content": req.message})
+    user_content = req.message or ""
+    attachment_records = []
+    vision_enabled = bool(getattr(model, "vision_enabled", False))
+    ocr_strategy = app_config.settings.ocr_strategy
+
+    if req.attachments:
+        if not app_config.settings.file_upload_enabled:
+            raise HTTPException(400, "File uploads are disabled by the admin.")
+
+        content_parts = []
+        if user_content.strip():
+            content_parts.append({"type": "text", "text": user_content})
+
+        extra_text_parts = []
+
+        for att in req.attachments:
+            att_filename = att.get("filename", "")
+            att_path = att.get("file_path", "")
+            att_type = (att.get("file_type", "") or "").lower()
+
+            if att_path.startswith("/api/uploads/"):
+                stored_name = att_path.split("/")[-1]
+                full_path = os.path.join(app_config.settings.uploads_dir, stored_name)
+            else:
+                full_path = att_path
+
+            record = {
+                "filename": att_filename,
+                "file_type": att_type,
+                "file_path": att_path,
+            }
+
+            is_img = is_image_file(att_filename)
+
+            if is_img:
+                if vision_enabled:
+                    try:
+                        with open(full_path, "rb") as f:
+                            img_data = base64.b64encode(f.read()).decode()
+                        mime = att_type.lstrip(".")
+                        if mime == "jpg":
+                            mime = "jpeg"
+                        content_parts.append({
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/{mime};base64,{img_data}"},
+                        })
+                        record["image_included"] = True
+                    except Exception as e:
+                        content_parts.append({"type": "text", "text": f"\n[Failed to load image: {att_filename}]"})
+                else:
+                    if ocr_strategy == "deny":
+                        raise HTTPException(400, "This model does not support image inputs. The admin has configured to deny image uploads for non-vision models. Use a vision-capable model or contact an admin to enable OCR.")
+                    ocr_result = ocr_image(full_path)
+                    if ocr_result:
+                        extra_text_parts.append(f"\n--- OCR text from image '{att_filename}': ---\n{ocr_result}\n--- End OCR ---\n")
+                        record["ocr_text"] = ocr_result[:500]
+                    else:
+                        extra_text_parts.append(f"\n[Image '{att_filename}' uploaded but no text could be extracted via OCR.]")
+            else:
+                result = process_uploaded_file(full_path, att_filename, force_ocr=False)
+                if result.get("ocr_text"):
+                    if att_type == ".pdf":
+                        extra_text_parts.append(f"\n--- Content from PDF '{att_filename}': ---\n{result['ocr_text']}\n--- End PDF ---\n")
+                    else:
+                        extra_text_parts.append(f"\n--- Content from file '{att_filename}': ---\n{result['ocr_text']}\n--- End file ---\n")
+                else:
+                    extra_text_parts.append(f"\n[File '{att_filename}' uploaded (binary/unsupported format)]")
+
+            attachment_records.append(record)
+
+        if extra_text_parts:
+            combined_text = "\n".join(extra_text_parts)
+            content_parts.append({"type": "text", "text": combined_text})
+
+        if len(content_parts) == 1 and content_parts[0]["type"] == "text":
+            final_content = content_parts[0]["text"]
+        elif vision_enabled:
+            final_content = user_content
+            if extra_text_parts:
+                for part in extra_text_parts:
+                    final_content = final_content + "\n" + part if final_content else part
+        else:
+            final_content = user_content
+            if extra_text_parts:
+                for part in extra_text_parts:
+                    final_content = "\n".join([final_content, part]) if final_content else part
+
+        attachments_json_str = json.dumps(attachment_records)
+        user_msg = Message(
+            conversation_id=req.conversation_id,
+            role="user",
+            content=final_content,
+            attachments_json=attachments_json_str,
+        )
+        db.add(user_msg)
+        await db.commit()
+
+        if vision_enabled and any(p.get("type") == "image_url" for p in content_parts):
+            user_msg_entry = {"role": "user", "content": content_parts}
+        else:
+            user_msg_entry = {"role": "user", "content": final_content}
+        messages.append(user_msg_entry)
+    else:
+        user_msg = Message(conversation_id=req.conversation_id, role="user", content=req.message)
+        db.add(user_msg)
+        await db.commit()
+        messages.append({"role": "user", "content": req.message})
 
     tool_defs = get_tool_definitions()
     tools = [ToolDef(**t) for t in tool_defs]

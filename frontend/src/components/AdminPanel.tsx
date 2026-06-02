@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import {
   Users, UserPlus, Trash2, Key, Wrench, Shield, Globe,
   Loader2, X, Check, Settings, RotateCcw, CreditCard, Plus, Edit3, Brain,
-  ArrowUp, ArrowDown
+  ArrowUp, ArrowDown, Upload, File, Eye
 } from 'lucide-react'
 import { api } from '../api'
 import type { User, ProviderConfig, ScannedProvider, ModelConfig, SubscriptionPlan, PlanModelLimit, UserSubscription as UserSub } from '../types'
@@ -13,7 +13,7 @@ interface Props {
   onRefreshModels: () => void
 }
 
-type AdminTab = 'users' | 'providers' | 'models' | 'apikeys' | 'subscriptions'
+type AdminTab = 'users' | 'providers' | 'models' | 'apikeys' | 'subscriptions' | 'uploads'
 
 export default function AdminPanel({ currentUser, onClose, onRefreshModels }: Props) {
   const [tab, setTab] = useState<AdminTab>('users')
@@ -34,6 +34,7 @@ export default function AdminPanel({ currentUser, onClose, onRefreshModels }: Pr
             { key: 'models' as AdminTab, icon: Wrench, label: 'Models' },
             { key: 'apikeys' as AdminTab, icon: Key, label: 'API Keys' },
             { key: 'subscriptions' as AdminTab, icon: CreditCard, label: 'Subscriptions' },
+            { key: 'uploads' as AdminTab, icon: Upload, label: 'Uploads' },
           ].map(t => (
             <button
               key={t.key}
@@ -52,6 +53,7 @@ export default function AdminPanel({ currentUser, onClose, onRefreshModels }: Pr
           {tab === 'models' && <ModelsTab onRefresh={onRefreshModels} />}
           {tab === 'apikeys' && <ApiKeysTab />}
           {tab === 'subscriptions' && <SubscriptionsTab currentUser={currentUser} />}
+          {tab === 'uploads' && <UploadsTab />}
         </div>
       </div>
     </div>
@@ -412,8 +414,8 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
   const [renaming, setRenaming] = useState<number | null>(null)
   const [renameVal, setRenameVal] = useState('')
   const [configuringId, setConfiguringId] = useState<number | null>(null)
-  const [configForm, setConfigForm] = useState<{ temperature: number; max_tokens: number; thinking_enabled: boolean; thinking_budget_tokens: number; model_type: string }>({
-    temperature: 0.7, max_tokens: 4096, thinking_enabled: false, thinking_budget_tokens: 4000, model_type: 'chat',
+  const [configForm, setConfigForm] = useState<{ temperature: number; max_tokens: number; thinking_enabled: boolean; thinking_budget_tokens: number; model_type: string; vision_enabled: boolean }>({
+    temperature: 0.7, max_tokens: 4096, thinking_enabled: false, thinking_budget_tokens: 4000, model_type: 'chat', vision_enabled: false,
   })
   const [reordering, setReordering] = useState(false)
 
@@ -477,6 +479,7 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
       thinking_enabled: model.thinking_enabled,
       thinking_budget_tokens: model.thinking_budget_tokens || 4000,
       model_type: model.model_type || 'chat',
+      vision_enabled: model.vision_enabled || false,
     })
   }
 
@@ -488,6 +491,7 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
         thinking_enabled: configForm.thinking_enabled,
         thinking_budget_tokens: configForm.thinking_enabled ? configForm.thinking_budget_tokens : null,
         model_type: configForm.model_type,
+        vision_enabled: configForm.vision_enabled,
       })
       setConfiguringId(null)
       loadAll()
@@ -684,6 +688,18 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
                           <option value="chat">Chat</option>
                           <option value="image">Image Generation</option>
                         </select>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <label className="text-xs text-gray-400 w-24 shrink-0 flex items-center gap-1">
+                          <Eye className="w-3 h-3" /> Vision
+                        </label>
+                        <button
+                          onClick={() => setConfigForm(f => ({ ...f, vision_enabled: !f.vision_enabled }))}
+                          className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${configForm.vision_enabled ? 'bg-purple-600' : 'bg-gray-600'}`}
+                        >
+                          <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${configForm.vision_enabled ? 'left-4' : 'left-0.5'}`} />
+                        </button>
+                        <span className="text-xs text-gray-500">{configForm.vision_enabled ? 'Enabled' : 'Disabled'}</span>
                       </div>
                       <div className="flex gap-2 pt-1">
                         <button
@@ -1191,6 +1207,127 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
             })}
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+function UploadsTab() {
+  const [settings, setSettings] = useState<import('../types').FileUploadSettings | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const load = async () => {
+    try { setSettings(await api.config.uploads.get()) } catch (e: any) { setError(e.message) }
+  }
+
+  useEffect(() => { load() }, [])
+
+  const handleSave = async (key: string, value: boolean | string) => {
+    setSaving(true)
+    setError('')
+    try {
+      const update: Record<string, boolean | string> = {}
+      update[key] = value
+      const updated = await api.config.uploads.update(update)
+      setSettings(updated)
+    } catch (e: any) { setError(e.message) }
+    setSaving(false)
+  }
+
+  if (!settings) return <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-gray-400" /></div>
+
+  return (
+    <div className="space-y-6">
+      {error && <div className="bg-red-900/30 border border-red-800 rounded-lg px-3 py-2 text-sm text-red-300">{error}</div>}
+
+      <div>
+        <h3 className="text-sm font-semibold text-gray-400 mb-3">File Upload Configuration</h3>
+        <p className="text-xs text-gray-500 mb-4">Control how file uploads are handled. Changes apply immediately to all users.</p>
+
+        <div className="bg-gray-800/40 rounded-lg p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-medium flex items-center gap-2">
+                <Upload className="w-4 h-4 text-emerald-400" />
+                Enable File Uploads
+              </div>
+              <p className="text-xs text-gray-500 mt-1">Allow users to upload images, documents, and code files in chat</p>
+            </div>
+            <button
+              onClick={() => handleSave('file_upload_enabled', !settings.file_upload_enabled)}
+              disabled={saving}
+              className={`w-9 h-5 rounded-full transition-colors relative ${saving ? 'opacity-50' : ''} ${settings.file_upload_enabled ? 'bg-emerald-600' : 'bg-gray-600'}`}
+            >
+              <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${settings.file_upload_enabled ? 'left-4' : 'left-0.5'}`} />
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 bg-gray-800/40 rounded-lg p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-medium flex items-center gap-2">
+                <File className="w-4 h-4 text-amber-400" />
+                Enable OCR (Tesseract)
+              </div>
+              <p className="text-xs text-gray-500 mt-1">Auto-extract text from images using Tesseract OCR when the AI model doesn't support vision</p>
+            </div>
+            <button
+              onClick={() => handleSave('ocr_enabled', !settings.ocr_enabled)}
+              disabled={saving}
+              className={`w-9 h-5 rounded-full transition-colors relative ${saving ? 'opacity-50' : ''} ${settings.ocr_enabled ? 'bg-emerald-600' : 'bg-gray-600'}`}
+            >
+              <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${settings.ocr_enabled ? 'left-4' : 'left-0.5'}`} />
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 bg-gray-800/40 rounded-lg p-4 space-y-4">
+          <div>
+            <div className="text-sm font-medium flex items-center gap-2 mb-2">
+              <Eye className="w-4 h-4 text-purple-400" />
+              Image Handling for Non-Vision Models
+            </div>
+            <p className="text-xs text-gray-500 mb-3">What happens when a user uploads an image to a model that doesn't support vision:</p>
+            <div className="space-y-2">
+              <label className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors ${settings.ocr_strategy === 'ocr' ? 'bg-emerald-900/30 border border-emerald-700/40' : 'bg-gray-800/50 border border-gray-700/30'}`}>
+                <input
+                  type="radio"
+                  name="ocr_strategy"
+                  value="ocr"
+                  checked={settings.ocr_strategy === 'ocr'}
+                  onChange={() => handleSave('ocr_strategy', 'ocr')}
+                  className="accent-emerald-500"
+                />
+                <div>
+                  <div className="text-sm">OCR Fallback</div>
+                  <div className="text-xs text-gray-500">Extract text from images using Tesseract OCR and pass it to the AI (recommended)</div>
+                </div>
+              </label>
+              <label className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors ${settings.ocr_strategy === 'deny' ? 'bg-red-900/30 border border-red-700/40' : 'bg-gray-800/50 border border-gray-700/30'}`}>
+                <input
+                  type="radio"
+                  name="ocr_strategy"
+                  value="deny"
+                  checked={settings.ocr_strategy === 'deny'}
+                  onChange={() => handleSave('ocr_strategy', 'deny')}
+                  className="accent-red-500"
+                />
+                <div>
+                  <div className="text-sm">Deny Image Uploads</div>
+                  <div className="text-xs text-gray-500">Block image uploads for non-vision models. Users must use a vision-capable model</div>
+                </div>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 p-4 bg-blue-900/20 border border-blue-800/30 rounded-lg">
+          <div className="text-xs text-blue-300 font-medium mb-1">What's a Vision Model?</div>
+          <p className="text-xs text-blue-200/70">Vision-capable models can "see" and understand images directly. Examples: GPT-4o, Claude 3.5 Sonnet, Gemini Pro Vision, Qwen-VL. These models bypass OCR entirely for more accurate image understanding.</p>
+          <p className="text-xs text-blue-200/70 mt-1">Set each model's Vision capability in the <span className="text-blue-300">Models</span> tab.</p>
+        </div>
       </div>
     </div>
   )

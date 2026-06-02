@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     searxng_url: str = "http://localhost:8080"
     lnbits_url: Optional[str] = None
     lnbits_invoice_key: Optional[str] = None
+    file_upload_enabled: bool = True
+    uploads_dir: str = "data/uploads"
+    ocr_enabled: bool = True
+    ocr_strategy: str = "ocr"
 
     model_config = {"env_file": "data/.env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
@@ -30,6 +34,9 @@ ENV_VAR_MAP = {
     "OPENROUTER_API_KEY": "openrouter_api_key",
     "LNBITS_URL": "lnbits_url",
     "LNBITS_INVOICE_KEY": "lnbits_invoice_key",
+    "FILE_UPLOAD_ENABLED": "file_upload_enabled",
+    "OCR_ENABLED": "ocr_enabled",
+    "OCR_STRATEGY": "ocr_strategy",
 }
 
 

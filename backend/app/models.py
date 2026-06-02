@@ -90,6 +90,7 @@ class ModelConfigCreate(BaseModel):
     max_tokens: int = 4096
     thinking_enabled: bool = False
     thinking_budget_tokens: Optional[int] = None
+    vision_enabled: bool = False
     enabled: bool = True
     sort_order: Optional[int] = None
 
@@ -105,6 +106,7 @@ class ModelConfigUpdate(BaseModel):
     max_tokens: Optional[int] = None
     thinking_enabled: Optional[bool] = None
     thinking_budget_tokens: Optional[int] = None
+    vision_enabled: Optional[bool] = None
     enabled: Optional[bool] = None
     sort_order: Optional[int] = None
 
@@ -121,6 +123,7 @@ class ModelConfigResponse(BaseModel):
     max_tokens: int = 4096
     thinking_enabled: bool = False
     thinking_budget_tokens: Optional[int] = None
+    vision_enabled: bool = False
     enabled: bool
     sort_order: Optional[int] = None
     created_at: str
@@ -147,8 +150,37 @@ class ConversationResponse(BaseModel):
 
 class ChatRequest(BaseModel):
     conversation_id: int
-    message: str = Field(..., min_length=1)
+    message: str = ""
     model_id: Optional[int] = None
+    attachments: Optional[list[dict]] = None
+
+
+class ChatAttachment(BaseModel):
+    filename: str
+    file_type: str
+    file_path: str
+    file_size: int
+    ocr_text: Optional[str] = None
+
+
+class UploadResponse(BaseModel):
+    filename: str
+    file_path: str
+    file_type: str
+    file_size: int
+    ocr_text: Optional[str] = None
+
+
+class FileUploadSettings(BaseModel):
+    file_upload_enabled: bool = True
+    ocr_enabled: bool = True
+    ocr_strategy: str = "ocr"
+
+
+class FileUploadSettingsUpdate(BaseModel):
+    file_upload_enabled: Optional[bool] = None
+    ocr_enabled: Optional[bool] = None
+    ocr_strategy: Optional[str] = None
 
 
 class ImageGenerationRequest(BaseModel):
@@ -179,6 +211,7 @@ class MessageResponse(BaseModel):
     id: int
     role: str
     content: Optional[str] = None
+    attachments_json: Optional[Any] = None
     tool_calls_json: Optional[Any] = None
     tool_call_id: Optional[str] = None
     tool_name: Optional[str] = None

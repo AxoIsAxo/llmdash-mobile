@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { api } from './api'
-import type { ModelConfig, Conversation, Message, StreamEvent, ToolCall, User, AuthStatus, GenerateStatus } from './types'
+import type { ModelConfig, Conversation, Message, StreamEvent, ToolCall, User, AuthStatus, GenerateStatus, AttachmentRecord } from './types'
 
 const LAST_ACTIVE_CONV_KEY = 'llmdash_active_conv'
 
@@ -13,7 +13,7 @@ import {
   Send, Plus, Key, MessageSquare, Trash2, ChevronLeft,
   ChevronRight, Wrench, Bot, Loader2, Terminal, Globe, FileText, Eye, Search,
   Copy, Check, RefreshCw, Square, ChevronUp, ChevronDown, Download,
-  Shield, LogOut, Settings, Minus, CreditCard, Brain, Image
+  Shield, LogOut, Settings, Minus, CreditCard, Brain, Image, Paperclip, X, File
 } from 'lucide-react'
 import MarkdownRenderer from './components/MarkdownRenderer'
 import SetupWizard from './components/SetupWizard'
@@ -46,6 +46,10 @@ function App() {
   const [copiedId, setCopiedId] = useState<number | null>(null)
   const [executingTools, setExecutingTools] = useState<Set<string>>(new Set())
   const [sidePanel, setSidePanel] = useState<SidePanel | null>(null)
+
+  const [attachments, setAttachments] = useState<AttachmentRecord[]>([])
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -153,6 +157,7 @@ function App() {
 
   const createConv = async () => {
     setSidePanel(null)
+    setAttachments([])
     const modelId = selectedModelId || undefined
     try {
       const conv = await api.conversations.create({ title: 'New Chat', model_id: modelId })
@@ -173,6 +178,7 @@ function App() {
   const selectConv = async (conv: Conversation) => {
     setActiveConv(conv)
     setSidePanel(null)
+    setAttachments([])
     localStorage.setItem(LAST_ACTIVE_CONV_KEY, String(conv.id))
     try {
       const msgs = await api.conversations.messages(conv.id)
@@ -287,7 +293,7 @@ function App() {
   }
 
   const handleSend = async () => {
-    if (!input.trim() || streaming) return
+    if ((!input.trim() && attachments.length === 0) || streaming) return
     setSidePanel(null)
     const modelId = selectedModelId
     if (!modelId) { alert('No enabled model configured. Ask an admin to set one up.'); return }
@@ -310,6 +316,7 @@ function App() {
       }])
       const prompt = input
       setInput('')
+      setAttachments([])
       setStreaming(true)
 
       try {
@@ -355,6 +362,7 @@ function App() {
     }
     setMessages(prev => [...prev, userMsg])
     setInput('')
+    setAttachments([])
     setStreaming(true)
 
     const controller = new AbortController()
@@ -365,7 +373,7 @@ function App() {
       let assistantReasoning = ''
       const toolCalls: ToolCall[] = []
 
-      for await (const event of api.chat.send(conv.id, userMsg.content || '', modelId, controller.signal)) {
+      for await (const event of api.chat.send(conv.id, userMsg.content || '', modelId, controller.signal, attachments.length > 0 ? attachments : undefined)) {
           if (event.type === 'content_delta') {
             assistantContent += (event.content || '')
             setMessages(prev => {
@@ -519,6 +527,39 @@ function App() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
   }
 
+  const ALLOWED_FILE_EXTS = ['.png','.jpg','.jpeg','.gif','.webp','.bmp','.tiff','.tif','.txt','.csv','.json','.xml','.yaml','.yml','.toml','.ini','.cfg','.log','.md','.py','.js','.ts','.jsx','.tsx','.html','.css','.scss','.less','.sh','.bash','.zsh','.rs','.go','.java','.c','.cpp','.h','.hpp','.sql','.r','.rb','.php','.lua','.swift','.kt','.tf','.env','.gitignore','.dockerfile','.makefile','.conf','.cnf','.gradle','.properties','.lock','.pdf']
+
+  const handleFileUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0 || uploading) return
+    setUploading(true)
+    const newAttachments: AttachmentRecord[] = []
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      const ext = '.' + file.name.split('.').pop()?.toLowerCase()
+      if (!ALLOWED_FILE_EXTS.includes(ext)) {
+        alert(`File type ${ext} is not supported`)
+        continue
+      }
+      try {
+        const result = await api.chat.upload(file)
+        newAttachments.push({
+          filename: file.name,
+          file_type: result.file_type,
+          file_path: result.file_path,
+          ocr_text: result.ocr_text,
+        })
+      } catch (e: any) {
+        alert(`Upload failed for ${file.name}: ${e.message}`)
+      }
+    }
+    setAttachments(prev => [...prev, ...newAttachments])
+    setUploading(false)
+  }
+
+  const removeAttachment = (index: number) => {
+    setAttachments(prev => prev.filter((_, i) => i !== index))
+  }
+
   const handleCancel = async () => {
     if (activeConv) {
       try { await api.chat.cancel(activeConv.id) } catch {}
@@ -567,7 +608,7 @@ function App() {
         let assistantContent = ''
         let assistantReasoning = ''
         const toolCalls: ToolCall[] = []
-        for await (const event of api.chat.send(branch.id, content, modelId, controller.signal)) {
+        for await (const event of api.chat.send(branch.id, content, modelId, controller.signal, msg.attachments_json && msg.attachments_json.length > 0 ? msg.attachments_json : undefined)) {
            if (event.type === 'content_delta') {
             assistantContent += (event.content || '')
             setMessages(prev => {
@@ -885,15 +926,53 @@ function App() {
         {/* Input */}
         <div className="border-t border-gray-800 p-4">
           <div className="max-w-4xl mx-auto">
+            {attachments.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {attachments.map((att, i) => (
+                  <div key={i} className="flex items-center gap-1.5 bg-gray-800 rounded-lg px-3 py-1.5 text-xs border border-gray-700">
+                    {['.png','.jpg','.jpeg','.gif','.webp','.bmp'].includes(att.file_type.toLowerCase()) ? (
+                      <Image className="w-3.5 h-3.5 text-purple-400" />
+                    ) : (
+                      <File className="w-3.5 h-3.5 text-emerald-400" />
+                    )}
+                    <span className="text-gray-300 truncate max-w-[150px]">{att.filename}</span>
+                    <button
+                      onClick={() => removeAttachment(i)}
+                      className="p-0.5 hover:bg-red-600/20 rounded text-gray-500 hover:text-red-400"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="flex gap-2 items-end">
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.tiff,.tif,.txt,.csv,.json,.xml,.yaml,.yml,.toml,.ini,.cfg,.log,.md,.py,.js,.ts,.jsx,.tsx,.html,.css,.scss,.less,.sh,.bash,.zsh,.rs,.go,.java,.c,.cpp,.h,.hpp,.sql,.r,.rb,.php,.lua,.swift,.kt,.tf,.env,.gitignore,.dockerfile,.makefile,.conf,.cnf,.gradle,.properties,.lock,.pdf"
+                onChange={e => handleFileUpload(e.target.files)}
+                className="hidden"
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={streaming || uploading}
+                title="Upload files (images, documents, code)"
+                className={`p-3 rounded-xl transition-colors ${
+                  uploading ? 'bg-purple-600/50' : 'bg-gray-800 hover:bg-gray-700'
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
+              >
+                {uploading ? <Loader2 className="w-5 h-5 animate-spin text-purple-400" /> : <Paperclip className="w-5 h-5 text-gray-400" />}
+              </button>
               <div className="flex-1 relative">
                 <textarea
                   value={input}
                   onChange={e => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder={streaming ? 'Waiting for response...' : 'Type a message...'}
+                  placeholder={streaming ? 'Waiting for response...' : uploading ? 'Uploading...' : 'Type a message...'}
                   rows={1}
-                  disabled={streaming}
+                  disabled={streaming || uploading}
                   className="w-full bg-gray-800 rounded-xl px-4 py-3 pr-12 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500/50 disabled:opacity-50"
                   onInput={e => {
                     const el = e.currentTarget
@@ -904,7 +983,7 @@ function App() {
               </div>
               <button
                 onClick={streaming ? handleCancel : handleSend}
-                disabled={!streaming && !input.trim()}
+                disabled={!streaming && !input.trim() && attachments.length === 0}
                 className={`p-3 rounded-xl transition-colors ${
                   streaming ? 'bg-red-600 hover:bg-red-500' : 'bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 disabled:text-gray-500'
                 }`}
@@ -1319,6 +1398,46 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
 
   return (
     <div>
+      {isUser && message.attachments_json && message.attachments_json.length > 0 && (
+        <div className="flex justify-end mb-1">
+          <div className="flex flex-wrap gap-1.5 mr-10">
+            {message.attachments_json.map((att, i) => {
+              const isImg = ['.png','.jpg','.jpeg','.gif','.webp','.bmp'].includes((att.file_type || '').toLowerCase())
+              const token = localStorage.getItem('llmdash_token')
+              const fileUrl = att.file_path.startsWith('/api/') ? att.file_path : null
+              return (
+                <div key={i} className="flex items-center gap-1.5 bg-gray-800/80 rounded-lg px-2.5 py-1.5 text-xs border border-gray-700/50">
+                  {isImg ? (
+                    fileUrl ? (
+                      <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 hover:opacity-80">
+                        <Image className="w-3.5 h-3.5 text-purple-400" />
+                        <span className="text-gray-300 truncate max-w-[120px]">{att.filename}</span>
+                      </a>
+                    ) : (
+                      <>
+                        <Image className="w-3.5 h-3.5 text-purple-400" />
+                        <span className="text-gray-300 truncate max-w-[120px]">{att.filename}</span>
+                      </>
+                    )
+                  ) : (
+                    fileUrl ? (
+                      <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 hover:opacity-80">
+                        <File className="w-3.5 h-3.5 text-emerald-400" />
+                        <span className="text-gray-300 truncate max-w-[120px]">{att.filename}</span>
+                      </a>
+                    ) : (
+                      <>
+                        <File className="w-3.5 h-3.5 text-emerald-400" />
+                        <span className="text-gray-300 truncate max-w-[120px]">{att.filename}</span>
+                      </>
+                    )
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
       {isAssistant && message.reasoning_content && (
         <div className="flex justify-start mb-1">
           <div className="w-8 shrink-0" />

@@ -9,11 +9,21 @@ RUN npm run build
 # Stage 2: Python backend
 FROM python:3.12-slim
 
-# Install system deps (including Docker CLI for sandbox)
+# Install system deps (including Docker CLI for sandbox and Tesseract OCR)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-dejavu \
     ca-certificates \
     curl \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    tesseract-ocr-chi-sim \
+    tesseract-ocr-jpn \
+    tesseract-ocr-kor \
+    tesseract-ocr-rus \
+    tesseract-ocr-fra \
+    tesseract-ocr-deu \
+    tesseract-ocr-spa \
+    tesseract-ocr-ara \
     && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
     && chmod a+r /etc/apt/keyrings/docker.asc \
     && echo "deb [signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" > /etc/apt/sources.list.d/docker.list \

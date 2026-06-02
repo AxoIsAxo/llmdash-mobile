@@ -1,3 +1,4 @@
+import base64
 import json
 from typing import Optional, AsyncGenerator
 from abc import ABC, abstractmethod
@@ -113,7 +114,20 @@ class OpenAICompatibleProvider(AIProvider):
                 entry["tool_call_id"] = m.get("tool_call_id", "")
                 entry["content"] = m.get("content", "")
             else:
-                entry["content"] = m.get("content", "")
+                content = m.get("content", "")
+                if isinstance(content, list):
+                    parts = []
+                    for part in content:
+                        if part.get("type") == "image_url":
+                            parts.append({
+                                "type": "image_url",
+                                "image_url": part["image_url"],
+                            })
+                        elif part.get("type") == "text":
+                            parts.append({"type": "text", "text": part["text"]})
+                    entry["content"] = parts
+                else:
+                    entry["content"] = content or ""
             converted.append(entry)
         return converted
 
@@ -360,6 +374,26 @@ class AnthropicProvider(AIProvider):
                 continue
             if isinstance(m.get("content"), str):
                 converted.append({"role": m["role"], "content": m["content"]})
+            elif isinstance(m.get("content"), list):
+                content_parts = []
+                for part in m["content"]:
+                    if part.get("type") == "image_url":
+                        iu = part.get("image_url", {})
+                        url = iu.get("url", "")
+                        if url.startswith("data:"):
+                            header, b64data = url.split(",", 1)
+                            media_type = header.split(":")[1].split(";")[0] if ":" in header else "image/png"
+                            content_parts.append({
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": media_type,
+                                    "data": b64data,
+                                },
+                            })
+                    elif part.get("type") == "text":
+                        content_parts.append({"type": "text", "text": part["text"]})
+                converted.append({"role": m["role"], "content": content_parts})
             else:
                 converted.append(m)
         return converted, system

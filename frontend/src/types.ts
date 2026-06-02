@@ -31,6 +31,7 @@ export interface ModelConfig {
   max_tokens: number;
   thinking_enabled: boolean;
   thinking_budget_tokens: number | null;
+  vision_enabled: boolean;
   enabled: boolean;
   sort_order: number | null;
   created_at: string;
@@ -50,6 +51,7 @@ export interface Message {
   id: number;
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string | null;
+  attachments_json?: AttachmentRecord[] | null;
   tool_calls_json: ToolCall[] | null;
   tool_call_id: string | null;
   tool_name: string | null;
@@ -176,4 +178,26 @@ export interface SubscribeResult {
   payment_hash?: string;
   checking_id?: string;
   plan_name?: string;
+}
+
+export interface AttachmentRecord {
+  filename: string;
+  file_type: string;
+  file_path: string;
+  ocr_text?: string | null;
+  image_included?: boolean;
+}
+
+export interface UploadResponse {
+  filename: string;
+  file_path: string;
+  file_type: string;
+  file_size: number;
+  ocr_text: string | null;
+}
+
+export interface FileUploadSettings {
+  file_upload_enabled: boolean;
+  ocr_enabled: boolean;
+  ocr_strategy: string;
 }

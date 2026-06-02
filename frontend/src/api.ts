@@ -175,6 +175,14 @@ export const api = {
         body: JSON.stringify({ updates }),
       }),
     status: () => request<import('./types').ConfigStatus>('/config/status'),
+    uploads: {
+      get: () => request<import('./types').FileUploadSettings>('/config/uploads'),
+      update: (data: { file_upload_enabled?: boolean; ocr_enabled?: boolean; ocr_strategy?: string }) =>
+        request<import('./types').FileUploadSettings>('/config/uploads', {
+          method: 'PUT',
+          body: JSON.stringify(data),
+        }),
+    },
   },
 
   subscriptions: {
@@ -234,15 +242,20 @@ export const api = {
       if (modelId) params.set('model_id', String(modelId));
       return new EventSource(`${BASE}/chat/stream?${params}`);
     },
-    send: async function* (convId: number, message: string, modelId?: number, signal?: AbortSignal) {
+    send: async function* (convId: number, message: string, modelId?: number, signal?: AbortSignal, attachments?: import('./types').AttachmentRecord[]) {
       const token = getToken();
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
+      const body: Record<string, unknown> = { conversation_id: convId, message, model_id: modelId };
+      if (attachments && attachments.length > 0) {
+        body.attachments = attachments;
+      }
+
       const response = await fetch(`${BASE}/chat/stream`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ conversation_id: convId, message, model_id: modelId }),
+        body: JSON.stringify(body),
         signal,
       });
       if (!response.ok) {
@@ -326,6 +339,25 @@ export const api = {
         throw new Error(`Image generation error ${response.status}${detail}`)
       }
       return response.json() as Promise<{ images: string[]; revised_prompt?: string }>;
+    },
+
+    upload: async (file: File) => {
+      const token = getToken();
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const formData = new FormData();
+      formData.append('file', file);
+      const response = await fetch(`${BASE}/chat/upload`, {
+        method: 'POST',
+        headers,
+        body: formData,
+      });
+      if (!response.ok) {
+        let detail = ''
+        try { const err = await response.json(); detail = err.detail ? `: ${err.detail}` : '' } catch {}
+        throw new Error(`Upload error ${response.status}${detail}`)
+      }
+      return response.json() as Promise<import('./types').UploadResponse>;
     },
   },
 };

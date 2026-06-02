@@ -62,6 +62,7 @@ class ModelConfig(Base):
     max_tokens = Column(Integer, default=4096)
     thinking_enabled = Column(Boolean, default=False)
     thinking_budget_tokens = Column(Integer, nullable=True)
+    vision_enabled = Column(Boolean, default=False)
     enabled = Column(Boolean, default=True)
     sort_order = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -90,6 +91,7 @@ class Message(Base):
     tool_calls_json = Column(Text, nullable=True)
     tool_call_id = Column(String(128), nullable=True)
     tool_name = Column(String(128), nullable=True)
+    attachments_json = Column(Text, nullable=True)
     reasoning_content = Column(Text, nullable=True)
     status = Column(String(32), default="done", nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -182,6 +184,8 @@ def _migrate(conn):
     msg_cols = {row[1] for row in msg_result}
     if "status" not in msg_cols:
         conn.exec_driver_sql("ALTER TABLE messages ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'done'")
+    if "attachments_json" not in msg_cols:
+        conn.exec_driver_sql("ALTER TABLE messages ADD COLUMN attachments_json TEXT")
 
     model_cfg_result = conn.exec_driver_sql("PRAGMA table_info(model_configs)")
     model_cfg_cols = {row[1] for row in model_cfg_result}
@@ -193,6 +197,8 @@ def _migrate(conn):
         conn.exec_driver_sql("ALTER TABLE model_configs ADD COLUMN sort_order INTEGER")
     if "model_type" not in model_cfg_cols:
         conn.exec_driver_sql("ALTER TABLE model_configs ADD COLUMN model_type VARCHAR(16) NOT NULL DEFAULT 'chat'")
+    if "vision_enabled" not in model_cfg_cols:
+        conn.exec_driver_sql("ALTER TABLE model_configs ADD COLUMN vision_enabled BOOLEAN DEFAULT 0")
 
     token_result = conn.exec_driver_sql("PRAGMA table_info(token_usage_log)")
     token_cols = {row[1] for row in token_result}
