@@ -484,7 +484,7 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
   const handleMoveUp = async (idx: number) => {
     if (idx <= 0 || reordering) return
     setReordering(true)
-    const reordered = [...enabled]
+    const reordered = [...enabledModels]
     ;[reordered[idx - 1], reordered[idx]] = [reordered[idx], reordered[idx - 1]]
     const ids = reordered.map(m => m.id)
     try {
@@ -496,9 +496,9 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
   }
 
   const handleMoveDown = async (idx: number) => {
-    if (idx >= enabled.length - 1 || reordering) return
+    if (idx >= enabledModels.length - 1 || reordering) return
     setReordering(true)
-    const reordered = [...enabled]
+    const reordered = [...enabledModels]
     ;[reordered[idx], reordered[idx + 1]] = [reordered[idx + 1], reordered[idx]]
     const ids = reordered.map(m => m.id)
     try {
