@@ -33,6 +33,7 @@ export interface ModelConfig {
   thinking_enabled: boolean;
   thinking_budget_tokens: number | null;
   vision_enabled: boolean;
+  tools_enabled: boolean;
   enabled: boolean;
   sort_order: number | null;
   created_at: string;
@@ -202,4 +203,5 @@ export interface FileUploadSettings {
   file_upload_enabled: boolean;
   ocr_enabled: boolean;
   ocr_strategy: string;
+  whisper_model: string;
 }

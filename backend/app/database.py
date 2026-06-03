@@ -31,6 +31,7 @@ class User(Base):
     image_limit = Column(Integer, nullable=True, default=None)
     image_usage = Column(Integer, nullable=False, default=0)
     ip_address = Column(String(45), nullable=True)
+    custom_css = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     @staticmethod
@@ -63,6 +64,7 @@ class ModelConfig(Base):
     thinking_enabled = Column(Boolean, default=False)
     thinking_budget_tokens = Column(Integer, nullable=True)
     vision_enabled = Column(Boolean, default=False)
+    tools_enabled = Column(Boolean, default=True)
     enabled = Column(Boolean, default=True)
     sort_order = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -190,6 +192,9 @@ def _migrate(conn):
     if "image_usage" not in existing:
         conn.exec_driver_sql("ALTER TABLE users ADD COLUMN image_usage INTEGER NOT NULL DEFAULT 0")
 
+    if "custom_css" not in existing:
+        conn.exec_driver_sql("ALTER TABLE users ADD COLUMN custom_css TEXT")
+
     msg_result = conn.exec_driver_sql("PRAGMA table_info(messages)")
     msg_cols = {row[1] for row in msg_result}
     if "status" not in msg_cols:
@@ -209,6 +214,8 @@ def _migrate(conn):
         conn.exec_driver_sql("ALTER TABLE model_configs ADD COLUMN model_type VARCHAR(16) NOT NULL DEFAULT 'chat'")
     if "vision_enabled" not in model_cfg_cols:
         conn.exec_driver_sql("ALTER TABLE model_configs ADD COLUMN vision_enabled BOOLEAN DEFAULT 0")
+    if "tools_enabled" not in model_cfg_cols:
+        conn.exec_driver_sql("ALTER TABLE model_configs ADD COLUMN tools_enabled BOOLEAN DEFAULT 1")
 
     token_result = conn.exec_driver_sql("PRAGMA table_info(token_usage_log)")
     token_cols = {row[1] for row in token_result}

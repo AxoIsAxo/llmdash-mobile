@@ -112,6 +112,15 @@ export const api = {
         }),
     },
 
+    css: {
+      get: () => request<{ css: string }>('/auth/css'),
+      save: (css: string) =>
+        request<{ status: string }>('/auth/css', {
+          method: 'PUT',
+          body: JSON.stringify({ css }),
+        }),
+    },
+
     providers: {
       list: () => request<import('./types').ProviderConfig[]>('/auth/providers'),
       update: (key: string, data: { name?: string; base_url?: string }) =>
@@ -177,7 +186,7 @@ export const api = {
     status: () => request<import('./types').ConfigStatus>('/config/status'),
     uploads: {
       get: () => request<import('./types').FileUploadSettings>('/config/uploads'),
-      update: (data: { file_upload_enabled?: boolean; ocr_enabled?: boolean; ocr_strategy?: string }) =>
+      update: (data: { file_upload_enabled?: boolean; ocr_enabled?: boolean; ocr_strategy?: string; whisper_model?: string }) =>
         request<import('./types').FileUploadSettings>('/config/uploads', {
           method: 'PUT',
           body: JSON.stringify(data),

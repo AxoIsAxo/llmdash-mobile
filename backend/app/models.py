@@ -92,6 +92,7 @@ class ModelConfigCreate(BaseModel):
     thinking_enabled: bool = False
     thinking_budget_tokens: Optional[int] = None
     vision_enabled: bool = False
+    tools_enabled: bool = True
     enabled: bool = True
     sort_order: Optional[int] = None
 
@@ -108,6 +109,7 @@ class ModelConfigUpdate(BaseModel):
     thinking_enabled: Optional[bool] = None
     thinking_budget_tokens: Optional[int] = None
     vision_enabled: Optional[bool] = None
+    tools_enabled: Optional[bool] = None
     enabled: Optional[bool] = None
     sort_order: Optional[int] = None
 
@@ -125,6 +127,7 @@ class ModelConfigResponse(BaseModel):
     thinking_enabled: bool = False
     thinking_budget_tokens: Optional[int] = None
     vision_enabled: bool = False
+    tools_enabled: bool = True
     enabled: bool
     sort_order: Optional[int] = None
     created_at: str
@@ -176,12 +179,14 @@ class FileUploadSettings(BaseModel):
     file_upload_enabled: bool = True
     ocr_enabled: bool = True
     ocr_strategy: str = "ocr"
+    whisper_model: str = "tiny"
 
 
 class FileUploadSettingsUpdate(BaseModel):
     file_upload_enabled: Optional[bool] = None
     ocr_enabled: Optional[bool] = None
     ocr_strategy: Optional[str] = None
+    whisper_model: Optional[str] = None
 
 
 class ImageGenerationRequest(BaseModel):
@@ -246,6 +251,10 @@ class EnvStatusResponse(BaseModel):
 class ChatStreamEvent(BaseModel):
     type: str
     data: Any
+
+
+class CssUpdateRequest(BaseModel):
+    css: str
 
 
 class SubscriptionPlanCreate(BaseModel):

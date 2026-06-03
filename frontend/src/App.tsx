@@ -13,13 +13,25 @@ import {
   Send, Plus, Key, MessageSquare, Trash2, ChevronLeft,
   ChevronRight, Wrench, Bot, Loader2, Terminal, Globe, FileText, Eye, Search,
   Copy, Check, RefreshCw, Square, ChevronUp, ChevronDown, Download,
-  Shield, LogOut, Settings, Minus, CreditCard, Brain, Image, Paperclip, X, File
+  Shield, LogOut, Settings, Minus, CreditCard, Brain, Image, Paperclip, X, File, Palette
 } from 'lucide-react'
 import MarkdownRenderer from './components/MarkdownRenderer'
 import SetupWizard from './components/SetupWizard'
 import LoginPage from './components/LoginPage'
 import AdminPanel from './components/AdminPanel'
 import SubscriptionPage from './components/SubscriptionPage'
+import CustomCssPanel from './components/CustomCssPanel'
+import VoiceButton from './components/VoiceButton'
+import { DEFAULT_CSS } from './css-preset'
+
+const STYLE_ID = 'llmdash-user-css'
+
+function injectUserCss(css: string) {
+  const el = document.getElementById(STYLE_ID) as HTMLStyleElement | null
+  if (el) {
+    el.textContent = css || DEFAULT_CSS
+  }
+}
 
 function App() {
   const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null)
@@ -37,6 +49,9 @@ function App() {
   const [showSidebar, setShowSidebar] = useState(true)
   const [showAdmin, setShowAdmin] = useState(false)
   const [showSubscription, setShowSubscription] = useState(false)
+  const [showCustomCss, setShowCustomCss] = useState(false)
+  const [cssUndoToast, setCssUndoToast] = useState<{ previousCss: string } | null>(null)
+  const cssPreviousRef = useRef<string>(DEFAULT_CSS)
   const [showModelPickerFooter, setShowModelPickerFooter] = useState(false)
   const [showModelPickerEmpty, setShowModelPickerEmpty] = useState(false)
   const closeModelPickers = () => { setShowModelPickerFooter(false); setShowModelPickerEmpty(false) }
@@ -115,6 +130,12 @@ function App() {
       }
       init()
       loadModels()
+      api.auth.css.get().then(res => {
+        if (res.css) {
+          injectUserCss(res.css)
+          cssPreviousRef.current = res.css
+        }
+      }).catch(() => {})
     }
   }, [currentUser, loadConversations, loadModels])  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -259,6 +280,13 @@ function App() {
               created_at: new Date().toISOString()
             }]
           })
+          const cssTool = (event as any).tool_calls?.find((tc: any) => tc.name === 'set_user_css')
+          if (cssTool?.arguments?.css) {
+            const cur = (document.getElementById(STYLE_ID) as HTMLStyleElement)?.textContent || DEFAULT_CSS
+            cssPreviousRef.current = cur
+            injectUserCss(cssTool.arguments.css as string)
+            setCssUndoToast({ previousCss: cur })
+          }
         } else if (event.type === 'tool_start') {
           if (event.id) setExecutingTools(prev => new Set(prev).add(event.id!))
         } else if (event.type === 'tool_result') {
@@ -436,6 +464,13 @@ function App() {
                 tool_call_id: null, tool_name: null, status: 'generating', created_at: new Date().toISOString()
               }]
             })
+            const cssTool2 = event.tool_calls?.find((tc: any) => tc.name === 'set_user_css')
+            if (cssTool2?.arguments?.css) {
+              const cur = (document.getElementById(STYLE_ID) as HTMLStyleElement)?.textContent || DEFAULT_CSS
+              cssPreviousRef.current = cur
+              injectUserCss(cssTool2.arguments.css as string)
+              setCssUndoToast({ previousCss: cur })
+            }
           } else if (event.type === 'tool_start') {
             if (event.id) setExecutingTools(prev => new Set(prev).add(event.id!))
           } else if (event.type === 'tool_result') {
@@ -671,6 +706,13 @@ function App() {
                 tool_call_id: null, tool_name: null, status: 'generating', created_at: new Date().toISOString()
               }]
             })
+            const cssTool3 = event.tool_calls?.find((tc: any) => tc.name === 'set_user_css')
+            if (cssTool3?.arguments?.css) {
+              const cur = (document.getElementById(STYLE_ID) as HTMLStyleElement)?.textContent || DEFAULT_CSS
+              cssPreviousRef.current = cur
+              injectUserCss(cssTool3.arguments.css as string)
+              setCssUndoToast({ previousCss: cur })
+            }
           } else if (event.type === 'tool_start') {
             if (event.id) setExecutingTools(prev => new Set(prev).add(event.id!))
           } else if (event.type === 'tool_result') {
@@ -801,6 +843,9 @@ function App() {
           )}
           <button onClick={() => setShowSubscription(true)} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-800 rounded-lg text-sm">
             <CreditCard className="w-4 h-4 text-emerald-400" /> Subscription
+          </button>
+          <button onClick={() => setShowCustomCss(true)} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-800 rounded-lg text-sm">
+            <Palette className="w-4 h-4 text-emerald-400" /> Custom CSS
           </button>
           <div className="flex items-center gap-2 px-3 py-2 text-xs text-gray-500">
             <span className="truncate flex-1">
@@ -987,6 +1032,10 @@ function App() {
                   }}
                 />
               </div>
+              <VoiceButton
+                onTranscribed={(text) => setInput(prev => prev + text)}
+                disabled={streaming || uploading}
+              />
               <button
                 onClick={streaming ? handleCancel : handleSend}
                 disabled={!streaming && !input.trim() && attachments.length === 0}
@@ -1086,6 +1135,36 @@ function App() {
           currentUser={currentUser}
           onClose={() => setShowSubscription(false)}
         />
+      )}
+
+      {/* Custom CSS Modal */}
+      {showCustomCss && (
+        <CustomCssPanel
+          currentCss={cssPreviousRef.current}
+          onClose={() => setShowCustomCss(false)}
+          onSaved={(css) => { cssPreviousRef.current = css }}
+        />
+      )}
+
+      {/* AI CSS Undo Toast */}
+      {cssUndoToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 shadow-2xl">
+          <span className="text-sm text-gray-200">CSS updated by AI</span>
+          <button
+            onClick={async () => {
+              injectUserCss(cssUndoToast.previousCss)
+              try { await api.auth.css.save(cssUndoToast.previousCss) } catch {}
+              cssPreviousRef.current = cssUndoToast.previousCss
+              setCssUndoToast(null)
+            }}
+            className="px-3 py-1 text-sm font-medium bg-emerald-600 hover:bg-emerald-500 rounded-lg"
+          >
+            Undo?
+          </button>
+          <button onClick={() => setCssUndoToast(null)} className="p-1 hover:bg-gray-700 rounded text-gray-400">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
       )}
     </div>
   )

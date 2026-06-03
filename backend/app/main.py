@@ -32,6 +32,7 @@ from .ai import get_provider, ToolDef
 from .tools import get_tool_definitions, execute_tool
 from .sandbox import is_docker_available
 from .ocr import process_uploaded_file, is_allowed_file, is_image_file, ocr_image, IMAGE_EXTENSIONS, is_ocr_available
+from .whisper_stt import transcribe_audio
 from .routers.auth import router as auth_router, get_current_user, require_role, load_provider_configs
 from .routers.subscriptions import router as subscriptions_router
 
@@ -81,6 +82,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def coi_middleware(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    response.headers["Cross-Origin-Embedder-Policy"] = "credentialless"
+    return response
+
 app.include_router(auth_router)
 app.include_router(subscriptions_router)
 
@@ -104,6 +113,7 @@ async def list_models(current_user: dict = Depends(get_current_user), db: AsyncS
             thinking_enabled=bool(getattr(m, "thinking_enabled", False)),
             thinking_budget_tokens=getattr(m, "thinking_budget_tokens", None),
             vision_enabled=bool(getattr(m, "vision_enabled", False)),
+            tools_enabled=bool(getattr(m, "tools_enabled", True)),
             enabled=m.enabled,
             sort_order=getattr(m, "sort_order", None),
             created_at=m.created_at.isoformat() if m.created_at else "",
@@ -134,6 +144,7 @@ async def create_model(cfg: ModelConfigCreate, current_user: dict = Depends(requ
         thinking_enabled=getattr(cfg, "thinking_enabled", False),
         thinking_budget_tokens=getattr(cfg, "thinking_budget_tokens", None),
         vision_enabled=getattr(cfg, "vision_enabled", False),
+        tools_enabled=getattr(cfg, "tools_enabled", True),
         enabled=cfg.enabled,
         sort_order=sort_order,
     )
@@ -350,6 +361,7 @@ async def get_model(model_id: int, current_user: dict = Depends(get_current_user
         thinking_enabled=bool(getattr(model, "thinking_enabled", False)),
         thinking_budget_tokens=getattr(model, "thinking_budget_tokens", None),
         vision_enabled=bool(getattr(model, "vision_enabled", False)),
+        tools_enabled=bool(getattr(model, "tools_enabled", True)),
         enabled=model.enabled,
         sort_order=getattr(model, "sort_order", None),
         created_at=model.created_at.isoformat() if model.created_at else "",
@@ -566,6 +578,7 @@ async def get_upload_settings(current_user: dict = Depends(require_role("owner",
         file_upload_enabled=app_config.settings.file_upload_enabled,
         ocr_enabled=app_config.settings.ocr_enabled,
         ocr_strategy=app_config.settings.ocr_strategy,
+        whisper_model=app_config.settings.whisper_model,
     )
 
 
@@ -578,6 +591,8 @@ async def update_upload_settings(req: FileUploadSettingsUpdate, current_user: di
         updates["OCR_ENABLED"] = str(req.ocr_enabled).lower()
     if req.ocr_strategy is not None:
         updates["OCR_STRATEGY"] = req.ocr_strategy
+    if req.whisper_model is not None:
+        updates["WHISPER_MODEL"] = req.whisper_model
 
     if updates:
         env_path = "data/.env"
@@ -613,7 +628,16 @@ async def update_upload_settings(req: FileUploadSettingsUpdate, current_user: di
         file_upload_enabled=app_config.settings.file_upload_enabled,
         ocr_enabled=app_config.settings.ocr_enabled,
         ocr_strategy=app_config.settings.ocr_strategy,
+        whisper_model=app_config.settings.whisper_model,
     )
+
+
+@router.get("/config/whisper")
+async def get_whisper_config(current_user: dict = Depends(get_current_user)):
+    model = app_config.settings.whisper_model
+    if model not in ("tiny", "small"):
+        model = "tiny"
+    return {"model": model}
 
 
 @router.post("/chat/upload", response_model=UploadResponse)
@@ -653,6 +677,21 @@ async def upload_file(file: UploadFile = File(...), current_user: dict = Depends
         file_size=result["file_size"],
         ocr_text=result.get("ocr_text"),
     )
+
+
+@router.post("/chat/transcribe")
+async def transcribe_voice(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
+    if not file.filename:
+        raise HTTPException(400, "No audio file provided")
+    content = await file.read()
+    max_size = 10 * 1024 * 1024
+    if len(content) > max_size:
+        raise HTTPException(413, "Audio too large (max 10MB)")
+    try:
+        text = transcribe_audio(content)
+        return {"text": text}
+    except Exception as e:
+        raise HTTPException(500, f"Transcription failed: {str(e)}")
 
 
 @router.get("/uploads/{filename}")
@@ -919,8 +958,11 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
         await db.commit()
         messages.append({"role": "user", "content": req.message})
 
-    tool_defs = get_tool_definitions()
-    tools = [ToolDef(**t) for t in tool_defs]
+    if getattr(model, "tools_enabled", True):
+        tool_defs = get_tool_definitions()
+        tools = [ToolDef(**t) for t in tool_defs]
+    else:
+        tools = []
 
     my_queue: asyncio.Queue = asyncio.Queue()
 
@@ -992,7 +1034,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                     tool_results = []
                     for tc in final_tool_calls:
                         await push_event("tool_start", name=tc["name"], id=tc["id"])
-                        result = await execute_tool(tc["name"], tc["arguments"])
+                        result = await execute_tool(tc["name"], tc["arguments"], _current_user=current_user)
                         tool_results.append({"tool_call_id": tc["id"], "content": result})
                         await push_event("tool_result", name=tc["name"], id=tc["id"], result=result)
 

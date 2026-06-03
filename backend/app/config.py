@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     uploads_dir: str = "data/uploads"
     ocr_enabled: bool = True
     ocr_strategy: str = "ocr"
+    whisper_model: str = "tiny"
 
     model_config = {"env_file": "data/.env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
@@ -37,6 +38,7 @@ ENV_VAR_MAP = {
     "FILE_UPLOAD_ENABLED": "file_upload_enabled",
     "OCR_ENABLED": "ocr_enabled",
     "OCR_STRATEGY": "ocr_strategy",
+    "WHISPER_MODEL": "whisper_model",
 }
 
 

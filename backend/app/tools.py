@@ -2,12 +2,15 @@ import json
 import re
 import random
 import asyncio
+import inspect
 from typing import Any, Optional
 from datetime import datetime
 import os
 import base64
 from html.parser import HTMLParser
 from urllib.parse import quote, urlparse
+
+from sqlalchemy import select
 
 import httpx
 from docx import Document
@@ -422,6 +425,52 @@ async def run_command(command: str, timeout: int = 30) -> str:
     return result
 
 
+@tool(
+    name="get_user_css",
+    description="Get the current user's custom CSS. Returns the full CSS string the user has saved, or empty string if none.",
+    input_schema={
+        "type": "object",
+        "properties": {},
+        "required": [],
+    },
+)
+async def get_user_css(_current_user: dict = None) -> str:
+    if not _current_user:
+        return "Error: Not authenticated"
+    from .database import async_session, User
+    async with async_session() as sess:
+        result = await sess.execute(select(User).where(User.id == _current_user["user_id"]))
+        user = result.scalar_one_or_none()
+        if user and user.custom_css:
+            return user.custom_css
+        return ""
+
+
+@tool(
+    name="set_user_css",
+    description="Replace the current user's custom CSS, save it server-side, and apply it immediately. Pass the complete CSS string including any existing styles the user wants to keep.",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "css": {"type": "string", "description": "The complete CSS string to set as the user's custom CSS"},
+        },
+        "required": ["css"],
+    },
+)
+async def set_user_css(css: str, _current_user: dict = None) -> str:
+    if not _current_user:
+        return "Error: Not authenticated"
+    from .database import async_session, User
+    async with async_session() as sess:
+        result = await sess.execute(select(User).where(User.id == _current_user["user_id"]))
+        user = result.scalar_one_or_none()
+        if not user:
+            return "Error: User not found"
+        user.custom_css = css or None
+        await sess.commit()
+        return f"CSS saved successfully ({len(css)} characters)"
+
+
 def get_tool_definitions():
     return [
         {
@@ -433,16 +482,18 @@ def get_tool_definitions():
     ]
 
 
-async def execute_tool(name: str, arguments: dict) -> str:
+async def execute_tool(name: str, arguments: dict, **context) -> str:
     tool_def = available_tools.get(name)
     if not tool_def:
         return f"Error: Unknown tool '{name}'"
     fn = tool_def["fn"]
     try:
+        sig = inspect.signature(fn)
+        filtered_context = {k: v for k, v in context.items() if k in sig.parameters}
         if asyncio.iscoroutinefunction(fn):
-            result = await fn(**arguments)
+            result = await fn(**arguments, **filtered_context)
         else:
-            result = fn(**arguments)
+            result = fn(**arguments, **filtered_context)
         return str(result)
     except Exception as e:
         return f"Tool execution error: {str(e)}"

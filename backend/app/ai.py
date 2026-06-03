@@ -140,14 +140,34 @@ class OpenAICompatibleProvider(AIProvider):
             "temperature": model_config.temperature or 0.7,
             "max_tokens": model_config.max_tokens or 4096,
         }
+        thinking_requested = False
         if getattr(model_config, "thinking_enabled", False):
             kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
+            thinking_requested = True
         openai_tools = build_tool_specs(tools)
+        tools_sent = False
         if openai_tools:
             kwargs["tools"] = openai_tools
             kwargs["tool_choice"] = "auto"
+            tools_sent = True
 
-        response = await client.chat.completions.create(**kwargs)
+        try:
+            response = await client.chat.completions.create(**kwargs)
+        except Exception as e:
+            error_str = str(e).lower()
+            if tools_sent and ("support tool" in error_str or "tool use" in error_str or "function call" in error_str or "tool_choice" in error_str or "tools" in error_str):
+                return await self.chat(messages, [], model_config)
+            if thinking_requested and ("thinking" in error_str or "reasoning" in error_str):
+                kwargs.pop("extra_body", None)
+                try:
+                    response = await client.chat.completions.create(**kwargs)
+                except Exception as e2:
+                    error_str2 = str(e2).lower()
+                    if tools_sent and ("support tool" in error_str2 or "tool use" in error_str2 or "tool_choice" in error_str2 or "tools" in error_str2):
+                        return await self.chat(messages, [], model_config)
+                    raise e2
+            else:
+                raise e
         msg = response.choices[0].message
 
         tool_calls = []
@@ -175,12 +195,32 @@ class OpenAICompatibleProvider(AIProvider):
             "temperature": model_config.temperature or 0.7,
             "max_tokens": model_config.max_tokens or 4096,
         }
+        thinking_requested = False
         if getattr(model_config, "thinking_enabled", False):
             kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
+            thinking_requested = True
+        tools_sent = False
         if openai_tools:
             kwargs["tools"] = openai_tools
+            tools_sent = True
 
-        response = await client.chat.completions.create(**kwargs)
+        try:
+            response = await client.chat.completions.create(**kwargs)
+        except Exception as e:
+            error_str = str(e).lower()
+            if tools_sent and ("support tool" in error_str or "tool use" in error_str or "function call" in error_str or "tool_choice" in error_str or "tools" in error_str):
+                return await self.chat_with_results(messages, [], model_config, tool_results)
+            if thinking_requested and ("thinking" in error_str or "reasoning" in error_str):
+                kwargs.pop("extra_body", None)
+                try:
+                    response = await client.chat.completions.create(**kwargs)
+                except Exception as e2:
+                    error_str2 = str(e2).lower()
+                    if tools_sent and ("support tool" in error_str2 or "tool use" in error_str2 or "tool_choice" in error_str2 or "tools" in error_str2):
+                        return await self.chat_with_results(messages, [], model_config, tool_results)
+                    raise e2
+            else:
+                raise e
         msg = response.choices[0].message
 
         tool_calls = []
@@ -198,7 +238,7 @@ class OpenAICompatibleProvider(AIProvider):
             reasoning_content=getattr(msg, "reasoning_content", "") or getattr(msg, "reasoning", "") or "",
         )
 
-    async def _stream_openai(self, messages: list[dict], tools: list[ToolDef], model_config) -> AsyncGenerator[StreamChunk, None]:
+    async def _stream_openai(self, messages: list[dict], tools: list[ToolDef], model_config, retry_without_tools: bool = True, retry_without_thinking: bool = True) -> AsyncGenerator[StreamChunk, None]:
         client = await self._get_client(model_config)
         openai_messages = self._convert_messages(messages)
         kwargs = {
@@ -209,14 +249,43 @@ class OpenAICompatibleProvider(AIProvider):
             "stream": True,
             "stream_options": {"include_usage": True},
         }
+        thinking_requested = False
         if getattr(model_config, "thinking_enabled", False):
             kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
+            thinking_requested = True
         openai_tools = build_tool_specs(tools)
+        tools_sent = False
         if openai_tools:
             kwargs["tools"] = openai_tools
             kwargs["tool_choice"] = "auto"
+            tools_sent = True
 
-        stream = await client.chat.completions.create(**kwargs)
+        stream = None
+        try:
+            stream = await client.chat.completions.create(**kwargs)
+        except Exception as e:
+            error_str = str(e).lower()
+            if retry_without_tools and tools_sent and ("support tool" in error_str or "tool use" in error_str or "function call" in error_str or "tool_choice" in error_str or "tools" in error_str):
+                async for chunk in self._stream_openai(messages, [], model_config, retry_without_tools=False, retry_without_thinking=retry_without_thinking):
+                    yield chunk
+                return
+            if retry_without_thinking and thinking_requested and ("thinking" in error_str or "reasoning" in error_str):
+                kwargs.pop("extra_body", None)
+                try:
+                    stream = await client.chat.completions.create(**kwargs)
+                except Exception as e2:
+                    error_str2 = str(e2).lower()
+                    if retry_without_tools and tools_sent and ("support tool" in error_str2 or "tool use" in error_str2 or "function call" in error_str2 or "tool_choice" in error_str2 or "tools" in error_str2):
+                        kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
+                        async for chunk in self._stream_openai(messages, [], model_config, retry_without_tools=False, retry_without_thinking=False):
+                            yield chunk
+                        return
+                    raise e2
+            else:
+                raise e
+
+        if stream is None:
+            return
 
         tool_call_accumulator: dict[int, dict] = {}
         finish_reason = None

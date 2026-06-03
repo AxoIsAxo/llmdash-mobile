@@ -12,6 +12,7 @@ from ..models import (
     UserResponse, UserUpdateRequest, RegistrationToggleRequest,
     ProviderConfig, ProviderConfigUpdate,
     IpLimitResponse, IpLimitUpdateRequest,
+    CssUpdateRequest,
 )
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -395,6 +396,24 @@ async def reset_user_usage(
     await db.execute(delete(UserModelUsage).where(UserModelUsage.user_id == user_id))
     await db.commit()
     return {"status": "reset"}
+
+
+@router.get("/css")
+async def get_user_css(current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.id == current_user["user_id"]))
+    user = result.scalar_one_or_none()
+    return {"css": user.custom_css or ""}
+
+
+@router.put("/css")
+async def save_user_css(req: CssUpdateRequest, current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.id == current_user["user_id"]))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(404, "User not found")
+    user.custom_css = req.css or None
+    await db.commit()
+    return {"status": "saved"}
 
 
 import os

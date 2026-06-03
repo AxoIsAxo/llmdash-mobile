@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import {
   Users, UserPlus, Trash2, Key, Wrench, Shield, Globe,
   Loader2, X, Check, Settings, RotateCcw, CreditCard, Plus, Edit3, Brain,
-  ArrowUp, ArrowDown, Upload, File, Eye
+  ArrowUp, ArrowDown, Upload, File, Eye, Mic
 } from 'lucide-react'
 import { api } from '../api'
 import type { User, ProviderConfig, ScannedProvider, ModelConfig, SubscriptionPlan, PlanModelLimit, UserSubscription as UserSub } from '../types'
@@ -414,8 +414,8 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
   const [renaming, setRenaming] = useState<number | null>(null)
   const [renameVal, setRenameVal] = useState('')
   const [configuringId, setConfiguringId] = useState<number | null>(null)
-  const [configForm, setConfigForm] = useState<{ temperature: number; max_tokens: number; thinking_enabled: boolean; thinking_budget_tokens: number; model_type: string; vision_enabled: boolean }>({
-    temperature: 0.7, max_tokens: 4096, thinking_enabled: false, thinking_budget_tokens: 4000, model_type: 'chat', vision_enabled: false,
+  const [configForm, setConfigForm] = useState<{ temperature: number; max_tokens: number; thinking_enabled: boolean; thinking_budget_tokens: number; model_type: string; vision_enabled: boolean; tools_enabled: boolean }>({
+    temperature: 0.7, max_tokens: 4096, thinking_enabled: false, thinking_budget_tokens: 4000, model_type: 'chat', vision_enabled: false, tools_enabled: true,
   })
   const [reordering, setReordering] = useState(false)
 
@@ -482,6 +482,7 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
       thinking_budget_tokens: model.thinking_budget_tokens || 4000,
       model_type: model.model_type || 'chat',
       vision_enabled: model.vision_enabled || false,
+      tools_enabled: model.tools_enabled ?? true,
     })
   }
 
@@ -494,6 +495,7 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
         thinking_budget_tokens: configForm.thinking_enabled ? configForm.thinking_budget_tokens : null,
         model_type: configForm.model_type,
         vision_enabled: configForm.vision_enabled,
+        tools_enabled: configForm.tools_enabled,
       })
       setConfiguringId(null)
       loadAll()
@@ -702,6 +704,18 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
                           <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${configForm.vision_enabled ? 'left-4' : 'left-0.5'}`} />
                         </button>
                         <span className="text-xs text-gray-500">{configForm.vision_enabled ? 'Enabled' : 'Disabled'}</span>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <label className="text-xs text-gray-400 w-24 shrink-0 flex items-center gap-1">
+                          <Wrench className="w-3 h-3" /> Tools
+                        </label>
+                        <button
+                          onClick={() => setConfigForm(f => ({ ...f, tools_enabled: !f.tools_enabled }))}
+                          className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${configForm.tools_enabled ? 'bg-purple-600' : 'bg-gray-600'}`}
+                        >
+                          <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${configForm.tools_enabled ? 'left-4' : 'left-0.5'}`} />
+                        </button>
+                        <span className="text-xs text-gray-500">{configForm.tools_enabled ? 'Enabled' : 'Disabled'}</span>
                       </div>
                       <div className="flex gap-2 pt-1">
                         <button
@@ -1263,6 +1277,29 @@ function UploadsTab() {
             >
               <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${settings.file_upload_enabled ? 'left-4' : 'left-0.5'}`} />
             </button>
+          </div>
+        </div>
+
+        <div className="mt-4 bg-gray-800/40 rounded-lg p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-medium flex items-center gap-2">
+                <Mic className="w-4 h-4 text-blue-400" />
+                Whisper Model (Speech-to-Text)
+              </div>
+              <p className="text-xs text-gray-500 mt-1">Choose the Whisper model for voice transcription. Tiny is faster, Small is more accurate</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={`text-xs cursor-pointer select-none ${settings.whisper_model === 'tiny' ? 'text-white font-semibold' : 'text-gray-500'}`} onClick={() => handleSave('whisper_model', 'tiny')}>Tiny</span>
+              <button
+                onClick={() => handleSave('whisper_model', settings.whisper_model === 'tiny' ? 'small' : 'tiny')}
+                disabled={saving}
+                className={`w-9 h-5 rounded-full transition-colors relative ${saving ? 'opacity-50' : ''} ${settings.whisper_model === 'small' ? 'bg-blue-600' : 'bg-gray-600'}`}
+              >
+                <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${settings.whisper_model === 'small' ? 'left-4' : 'left-0.5'}`} />
+              </button>
+              <span className={`text-xs cursor-pointer select-none ${settings.whisper_model === 'small' ? 'text-white font-semibold' : 'text-gray-500'}`} onClick={() => handleSave('whisper_model', 'small')}>Small</span>
+            </div>
           </div>
         </div>
 
