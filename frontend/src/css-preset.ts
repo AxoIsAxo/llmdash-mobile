@@ -1,4 +1,4 @@
-export const DEFAULT_CSS = `:root {
+export const BASE_THEME_CSS = `:root {
   /* Surfaces */
   --theme-bg: 3 7 18;
   --theme-bg-secondary: 17 24 39;
@@ -98,8 +98,9 @@ export const DEFAULT_CSS = `:root {
   /* Animation */
   --theme-spin-duration: 1s;
   --theme-pulse-duration: 2s;
-}
+}`
 
+const GLOBAL_CSS = `
 * {
   scrollbar-width: thin;
   scrollbar-color: #374151 transparent;
@@ -127,3 +128,5 @@ code::before,
 code::after {
   content: none;
 }`
+
+export const DEFAULT_CSS = BASE_THEME_CSS + '\n' + GLOBAL_CSS
