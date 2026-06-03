@@ -15,17 +15,17 @@ function CodeBlock({ language, children }: { language?: string; children: React.
   }, [children])
 
   return (
-    <div className="my-3 rounded-lg overflow-hidden border border-gray-700/50">
-      <div className="flex items-center justify-between px-3 py-1.5 bg-gray-900/80 text-xs text-gray-400">
+    <div className="my-3 rounded-lg overflow-hidden border border-theme-border-light/50">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-theme-bg-secondary/80 text-xs text-theme-subtle">
         <span className="font-mono">{language || 'text'}</span>
         <button
           onClick={handleCopy}
-          className="flex items-center gap-1 px-2 py-0.5 rounded hover:bg-gray-700 transition-colors"
+          className="flex items-center gap-1 px-2 py-0.5 rounded hover:bg-theme-bg-active transition-colors"
         >
           {copied ? (
             <>
-              <Check className="w-3 h-3 text-emerald-400" />
-              <span className="text-emerald-400">Copied</span>
+              <Check className="w-3 h-3 text-theme-accent-text" />
+              <span className="text-theme-accent-text">Copied</span>
             </>
           ) : (
             <>
@@ -35,7 +35,7 @@ function CodeBlock({ language, children }: { language?: string; children: React.
           )}
         </button>
       </div>
-      <pre className="p-4 overflow-x-auto bg-[#1a1b26] text-sm">
+      <pre className="p-4 overflow-x-auto bg-theme-code-bg text-sm">
         <code className={`hljs${language ? ` language-${language}` : ''}`}>{children}</code>
       </pre>
     </div>
@@ -58,7 +58,7 @@ const MarkdownRenderer = memo(function MarkdownRenderer({ content }: { content: 
           }
 
           return (
-            <code className="px-1.5 py-0.5 rounded-md bg-gray-700/50 text-xs font-mono text-emerald-300" {...props}>
+            <code className="px-1.5 py-0.5 rounded-md bg-theme-bg-hover/50 text-xs font-mono text-theme-accent-dim" {...props}>
               {children}
             </code>
           )
@@ -91,7 +91,7 @@ const MarkdownRenderer = memo(function MarkdownRenderer({ content }: { content: 
                     console.error('Download error:', e);
                   }
                 }}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-xs font-medium text-white transition-colors cursor-pointer border-0"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-theme-accent hover:bg-theme-accent-hover rounded-lg text-xs font-medium text-white transition-colors cursor-pointer border-0"
               >
                 <Download className="w-3.5 h-3.5" />
                 {children}
@@ -99,7 +99,7 @@ const MarkdownRenderer = memo(function MarkdownRenderer({ content }: { content: 
             )
           }
           return (
-            <a href={href} target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:text-emerald-300 underline">
+            <a href={href} target="_blank" rel="noopener noreferrer" className="text-theme-accent-text hover:text-theme-accent-dim underline">
               {children}
             </a>
           )
@@ -115,7 +115,7 @@ const MarkdownRenderer = memo(function MarkdownRenderer({ content }: { content: 
         },
         blockquote({ children }) {
           return (
-            <blockquote className="my-2 pl-3 border-l-2 border-emerald-500/50 text-gray-400 italic">
+            <blockquote className="my-2 pl-3 border-l-2 border-theme-accent-text/50 text-theme-subtle italic">
               {children}
             </blockquote>
           )
@@ -123,20 +123,20 @@ const MarkdownRenderer = memo(function MarkdownRenderer({ content }: { content: 
         table({ children }) {
           return (
             <div className="my-2 overflow-x-auto">
-              <table className="w-full text-sm border-collapse border border-gray-700">
+              <table className="w-full text-sm border-collapse border border-theme-border-light">
                 {children}
               </table>
             </div>
           )
         },
         th({ children }) {
-          return <th className="px-3 py-1.5 text-left bg-gray-800 border border-gray-700 font-semibold">{children}</th>
+          return <th className="px-3 py-1.5 text-left bg-theme-bg-elevated border border-theme-border-light font-semibold">{children}</th>
         },
         td({ children }) {
-          return <td className="px-3 py-1.5 border border-gray-700">{children}</td>
+          return <td className="px-3 py-1.5 border border-theme-border-light">{children}</td>
         },
         hr() {
-          return <hr className="my-3 border-gray-700" />
+          return <hr className="my-3 border-theme-border-light" />
         },
         h1({ children }) {
           return <h1 className="text-lg font-bold mt-4 mb-2">{children}</h1>

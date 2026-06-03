@@ -63,28 +63,28 @@ export default function CustomCssPanel({ currentCss, onClose, onSaved }: Props) 
   const previewText = css.slice(0, 60).replace(/\s+/g, ' ')
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-theme-overlay/60 flex items-center justify-center z-50" onClick={onClose}>
       <div
-        className={`bg-gray-900 rounded-2xl border border-gray-700 flex flex-col ${
+        className={`bg-theme-bg-secondary rounded-2xl border border-theme-border-light flex flex-col ${
           fullscreen ? 'fixed inset-4 w-auto h-auto max-w-none max-h-none' : 'w-full max-w-3xl max-h-[85vh]'
         }`}
         onClick={e => e.stopPropagation()}
       >
-        <div className="p-4 border-b border-gray-800 flex items-center justify-between shrink-0">
+        <div className="p-4 border-b border-theme-border flex items-center justify-between shrink-0">
           <h2 className="text-lg font-semibold">Custom CSS</h2>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setFullscreen(!fullscreen)}
-              className="p-1.5 hover:bg-gray-800 rounded-lg text-gray-400 hover:text-gray-200"
+              className="p-1.5 hover:bg-theme-bg-hover rounded-lg text-theme-subtle hover:text-theme-text"
               title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
             >
               {fullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
             </button>
-            <button onClick={onClose} className="px-3 py-1.5 hover:bg-gray-800 rounded-lg text-sm">Close</button>
+            <button onClick={onClose} className="px-3 py-1.5 hover:bg-theme-bg-hover rounded-lg text-sm">Close</button>
           </div>
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-theme-muted">
             Customize the appearance of LLMDash. Changes apply immediately on preview or save.
             The default CSS is used as fallback.
           </p>
@@ -92,31 +92,31 @@ export default function CustomCssPanel({ currentCss, onClose, onSaved }: Props) 
             ref={textareaRef}
             value={css}
             onChange={e => { setCss(e.target.value); setSaved(false) }}
-            className="w-full bg-gray-800 rounded-lg px-4 py-3 text-sm font-mono border border-gray-700 focus:outline-none focus:border-emerald-500 resize-none"
+            className="w-full bg-theme-bg-elevated rounded-lg px-4 py-3 text-sm font-mono border border-theme-border-light focus:outline-none focus:border-theme-focus-ring resize-none"
             style={{ minHeight: fullscreen ? 'calc(100vh - 240px)' : '400px' }}
             spellCheck={false}
           />
           <div className="flex items-center gap-2">
             <button
               onClick={handlePreview}
-              className="px-4 py-1.5 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm flex items-center gap-1.5"
+              className="px-4 py-1.5 bg-theme-bg-hover hover:bg-theme-bg-active rounded-lg text-sm flex items-center gap-1.5"
             >
               <Eye className="w-4 h-4" /> Preview
             </button>
             <button
               onClick={handleSave}
               disabled={saving}
-              className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 disabled:text-gray-500 rounded-lg text-sm flex items-center gap-1.5"
+              className="px-4 py-1.5 bg-theme-accent hover:bg-theme-accent-hover disabled:bg-theme-bg-hover disabled:text-theme-muted rounded-lg text-sm flex items-center gap-1.5"
             >
               {saving ? 'Saving...' : saved ? 'Saved!' : 'Save'}
             </button>
             <button
               onClick={handleReset}
-              className="px-4 py-1.5 hover:bg-gray-800 rounded-lg text-sm flex items-center gap-1.5 text-gray-400"
+              className="px-4 py-1.5 hover:bg-theme-bg-hover rounded-lg text-sm flex items-center gap-1.5 text-theme-subtle"
             >
               <RotateCcw className="w-4 h-4" /> Reset to default
             </button>
-            <span className="text-xs text-gray-600 ml-auto">{css.length} chars</span>
+            <span className="text-xs text-theme-subtle ml-auto">{css.length} chars</span>
           </div>
         </div>
       </div>

@@ -151,22 +151,22 @@ export default function VoiceButton({
       }
       className={`p-3 rounded-xl transition-colors relative ${
         buttonState === 'recording'
-          ? 'bg-red-600 hover:bg-red-500 animate-pulse'
+          ? 'bg-theme-danger hover:bg-theme-danger-hover animate-pulse'
           : showError
-          ? 'bg-amber-600 hover:bg-amber-500'
+          ? 'bg-theme-amber hover:bg-theme-amber'
           : buttonState === 'transcribing'
-          ? 'bg-purple-600'
-          : 'bg-gray-800 hover:bg-gray-700'
+          ? 'bg-theme-purple'
+          : 'bg-theme-bg-elevated hover:bg-theme-bg-active'
       } disabled:opacity-50 disabled:cursor-not-allowed`}
     >
       {buttonState === 'transcribing' ? (
-        <Loader2 className="w-5 h-5 animate-spin text-purple-400" />
+        <Loader2 className="w-5 h-5 animate-spin text-theme-purple" />
       ) : buttonState === 'recording' ? (
         <MicOff className="w-5 h-5 text-white" />
       ) : showError ? (
         <AlertCircle className="w-5 h-5 text-white" />
       ) : (
-        <Mic className="w-5 h-5 text-gray-400" />
+        <Mic className="w-5 h-5 text-theme-subtle" />
       )}
     </button>
   )

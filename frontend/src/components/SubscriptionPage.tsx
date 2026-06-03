@@ -101,23 +101,23 @@ function SubscriptionPage({ currentUser, onClose }: Props) {
 
   if (loading) {
     return (
-      <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center">
-        <div className="bg-gray-900 rounded-xl p-8">
-          <Loader2 className="w-8 h-8 animate-spin text-emerald-400" />
+      <div className="fixed inset-0 bg-theme-overlay/60 z-50 flex items-center justify-center">
+        <div className="bg-theme-bg-secondary rounded-xl p-8">
+          <Loader2 className="w-8 h-8 animate-spin text-theme-accent-text" />
         </div>
       </div>
     )
   }
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-      <div className="bg-gray-900 rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto border border-gray-700 shadow-2xl">
-        <div className="p-6 border-b border-gray-800 flex items-center justify-between">
+    <div className="fixed inset-0 bg-theme-overlay/60 z-50 flex items-center justify-center p-4">
+      <div className="bg-theme-bg-secondary rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto border border-theme-border-light shadow-2xl">
+        <div className="p-6 border-b border-theme-border flex items-center justify-between">
           <h2 className="text-lg font-semibold flex items-center gap-2">
-            <CreditCard className="w-5 h-5 text-emerald-400" />
+            <CreditCard className="w-5 h-5 text-theme-accent-text" />
             Subscription
           </h2>
-          <button onClick={onClose} className="p-1 hover:bg-gray-800 rounded text-gray-500 hover:text-gray-300">
+          <button onClick={onClose} className="p-1 hover:bg-theme-bg-elevated rounded text-theme-muted hover:text-theme-text-secondary">
             <XCircle className="w-5 h-5" />
           </button>
         </div>
@@ -126,14 +126,14 @@ function SubscriptionPage({ currentUser, onClose }: Props) {
           {/* Current subscription status */}
           {mySub && (
             <div className={`p-4 rounded-xl border ${
-              isActive ? 'bg-emerald-900/20 border-emerald-700/50' :
-              mySub.status === 'pending' ? 'bg-amber-900/20 border-amber-700/50' :
-              'bg-red-900/20 border-red-700/50'
+              isActive ? 'bg-theme-accent/20 border-theme-msg-user/50' :
+              mySub.status === 'pending' ? 'bg-theme-amber/20 border-theme-amber/50' :
+              'bg-theme-danger/20 border-theme-danger/50'
             }`}>
               <div className="flex items-center gap-2 mb-2">
-                {isActive ? <CheckCircle className="w-5 h-5 text-emerald-400" /> :
-                 mySub.status === 'pending' ? <Clock className="w-5 h-5 text-amber-400" /> :
-                 <AlertTriangle className="w-5 h-5 text-red-400" />}
+                {isActive ? <CheckCircle className="w-5 h-5 text-theme-accent-text" /> :
+                 mySub.status === 'pending' ? <Clock className="w-5 h-5 text-theme-amber" /> :
+                 <AlertTriangle className="w-5 h-5 text-theme-danger-text" />}
                 <span className="font-semibold">
                   {isActive ? `Active: ${mySub.plan_name}` :
                    mySub.status === 'pending' ? `Pending: ${mySub.plan_name}` :
@@ -141,9 +141,9 @@ function SubscriptionPage({ currentUser, onClose }: Props) {
                 </span>
               </div>
               {isActive && mySub.expires_at && (
-                <p className="text-sm text-gray-400">
+                <p className="text-sm text-theme-subtle">
                   {daysLeft <= 3 ? (
-                    <span className="text-amber-400 font-medium">
+                    <span className="text-theme-amber font-medium">
                       <AlertTriangle className="w-4 h-4 inline mr-1" />
                       Renewal reminder: {daysLeft} {daysLeft === 1 ? 'day' : 'days'} remaining.
                       {daysLeft === 0 ? ' Top up now to avoid interruption.' : ' Time to top up!'}
@@ -154,22 +154,22 @@ function SubscriptionPage({ currentUser, onClose }: Props) {
                 </p>
               )}
               {mySub.status === 'pending' && mySub.payment_checking_id && (
-                <p className="text-sm text-amber-400 mt-1">Payment pending. Click "Check Payment" on your invoice to confirm.</p>
+                <p className="text-sm text-theme-amber mt-1">Payment pending. Click "Check Payment" on your invoice to confirm.</p>
               )}
-              <p className="text-xs text-gray-400 mt-2">
-                Tokens used: <span className="font-mono text-gray-300">{mySub.token_usage.toLocaleString()}</span>
+              <p className="text-xs text-theme-subtle mt-2">
+                Tokens used: <span className="font-mono text-theme-text-secondary">{mySub.token_usage.toLocaleString()}</span>
                 {mySub.plan_token_limit != null && (
-                  <span> / <span className={mySub.token_usage >= mySub.plan_token_limit ? 'text-red-400 font-semibold' : 'text-gray-300'}>{mySub.plan_token_limit.toLocaleString()}</span></span>
+                  <span> / <span className={mySub.token_usage >= mySub.plan_token_limit ? 'text-theme-danger-text font-semibold' : 'text-theme-text-secondary'}>{mySub.plan_token_limit.toLocaleString()}</span></span>
                 )}
                 {mySub.plan_token_limit != null && mySub.token_usage >= mySub.plan_token_limit && (
-                  <span className="text-red-400 ml-2 font-medium">LIMIT REACHED</span>
+                  <span className="text-theme-danger-text ml-2 font-medium">LIMIT REACHED</span>
                 )}
               </p>
               {(isActive || mySub.status === 'pending') && (
                 <button
                   onClick={handleCancel}
                   disabled={cancelling}
-                  className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-700/30 transition-colors disabled:opacity-50"
+                  className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-theme-danger/20 hover:bg-theme-danger/30 text-theme-danger-text border border-theme-danger/30 transition-colors disabled:opacity-50"
                 >
                   {cancelling ? <Loader2 className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />}
                   Cancel Subscription
@@ -180,12 +180,12 @@ function SubscriptionPage({ currentUser, onClose }: Props) {
 
           {/* Free plan is always visible and active by default */}
           {!mySub && (
-            <div className="p-4 rounded-xl border bg-gray-800/50 border-gray-700">
+            <div className="p-4 rounded-xl border bg-theme-bg-elevated/50 border-theme-border-light">
               <div className="flex items-center gap-2 mb-2">
-                <Zap className="w-5 h-5 text-gray-400" />
+                <Zap className="w-5 h-5 text-theme-subtle" />
                 <span className="font-semibold">Free Plan</span>
               </div>
-              <p className="text-sm text-gray-400">
+              <p className="text-sm text-theme-subtle">
                 You are on the Free plan by default. Subscribe to a paid plan for higher limits.
               </p>
             </div>
@@ -193,52 +193,52 @@ function SubscriptionPage({ currentUser, onClose }: Props) {
 
           {/* Subscribe result (invoice QR code) */}
           {pendingInvoice && (
-            <div className="p-4 rounded-xl border bg-gray-800 border-gray-700 space-y-3">
-              <h3 className="text-sm font-semibold text-emerald-400">Lightning Invoice</h3>
-              <p className="text-xs text-gray-400">Pay this invoice with any Lightning wallet to activate your {pendingPlanName} plan.</p>
-              <div className="bg-gray-950 rounded-lg p-3">
-                <pre className="text-xs text-gray-300 break-all whitespace-pre-wrap font-mono select-all">
+            <div className="p-4 rounded-xl border bg-theme-bg-elevated border-theme-border-light space-y-3">
+              <h3 className="text-sm font-semibold text-theme-accent-text">Lightning Invoice</h3>
+              <p className="text-xs text-theme-subtle">Pay this invoice with any Lightning wallet to activate your {pendingPlanName} plan.</p>
+              <div className="bg-theme-bg rounded-lg p-3">
+                <pre className="text-xs text-theme-text-secondary break-all whitespace-pre-wrap font-mono select-all">
                   {pendingInvoice}
                 </pre>
               </div>
               <div className="flex gap-2">
                 <button
                   onClick={() => handleCopy(pendingInvoice!)}
-                  className="flex items-center gap-1 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded-lg text-xs"
+                  className="flex items-center gap-1 px-3 py-1.5 bg-theme-bg-hover hover:bg-theme-bg-active rounded-lg text-xs"
                 >
-                  {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copied ? <Check className="w-3.5 h-3.5 text-theme-accent-text" /> : <Copy className="w-3.5 h-3.5" />}
                   {copied ? 'Copied' : 'Copy Invoice'}
                 </button>
                 <button
                   onClick={handleCheckPayment}
                   disabled={checking}
-                  className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-xs disabled:opacity-50"
+                  className="flex items-center gap-1 px-3 py-1.5 bg-theme-accent hover:bg-theme-accent-hover rounded-lg text-xs disabled:opacity-50"
                 >
                   {checking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
                   Check Payment
                 </button>
               </div>
               {checkError && (
-                <p className="text-red-400 text-xs mt-2">{checkError}</p>
+                <p className="text-theme-danger-text text-xs mt-2">{checkError}</p>
               )}
             </div>
           )}
 
           {subscribeResult?.status === 'active' && (
-            <div className="p-4 rounded-xl border bg-gray-800 border-gray-700">
-              <p className="text-emerald-400 text-sm">Subscription activated!</p>
+            <div className="p-4 rounded-xl border bg-theme-bg-elevated border-theme-border-light">
+              <p className="text-theme-accent-text text-sm">Subscription activated!</p>
             </div>
           )}
 
           {subscribeResult?.status === 'error' && (
-            <div className="p-4 rounded-xl border bg-gray-800 border-gray-700">
-              <p className="text-red-400 text-sm">{subscribeResult.plan_name}</p>
+            <div className="p-4 rounded-xl border bg-theme-bg-elevated border-theme-border-light">
+              <p className="text-theme-danger-text text-sm">{subscribeResult.plan_name}</p>
             </div>
           )}
 
           {/* Available plans */}
           <div>
-            <h3 className="text-sm font-semibold text-gray-400 mb-3">Available Plans</h3>
+            <h3 className="text-sm font-semibold text-theme-subtle mb-3">Available Plans</h3>
             <div className="space-y-3">
               {plans.filter(p => p.name !== 'Free' || !mySub).map(plan => {
                 const isCurrent = mySub?.plan_id === plan.id && isActive
@@ -247,27 +247,27 @@ function SubscriptionPage({ currentUser, onClose }: Props) {
                   <div
                     key={plan.id}
                     className={`p-4 rounded-xl border transition-colors ${
-                      isCurrent ? 'bg-emerald-900/20 border-emerald-600/50' : 'bg-gray-800/50 border-gray-700 hover:border-gray-600'
+                      isCurrent ? 'bg-theme-accent/20 border-theme-accent/50' : 'bg-theme-bg-elevated/50 border-theme-border-light hover:border-theme-border-light'
                     }`}
                   >
                     <div className="flex items-start justify-between">
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="font-semibold">{plan.name}</span>
-                          {isCurrent && <span className="text-xs px-2 py-0.5 bg-emerald-600/30 text-emerald-400 rounded-full">Current</span>}
-                          {!plan.enabled && <span className="text-xs px-2 py-0.5 bg-red-600/30 text-red-400 rounded-full">Disabled</span>}
+                          {isCurrent && <span className="text-xs px-2 py-0.5 bg-theme-accent/30 text-theme-accent-text rounded-full">Current</span>}
+                          {!plan.enabled && <span className="text-xs px-2 py-0.5 bg-theme-danger/30 text-theme-danger-text rounded-full">Disabled</span>}
                         </div>
-                        <p className="text-sm text-gray-400 mt-1">
+                        <p className="text-sm text-theme-subtle mt-1">
                           {plan.duration_days > 0 ? `${plan.duration_days} days` : 'Unlimited'}
                           {plan.token_limit ? ` · ${plan.token_limit.toLocaleString()} tokens/month` : ' · No token limit'}
                         </p>
                       </div>
                       <div className="text-right">
-                        <p className="text-xl font-bold text-emerald-400">
+                        <p className="text-xl font-bold text-theme-accent-text">
                           {plan.price_sats === 0 ? 'Free' : `${plan.price_sats.toLocaleString()} sats`}
                         </p>
                         {plan.duration_days > 0 && plan.price_sats > 0 && (
-                          <p className="text-xs text-gray-500">~{(plan.price_sats / plan.duration_days).toFixed(0)} sats/day</p>
+                          <p className="text-xs text-theme-muted">~{(plan.price_sats / plan.duration_days).toFixed(0)} sats/day</p>
                         )}
                       </div>
                     </div>
@@ -277,8 +277,8 @@ function SubscriptionPage({ currentUser, onClose }: Props) {
                         disabled={subscribing || plan.name === 'Free'}
                         className={`mt-3 w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                           plan.name === 'Free'
-                            ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                            : 'bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50'
+                            ? 'bg-theme-bg-hover text-theme-subtle cursor-not-allowed'
+                            : 'bg-theme-accent hover:bg-theme-accent-hover disabled:opacity-50'
                         }`}
                       >
                         {subscribing && selectedPlan?.id === plan.id ? (

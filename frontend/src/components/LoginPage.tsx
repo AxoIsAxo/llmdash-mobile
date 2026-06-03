@@ -36,41 +36,41 @@ export default function LoginPage({ authStatus, onDone }: Props) {
   }
 
   return (
-    <div className="h-screen flex items-center justify-center bg-gray-950">
+    <div className="h-screen flex items-center justify-center bg-theme-bg">
       <div className="w-full max-w-sm mx-4">
         <div className="text-center mb-8">
-          <Bot className="w-14 h-14 text-emerald-400 mx-auto mb-3" />
-          <h1 className="text-2xl font-bold text-gray-100">LLMDash</h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <Bot className="w-14 h-14 text-theme-accent-text mx-auto mb-3" />
+          <h1 className="text-2xl font-bold text-theme-text">LLMDash</h1>
+          <p className="text-sm text-theme-muted mt-1">
             {mode === 'login' ? 'Sign in to continue' : 'Create an account'}
           </p>
         </div>
-        <form onSubmit={handleSubmit} className="bg-gray-900 rounded-xl border border-gray-800 p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="bg-theme-bg-secondary rounded-xl border border-theme-border p-6 space-y-4">
           {error && (
-            <div className="bg-red-900/30 border border-red-800 rounded-lg px-3 py-2 text-sm text-red-300">{error}</div>
+            <div className="bg-theme-danger/30 border border-theme-danger rounded-lg px-3 py-2 text-sm text-theme-danger-text">{error}</div>
           )}
           <div>
-            <label className="text-sm text-gray-400 mb-1 block">Username</label>
+            <label className="text-sm text-theme-subtle mb-1 block">Username</label>
             <input
               value={username}
               onChange={e => setUsername(e.target.value)}
               autoFocus
-              className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm border border-gray-700 focus:outline-none focus:border-emerald-500"
+              className="w-full bg-theme-bg-elevated rounded-lg px-3 py-2 text-sm border border-theme-border-light focus:outline-none focus:border-theme-focus-ring"
             />
           </div>
           <div>
-            <label className="text-sm text-gray-400 mb-1 block">Password</label>
+            <label className="text-sm text-theme-subtle mb-1 block">Password</label>
             <input
               type="password"
               value={password}
               onChange={e => setPassword(e.target.value)}
-              className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm border border-gray-700 focus:outline-none focus:border-emerald-500"
+              className="w-full bg-theme-bg-elevated rounded-lg px-3 py-2 text-sm border border-theme-border-light focus:outline-none focus:border-theme-focus-ring"
             />
           </div>
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 rounded-lg text-sm font-medium"
+            className="w-full py-2 bg-theme-accent hover:bg-theme-accent-hover disabled:bg-theme-bg-hover rounded-lg text-sm font-medium"
           >
             {loading ? <Loader2 className="w-4 h-4 animate-spin inline" /> : mode === 'login' ? 'Sign In' : 'Create Account'}
           </button>
@@ -78,7 +78,7 @@ export default function LoginPage({ authStatus, onDone }: Props) {
             <button
               type="button"
               onClick={() => { setMode(m => m === 'login' ? 'register' : 'login'); setError('') }}
-              className="w-full py-2 text-sm text-gray-400 hover:text-emerald-400 transition-colors flex items-center justify-center gap-1"
+              className="w-full py-2 text-sm text-theme-subtle hover:text-theme-accent-text transition-colors flex items-center justify-center gap-1"
             >
               <UserPlus className="w-3.5 h-3.5" />
               {mode === 'login' ? 'Create new account' : 'Back to login'}

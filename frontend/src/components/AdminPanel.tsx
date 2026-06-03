@@ -19,15 +19,15 @@ export default function AdminPanel({ currentUser, onClose, onRefreshModels }: Pr
   const [tab, setTab] = useState<AdminTab>('users')
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-gray-900 rounded-2xl w-full max-w-3xl max-h-[85vh] flex flex-col border border-gray-700" onClick={e => e.stopPropagation()}>
-        <div className="p-4 border-b border-gray-800 flex items-center justify-between shrink-0">
+    <div className="fixed inset-0 bg-theme-overlay/60 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-theme-bg-secondary rounded-2xl w-full max-w-3xl max-h-[85vh] flex flex-col border border-theme-border-light" onClick={e => e.stopPropagation()}>
+        <div className="p-4 border-b border-theme-border flex items-center justify-between shrink-0">
           <h2 className="text-lg font-semibold flex items-center gap-2">
-            <Shield className="w-5 h-5 text-emerald-400" /> Admin Panel
+            <Shield className="w-5 h-5 text-theme-accent-text" /> Admin Panel
           </h2>
-          <button onClick={onClose} className="px-3 py-1.5 hover:bg-gray-800 rounded-lg text-sm">Close</button>
+          <button onClick={onClose} className="px-3 py-1.5 hover:bg-theme-bg-hover rounded-lg text-sm">Close</button>
         </div>
-        <div className="flex border-b border-gray-800 shrink-0">
+        <div className="flex border-b border-theme-border shrink-0">
           {[
             { key: 'users' as AdminTab, icon: Users, label: 'Users' },
             { key: 'providers' as AdminTab, icon: Globe, label: 'Providers' },
@@ -40,7 +40,7 @@ export default function AdminPanel({ currentUser, onClose, onRefreshModels }: Pr
               key={t.key}
               onClick={() => setTab(t.key)}
               className={`flex-1 py-2.5 text-sm font-medium flex items-center justify-center gap-1.5 transition-colors ${
-                tab === t.key ? 'text-emerald-400 border-b-2 border-emerald-400 bg-gray-800/50' : 'text-gray-500 hover:text-gray-300'
+                tab === t.key ? 'text-theme-accent-text border-b-2 border-theme-accent-text bg-theme-bg-elevated/50' : 'text-theme-muted hover:text-theme-text'
               }`}
             >
               <t.icon className="w-4 h-4" /> {t.label}
@@ -148,37 +148,37 @@ function UsersTab({ currentUser }: { currentUser: User }) {
 
   return (
     <div className="space-y-4">
-      {error && <div className="bg-red-900/30 border border-red-800 rounded-lg px-3 py-2 text-sm text-red-300">{error}</div>}
+      {error && <div className="bg-theme-danger/30 border border-theme-danger rounded-lg px-3 py-2 text-sm text-theme-danger-text">{error}</div>}
 
       <div className="flex items-center justify-between">
         <div className="text-sm">
-          <span className="text-gray-400">Registration: </span>
-          <span className={`font-medium ${regEnabled ? 'text-emerald-400' : 'text-gray-500'}`}>
+          <span className="text-theme-subtle">Registration: </span>
+          <span className={`font-medium ${regEnabled ? 'text-theme-accent-text' : 'text-theme-muted'}`}>
             {regEnabled ? 'Enabled' : 'Disabled'}
           </span>
         </div>
         <button
           onClick={handleRegistrationToggle}
-          className={`w-9 h-5 rounded-full transition-colors relative ${regEnabled ? 'bg-emerald-600' : 'bg-gray-600'}`}
+          className={`w-9 h-5 rounded-full transition-colors relative ${regEnabled ? 'bg-theme-accent' : 'bg-theme-switch-off'}`}
         >
           <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${regEnabled ? 'left-4' : 'left-0.5'}`} />
         </button>
       </div>
 
       <div className="flex items-center gap-2">
-        <div className="text-sm text-gray-400">IP account limit: </div>
+        <div className="text-sm text-theme-subtle">IP account limit: </div>
         <input
           type="number"
           min={1}
           max={100}
           value={ipLimitEdit}
           onChange={e => setIpLimitEdit(parseInt(e.target.value) || 1)}
-          className="bg-gray-800 rounded px-2 py-1 text-sm w-16 border border-gray-700 focus:outline-none focus:border-emerald-500"
+          className="bg-theme-bg-elevated rounded px-2 py-1 text-sm w-16 border border-theme-border-light focus:outline-none focus:border-theme-focus-ring"
         />
         <button
           onClick={handleIpLimitSave}
           disabled={ipLimitEdit === ipLimit}
-          className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 disabled:text-gray-500 rounded text-xs"
+          className="px-2 py-1 bg-theme-accent hover:bg-theme-accent-hover disabled:bg-theme-bg-hover disabled:text-theme-muted rounded text-xs"
         >
           Save
         </button>
@@ -189,45 +189,45 @@ function UsersTab({ currentUser }: { currentUser: User }) {
           value={newUser}
           onChange={e => setNewUser(e.target.value)}
           placeholder="Username"
-          className="flex-1 bg-gray-800 rounded-lg px-3 py-1.5 text-sm border border-gray-700 focus:outline-none focus:border-emerald-500"
+          className="flex-1 bg-theme-bg-elevated rounded-lg px-3 py-1.5 text-sm border border-theme-border-light focus:outline-none focus:border-theme-focus-ring"
         />
         <input
           value={newPass}
           onChange={e => setNewPass(e.target.value)}
           type="password"
           placeholder="Password"
-          className="flex-1 bg-gray-800 rounded-lg px-3 py-1.5 text-sm border border-gray-700 focus:outline-none focus:border-emerald-500"
+          className="flex-1 bg-theme-bg-elevated rounded-lg px-3 py-1.5 text-sm border border-theme-border-light focus:outline-none focus:border-theme-focus-ring"
         />
-        <button onClick={handleCreate} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm">
+        <button onClick={handleCreate} className="px-3 py-1.5 bg-theme-accent hover:bg-theme-accent-hover rounded-lg text-sm">
           <UserPlus className="w-4 h-4" />
         </button>
       </div>
 
       {loading ? (
-        <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-gray-400" /></div>
+        <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-theme-subtle" /></div>
       ) : (
         <div className="space-y-2">
           {users.map(u => (
-            <div key={u.id} className="bg-gray-800/40 rounded-lg px-3 py-2 flex items-center gap-3">
+            <div key={u.id} className="bg-theme-bg-elevated/40 rounded-lg px-3 py-2 flex items-center gap-3">
               {editingUser === u.id ? (
                 <>
                   <input
                     value={editData.username}
                     onChange={e => setEditData(d => ({ ...d, username: e.target.value }))}
-                    className="bg-gray-800 rounded px-2 py-1 text-sm w-32"
+                    className="bg-theme-bg-elevated rounded px-2 py-1 text-sm w-32"
                   />
                   <input
                     value={editData.password}
                     onChange={e => setEditData(d => ({ ...d, password: e.target.value }))}
                     type="password"
                     placeholder="new pass"
-                    className="bg-gray-800 rounded px-2 py-1 text-sm w-24"
+                    className="bg-theme-bg-elevated rounded px-2 py-1 text-sm w-24"
                   />
                   {currentUser.role === 'owner' && (
                     <select
                       value={editData.role}
                       onChange={e => setEditData(d => ({ ...d, role: e.target.value }))}
-                      className="bg-gray-800 rounded px-2 py-1 text-sm"
+                      className="bg-theme-bg-elevated rounded px-2 py-1 text-sm"
                     >
                       <option value="owner">Owner</option>
                       <option value="admin">Admin</option>
@@ -238,7 +238,7 @@ function UsersTab({ currentUser }: { currentUser: User }) {
                     <select
                       value={editData.role}
                       onChange={e => setEditData(d => ({ ...d, role: e.target.value }))}
-                      className="bg-gray-800 rounded px-2 py-1 text-sm"
+                      className="bg-theme-bg-elevated rounded px-2 py-1 text-sm"
                     >
                       <option value="admin">Admin</option>
                       <option value="user">User</option>
@@ -249,40 +249,40 @@ function UsersTab({ currentUser }: { currentUser: User }) {
                     onChange={e => setEditData(d => ({ ...d, token_limit: e.target.value }))}
                     type="number"
                     placeholder="Token limit"
-                    className="bg-gray-800 rounded px-2 py-1 text-sm w-28"
+                    className="bg-theme-bg-elevated rounded px-2 py-1 text-sm w-28"
                   />
                   <input
                     value={editData.image_limit}
                     onChange={e => setEditData(d => ({ ...d, image_limit: e.target.value }))}
                     type="number"
                     placeholder="Image limit"
-                    className="bg-gray-800 rounded px-2 py-1 text-sm w-28"
+                    className="bg-theme-bg-elevated rounded px-2 py-1 text-sm w-28"
                   />
-                  <button onClick={() => handleUpdate(u.id)} className="p-1 hover:bg-emerald-800 rounded"><Check className="w-4 h-4 text-emerald-400" /></button>
-                  <button onClick={() => setEditingUser(null)} className="p-1 hover:bg-gray-700 rounded"><X className="w-4 h-4 text-gray-400" /></button>
+                  <button onClick={() => handleUpdate(u.id)} className="p-1 hover:bg-theme-accent rounded"><Check className="w-4 h-4 text-theme-accent-text" /></button>
+                  <button onClick={() => setEditingUser(null)} className="p-1 hover:bg-theme-bg-active rounded"><X className="w-4 h-4 text-theme-subtle" /></button>
                 </>
               ) : (
                 <>
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium truncate">{u.username}</div>
                     <div className="text-xs flex items-center gap-2">
-                      <span className={`${u.role === 'owner' ? 'text-amber-400' : u.role === 'admin' ? 'text-emerald-400' : 'text-gray-500'}`}>
+                      <span className={`${u.role === 'owner' ? 'text-theme-amber' : u.role === 'admin' ? 'text-theme-accent-text' : 'text-theme-muted'}`}>
                         {u.role}
                       </span>
                       {u.token_limit != null && (
-                        <span className={u.token_usage >= u.token_limit ? 'text-red-400' : 'text-gray-500'}>
+                        <span className={u.token_usage >= u.token_limit ? 'text-theme-danger-text' : 'text-theme-muted'}>
                           Tokens: {u.token_usage.toLocaleString()} / {u.token_limit.toLocaleString()}
                         </span>
                       )}
                       {u.token_limit == null && (
-                        <span className="text-gray-600">Tokens: {u.token_usage.toLocaleString()}</span>
+                        <span className="text-theme-subtle">Tokens: {u.token_usage.toLocaleString()}</span>
                       )}
                     </div>
                   </div>
                   {(u.token_usage > 0) && (
                     <button
                       onClick={() => handleResetUsage(u.id)}
-                      className="p-1.5 hover:bg-emerald-900/30 rounded text-gray-500 hover:text-emerald-400"
+                      className="p-1.5 hover:bg-theme-accent/30 rounded text-theme-muted hover:text-theme-accent-text"
                       title="Reset token usage"
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
@@ -299,19 +299,19 @@ function UsersTab({ currentUser }: { currentUser: User }) {
                         image_limit: u.image_limit != null ? String(u.image_limit) : '',
                       })
                     }}
-                    className="p-1.5 hover:bg-gray-700 rounded text-gray-500 hover:text-gray-300"
+                    className="p-1.5 hover:bg-theme-bg-active rounded text-theme-muted hover:text-theme-text"
                   >
                     <Settings className="w-3.5 h-3.5" />
                   </button>
                   {currentUser.role === 'owner' ? (
                     u.id !== currentUser.id && (
-                      <button onClick={() => handleDelete(u.id)} className="p-1.5 hover:bg-red-900/30 rounded text-gray-500 hover:text-red-400">
+                      <button onClick={() => handleDelete(u.id)} className="p-1.5 hover:bg-theme-danger/30 rounded text-theme-muted hover:text-theme-danger-text">
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     )
                   ) : (
                     u.role === 'user' && (
-                      <button onClick={() => handleDelete(u.id)} className="p-1.5 hover:bg-red-900/30 rounded text-gray-500 hover:text-red-400">
+                      <button onClick={() => handleDelete(u.id)} className="p-1.5 hover:bg-theme-danger/30 rounded text-theme-muted hover:text-theme-danger-text">
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     )
@@ -351,46 +351,46 @@ function ProvidersTab() {
     } catch (e: any) { setError(e.message) }
   }
 
-  if (loading) return <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-gray-400" /></div>
+  if (loading) return <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-theme-subtle" /></div>
 
   return (
     <div className="space-y-3">
-      {error && <div className="bg-red-900/30 border border-red-800 rounded-lg px-3 py-2 text-sm text-red-300">{error}</div>}
-      <p className="text-xs text-gray-500">Customize how providers appear to users. Changes take effect immediately.</p>
+      {error && <div className="bg-theme-danger/30 border border-theme-danger rounded-lg px-3 py-2 text-sm text-theme-danger-text">{error}</div>}
+      <p className="text-xs text-theme-muted">Customize how providers appear to users. Changes take effect immediately.</p>
       {providers.map(p => (
-        <div key={p.key} className="bg-gray-800/40 rounded-lg px-4 py-3">
+        <div key={p.key} className="bg-theme-bg-elevated/40 rounded-lg px-4 py-3">
           {editing === p.key ? (
             <div className="space-y-2">
               <div>
-                <label className="text-xs text-gray-500">Display Name</label>
+                <label className="text-xs text-theme-muted">Display Name</label>
                 <input
                   value={editName}
                   onChange={e => setEditName(e.target.value)}
-                  className="w-full bg-gray-800 rounded px-3 py-1.5 text-sm border border-gray-700 focus:outline-none focus:border-emerald-500 mt-1"
+                  className="w-full bg-theme-bg-elevated rounded px-3 py-1.5 text-sm border border-theme-border-light focus:outline-none focus:border-theme-focus-ring mt-1"
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-500">Base URL</label>
+                <label className="text-xs text-theme-muted">Base URL</label>
                 <input
                   value={editUrl}
                   onChange={e => setEditUrl(e.target.value)}
-                  className="w-full bg-gray-800 rounded px-3 py-1.5 text-sm border border-gray-700 focus:outline-none focus:border-emerald-500 mt-1"
+                  className="w-full bg-theme-bg-elevated rounded px-3 py-1.5 text-sm border border-theme-border-light focus:outline-none focus:border-theme-focus-ring mt-1"
                 />
               </div>
               <div className="flex gap-2">
-                <button onClick={() => handleSave(p.key)} className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 rounded text-sm">Save</button>
-                <button onClick={() => setEditing(null)} className="px-3 py-1 hover:bg-gray-700 rounded text-sm">Cancel</button>
+                <button onClick={() => handleSave(p.key)} className="px-3 py-1 bg-theme-accent hover:bg-theme-accent-hover rounded text-sm">Save</button>
+                <button onClick={() => setEditing(null)} className="px-3 py-1 hover:bg-theme-bg-active rounded text-sm">Cancel</button>
               </div>
             </div>
           ) : (
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm font-medium">{p.name}</div>
-                <div className="text-xs text-gray-500 font-mono">{p.base_url}</div>
+                <div className="text-xs text-theme-muted font-mono">{p.base_url}</div>
               </div>
               <button
                 onClick={() => { setEditing(p.key); setEditName(p.name); setEditUrl(p.base_url) }}
-                className="p-1.5 hover:bg-gray-700 rounded text-gray-500 hover:text-gray-300"
+                className="p-1.5 hover:bg-theme-bg-active rounded text-theme-muted hover:text-theme-text"
               >
                 <Settings className="w-3.5 h-3.5" />
               </button>
@@ -545,21 +545,21 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
   return (
     <div className="space-y-6">
       <div className="flex justify-end">
-        <button onClick={loadAll} disabled={loading} className="px-3 py-1.5 hover:bg-gray-800 rounded-lg text-sm flex items-center gap-1">
+        <button onClick={loadAll} disabled={loading} className="px-3 py-1.5 hover:bg-theme-bg-hover rounded-lg text-sm flex items-center gap-1">
           {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
           Rescan
         </button>
       </div>
 
       {loading && scanned.length === 0 && (
-        <div className="flex items-center justify-center py-12 text-gray-400">
+        <div className="flex items-center justify-center py-12 text-theme-subtle">
           <Loader2 className="w-6 h-6 animate-spin mr-2" /> Scanning providers...
         </div>
       )}
 
       {!loading && scanned.length === 0 && (
-        <div className="text-center text-gray-500 py-8">
-          <Key className="w-12 h-12 mx-auto mb-3 text-gray-700" />
+        <div className="text-center text-theme-muted py-8">
+          <Key className="w-12 h-12 mx-auto mb-3 text-theme-icon-muted" />
           <p>No API keys configured.</p>
           <p className="text-xs mt-1">Add API keys in Admin → API Keys, then rescan.</p>
         </div>
@@ -568,8 +568,8 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
       {enabledModels.length > 0 && (
         <div>
           <div className="flex items-center gap-2 mb-3">
-            <h3 className="font-semibold text-sm text-emerald-400">Activated Models</h3>
-            <span className="text-xs text-gray-500">{enabledModels.length} active</span>
+            <h3 className="font-semibold text-sm text-theme-accent-text">Activated Models</h3>
+            <span className="text-xs text-theme-muted">{enabledModels.length} active</span>
           </div>
           <div className="space-y-1">
             {enabledModels.map((model, idx) => {
@@ -577,11 +577,11 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
               const providerName = providerInfo?.provider_name || model.provider
               return (
                 <div key={model.id}>
-                  <div className="flex items-center gap-2 px-3 py-2 bg-emerald-900/20 border border-emerald-800/30 rounded-lg hover:bg-emerald-900/30 transition-colors">
+                  <div className="flex items-center gap-2 px-3 py-2 bg-theme-accent/20 border border-theme-accent/30 rounded-lg hover:bg-theme-accent/30 transition-colors">
                     <button
                       onClick={() => handleMoveUp(idx)}
                       disabled={idx === 0 || reordering}
-                      className="p-0.5 hover:bg-gray-700 rounded text-gray-500 hover:text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                      className="p-0.5 hover:bg-theme-bg-active rounded text-theme-muted hover:text-theme-text disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
                       title="Move up"
                     >
                       <ArrowUp className="w-3.5 h-3.5" />
@@ -589,12 +589,12 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
                     <button
                       onClick={() => handleMoveDown(idx)}
                       disabled={idx === enabledModels.length - 1 || reordering}
-                      className="p-0.5 hover:bg-gray-700 rounded text-gray-500 hover:text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                      className="p-0.5 hover:bg-theme-bg-active rounded text-theme-muted hover:text-theme-text disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
                       title="Move down"
                     >
                       <ArrowDown className="w-3.5 h-3.5" />
                     </button>
-                    <span className="text-xs text-gray-600 w-5 text-center">{idx + 1}</span>
+                    <span className="text-xs text-theme-subtle w-5 text-center">{idx + 1}</span>
                     <div className="flex-1 min-w-0">
                       {renaming === model.id ? (
                         <div className="flex gap-1">
@@ -602,29 +602,29 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
                             value={renameVal}
                             onChange={e => setRenameVal(e.target.value)}
                             autoFocus
-                            className="bg-gray-800 rounded px-2 py-0.5 text-sm w-full"
+                            className="bg-theme-bg-elevated rounded px-2 py-0.5 text-sm w-full"
                             onKeyDown={e => { if (e.key === 'Enter') handleRename(model.id) }}
                           />
-                          <button onClick={() => handleRename(model.id)} className="p-1 hover:bg-emerald-800 rounded"><Check className="w-3.5 h-3.5 text-emerald-400" /></button>
-                          <button onClick={() => setRenaming(null)} className="p-1 hover:bg-gray-700 rounded"><X className="w-3.5 h-3.5 text-gray-400" /></button>
+                          <button onClick={() => handleRename(model.id)} className="p-1 hover:bg-theme-accent rounded"><Check className="w-3.5 h-3.5 text-theme-accent-text" /></button>
+                          <button onClick={() => setRenaming(null)} className="p-1 hover:bg-theme-bg-active rounded"><X className="w-3.5 h-3.5 text-theme-subtle" /></button>
                         </div>
                       ) : (
                         <div
-                          className="text-sm font-medium truncate cursor-pointer hover:text-emerald-400"
+                          className="text-sm font-medium truncate cursor-pointer hover:text-theme-accent-text"
                           onClick={() => { setRenaming(model.id); setRenameVal(model.name) }}
                           title="Click to rename"
                         >
                           {model.name}
                         </div>
                       )}
-                      <div className="text-xs text-gray-500 truncate">{model.model_name} — {providerName}{model.model_type === 'image' ? ' — Image Gen' : ''}</div>
+                      <div className="text-xs text-theme-muted truncate">{model.model_name} — {providerName}{model.model_type === 'image' ? ' — Image Gen' : ''}</div>
                     </div>
                     <button
                       onClick={() => configuringId === model.id ? setConfiguringId(null) : startConfigure(model)}
-                      className="p-1.5 hover:bg-gray-700 rounded-lg transition-colors shrink-0"
+                      className="p-1.5 hover:bg-theme-bg-active rounded-lg transition-colors shrink-0"
                       title="Configure"
                     >
-                      <Settings className="w-3.5 h-3.5 text-gray-400 hover:text-gray-200" />
+                      <Settings className="w-3.5 h-3.5 text-theme-subtle hover:text-theme-text" />
                     </button>
                     <button
                       onClick={async () => {
@@ -632,101 +632,101 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
                         await loadAll()
                         onRefresh()
                       }}
-                      className="p-1.5 hover:bg-red-800/30 rounded-lg transition-colors shrink-0"
+                      className="p-1.5 hover:bg-theme-danger/30 rounded-lg transition-colors shrink-0"
                       title="Deactivate"
                     >
-                      <Trash2 className="w-3.5 h-3.5 text-gray-400 hover:text-red-400" />
+                      <Trash2 className="w-3.5 h-3.5 text-theme-subtle hover:text-theme-danger-text" />
                     </button>
                   </div>
                   {configuringId === model.id && (
-                    <div className="ml-0 mt-1 mb-2 p-3 bg-gray-800/50 rounded-lg border border-gray-700/50 space-y-3">
+                    <div className="ml-0 mt-1 mb-2 p-3 bg-theme-bg-elevated/50 rounded-lg border border-theme-border-light/50 space-y-3">
                       <div className="flex items-center gap-4">
-                        <label className="text-xs text-gray-400 w-24 shrink-0">Temperature</label>
+                        <label className="text-xs text-theme-subtle w-24 shrink-0">Temperature</label>
                         <input
                           type="range" min="0" max="2" step="0.1"
                           value={configForm.temperature}
                           onChange={e => setConfigForm(f => ({ ...f, temperature: parseFloat(e.target.value) }))}
-                          className="flex-1 h-1.5 rounded-full appearance-none bg-gray-600 accent-emerald-500 cursor-pointer"
+                          className="flex-1 h-1.5 rounded-full appearance-none bg-theme-switch-off accent-theme-focus-ring cursor-pointer"
                         />
-                        <span className="text-xs text-gray-300 w-8 text-right">{configForm.temperature.toFixed(1)}</span>
+                        <span className="text-xs text-theme-text-secondary w-8 text-right">{configForm.temperature.toFixed(1)}</span>
                       </div>
                       <div className="flex items-center gap-4">
-                        <label className="text-xs text-gray-400 w-24 shrink-0">Max Tokens</label>
+                        <label className="text-xs text-theme-subtle w-24 shrink-0">Max Tokens</label>
                         <input
                           type="number" min="1" max="200000"
                           value={configForm.max_tokens}
                           onChange={e => setConfigForm(f => ({ ...f, max_tokens: parseInt(e.target.value) || 4096 }))}
-                          className="flex-1 bg-gray-700 rounded px-2 py-1 text-sm border border-gray-600 focus:outline-none focus:border-emerald-500"
+                          className="flex-1 bg-theme-bg-hover rounded px-2 py-1 text-sm border border-theme-switch-off focus:outline-none focus:border-theme-focus-ring"
                         />
                       </div>
                       <div className="flex items-center gap-4">
-                        <label className="text-xs text-gray-400 w-24 shrink-0 flex items-center gap-1">
+                        <label className="text-xs text-theme-subtle w-24 shrink-0 flex items-center gap-1">
                           <Brain className="w-3 h-3" /> Thinking
                         </label>
                         <button
                           onClick={() => setConfigForm(f => ({ ...f, thinking_enabled: !f.thinking_enabled }))}
-                          className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${configForm.thinking_enabled ? 'bg-purple-600' : 'bg-gray-600'}`}
+                          className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${configForm.thinking_enabled ? 'bg-theme-purple' : 'bg-theme-switch-off'}`}
                         >
                           <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${configForm.thinking_enabled ? 'left-4' : 'left-0.5'}`} />
                         </button>
-                        <span className="text-xs text-gray-500">{configForm.thinking_enabled ? 'Enabled' : 'Disabled'}</span>
+                        <span className="text-xs text-theme-muted">{configForm.thinking_enabled ? 'Enabled' : 'Disabled'}</span>
                       </div>
                       {configForm.thinking_enabled && (
                         <div className="flex items-center gap-4">
-                          <label className="text-xs text-gray-400 w-24 shrink-0">Budget Tokens</label>
+                          <label className="text-xs text-theme-subtle w-24 shrink-0">Budget Tokens</label>
                           <input
                             type="number" min="1024" max="100000"
                             value={configForm.thinking_budget_tokens}
                             onChange={e => setConfigForm(f => ({ ...f, thinking_budget_tokens: parseInt(e.target.value) || 4000 }))}
-                            className="flex-1 bg-gray-700 rounded px-2 py-1 text-sm border border-gray-600 focus:outline-none focus:border-emerald-500"
+                            className="flex-1 bg-theme-bg-hover rounded px-2 py-1 text-sm border border-theme-switch-off focus:outline-none focus:border-theme-focus-ring"
                           />
                         </div>
                       )}
                       <div className="flex items-center gap-4">
-                        <label className="text-xs text-gray-400 w-24 shrink-0">Model Type</label>
+                        <label className="text-xs text-theme-subtle w-24 shrink-0">Model Type</label>
                         <select
                           value={configForm.model_type}
                           onChange={e => setConfigForm(f => ({ ...f, model_type: e.target.value }))}
-                          className="flex-1 bg-gray-700 rounded px-2 py-1 text-sm border border-gray-600 focus:outline-none focus:border-emerald-500"
+                          className="flex-1 bg-theme-bg-hover rounded px-2 py-1 text-sm border border-theme-switch-off focus:outline-none focus:border-theme-focus-ring"
                         >
                           <option value="chat">Chat</option>
                           <option value="image">Image Generation</option>
                         </select>
                       </div>
                       <div className="flex items-center gap-4">
-                        <label className="text-xs text-gray-400 w-24 shrink-0 flex items-center gap-1">
+                        <label className="text-xs text-theme-subtle w-24 shrink-0 flex items-center gap-1">
                           <Eye className="w-3 h-3" /> Vision
                         </label>
                         <button
                           onClick={() => setConfigForm(f => ({ ...f, vision_enabled: !f.vision_enabled }))}
-                          className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${configForm.vision_enabled ? 'bg-purple-600' : 'bg-gray-600'}`}
+                          className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${configForm.vision_enabled ? 'bg-theme-purple' : 'bg-theme-switch-off'}`}
                         >
                           <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${configForm.vision_enabled ? 'left-4' : 'left-0.5'}`} />
                         </button>
-                        <span className="text-xs text-gray-500">{configForm.vision_enabled ? 'Enabled' : 'Disabled'}</span>
+                        <span className="text-xs text-theme-muted">{configForm.vision_enabled ? 'Enabled' : 'Disabled'}</span>
                       </div>
                       <div className="flex items-center gap-4">
-                        <label className="text-xs text-gray-400 w-24 shrink-0 flex items-center gap-1">
+                        <label className="text-xs text-theme-subtle w-24 shrink-0 flex items-center gap-1">
                           <Wrench className="w-3 h-3" /> Tools
                         </label>
                         <button
                           onClick={() => setConfigForm(f => ({ ...f, tools_enabled: !f.tools_enabled }))}
-                          className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${configForm.tools_enabled ? 'bg-purple-600' : 'bg-gray-600'}`}
+                          className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${configForm.tools_enabled ? 'bg-theme-purple' : 'bg-theme-switch-off'}`}
                         >
                           <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${configForm.tools_enabled ? 'left-4' : 'left-0.5'}`} />
                         </button>
-                        <span className="text-xs text-gray-500">{configForm.tools_enabled ? 'Enabled' : 'Disabled'}</span>
+                        <span className="text-xs text-theme-muted">{configForm.tools_enabled ? 'Enabled' : 'Disabled'}</span>
                       </div>
                       <div className="flex gap-2 pt-1">
                         <button
                           onClick={() => handleConfigure(model.id)}
-                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-xs font-medium"
+                          className="px-3 py-1.5 bg-theme-accent hover:bg-theme-accent-hover rounded-lg text-xs font-medium"
                         >
                           Save Config
                         </button>
                         <button
                           onClick={() => setConfiguringId(null)}
-                          className="px-3 py-1.5 hover:bg-gray-700 rounded-lg text-xs"
+                          className="px-3 py-1.5 hover:bg-theme-bg-active rounded-lg text-xs"
                         >
                           Cancel
                         </button>
@@ -744,28 +744,28 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
         <div key={provider.provider_key}>
           <div className="flex items-center gap-2 mb-3">
             <h3 className="font-semibold text-sm">{provider.provider_name}</h3>
-            {provider.error && <span className="text-xs text-red-400">Scan error: {provider.error}</span>}
-            {!provider.error && <span className="text-xs text-gray-500">{provider.models.length} models</span>}
+            {provider.error && <span className="text-xs text-theme-danger-text">Scan error: {provider.error}</span>}
+            {!provider.error && <span className="text-xs text-theme-muted">{provider.models.length} models</span>}
           </div>
           {provider.error ? (
-            <div className="text-xs text-red-400 bg-red-900/20 rounded-lg px-3 py-2">Failed to fetch models: {provider.error}</div>
+            <div className="text-xs text-theme-danger-text bg-theme-danger/20 rounded-lg px-3 py-2">Failed to fetch models: {provider.error}</div>
           ) : (
             <div className="space-y-1">
               {provider.models.map(model => {
                 const on = isEnabled(provider, model.id)
                 const busy = toggling.has(`${provider.provider_key}:${model.id}`)
                 return (
-                  <div key={model.id} className="flex items-center gap-3 px-3 py-2 bg-gray-800/30 rounded-lg hover:bg-gray-800/50 transition-colors">
+                  <div key={model.id} className="flex items-center gap-3 px-3 py-2 bg-theme-bg-elevated/30 rounded-lg hover:bg-theme-bg-hover/50 transition-colors">
                     <button
                       onClick={() => handleToggle(provider, model.id, !on)}
                       disabled={busy}
-                      className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${busy ? 'opacity-50' : ''} ${on ? 'bg-emerald-600' : 'bg-gray-600'}`}
+                      className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${busy ? 'opacity-50' : ''} ${on ? 'bg-theme-accent' : 'bg-theme-switch-off'}`}
                     >
                       <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${on ? 'left-4' : 'left-0.5'}`} />
                     </button>
                     <div className="flex-1 min-w-0">
-                      <div className={`text-sm font-medium truncate ${on ? 'text-emerald-400' : 'text-gray-500'}`}>{model.name}</div>
-                      <div className="text-xs text-gray-500 truncate">{model.id}</div>
+                      <div className={`text-sm font-medium truncate ${on ? 'text-theme-accent-text' : 'text-theme-muted'}`}>{model.name}</div>
+                      <div className="text-xs text-theme-muted truncate">{model.id}</div>
                     </div>
                   </div>
                 )
@@ -813,26 +813,26 @@ function ApiKeysTab() {
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-gray-500">Existing keys cannot be read — only overwritten. Leave blank to keep current value.</p>
+      <p className="text-xs text-theme-muted">Existing keys cannot be read — only overwritten. Leave blank to keep current value.</p>
       {(envStatus?.available || []).map(key => (
         <div key={key}>
           <label className="flex items-center gap-2 text-sm mb-1">
             <span>{envLabels[key] || key}</span>
-            {envStatus?.configured.includes(key) && <span className="text-xs text-emerald-400">(configured)</span>}
+            {envStatus?.configured.includes(key) && <span className="text-xs text-theme-accent-text">(configured)</span>}
           </label>
           <input
             type={isPasswordField(key) ? 'password' : 'text'}
             placeholder={envStatus?.configured.includes(key) ? '********' : isPasswordField(key) ? 'Enter...' : 'https://your-lnbits.com'}
             value={updates[key] || ''}
             onChange={e => setUpdates(u => ({ ...u, [key]: e.target.value }))}
-            className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm border border-gray-700 focus:outline-none focus:border-emerald-500"
+            className="w-full bg-theme-bg-elevated rounded-lg px-3 py-2 text-sm border border-theme-border-light focus:outline-none focus:border-theme-focus-ring"
           />
         </div>
       ))}
       <button
         onClick={handleSave}
         disabled={saving || Object.keys(updates).length === 0}
-        className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 disabled:text-gray-500 rounded-lg text-sm font-medium"
+        className="w-full py-2 bg-theme-accent hover:bg-theme-accent-hover disabled:bg-theme-bg-hover disabled:text-theme-muted rounded-lg text-sm font-medium"
       >
         {saving ? 'Saving...' : 'Save Keys'}
       </button>
@@ -956,78 +956,78 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
     } catch (e: any) { setError(e.message) }
   }
 
-  if (loading) return <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-gray-400" /></div>
+  if (loading) return <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-theme-subtle" /></div>
 
   return (
     <div className="space-y-6">
-      {error && <div className="bg-red-900/30 border border-red-800 rounded-lg px-3 py-2 text-sm text-red-300">{error}</div>}
+      {error && <div className="bg-theme-danger/30 border border-theme-danger rounded-lg px-3 py-2 text-sm text-theme-danger-text">{error}</div>}
 
       {/* Plans */}
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-gray-400">Plans</h3>
+          <h3 className="text-sm font-semibold text-theme-subtle">Plans</h3>
           <button
             onClick={() => setCreating(!creating)}
-            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm flex items-center gap-1"
+            className="px-3 py-1.5 bg-theme-accent hover:bg-theme-accent-hover rounded-lg text-sm flex items-center gap-1"
           >
             <Plus className="w-3.5 h-3.5" /> New Plan
           </button>
         </div>
 
         {creating && (
-          <div className="bg-gray-800/40 rounded-lg p-4 mb-3 space-y-3">
+          <div className="bg-theme-bg-elevated/40 rounded-lg p-4 mb-3 space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs text-gray-500">Name</label>
+                <label className="text-xs text-theme-muted">Name</label>
                 <input
                   value={newPlan.name}
                   onChange={e => setNewPlan(p => ({ ...p, name: e.target.value }))}
                   placeholder="e.g. Pro"
-                  className="w-full bg-gray-800 rounded px-3 py-1.5 text-sm border border-gray-700 focus:outline-none focus:border-emerald-500 mt-1"
+                  className="w-full bg-theme-bg-elevated rounded px-3 py-1.5 text-sm border border-theme-border-light focus:outline-none focus:border-theme-focus-ring mt-1"
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-500">Price (sats)</label>
+                <label className="text-xs text-theme-muted">Price (sats)</label>
                 <input
                   type="number"
                   value={newPlan.price_sats}
                   onChange={e => setNewPlan(p => ({ ...p, price_sats: parseInt(e.target.value) || 0 }))}
-                  className="w-full bg-gray-800 rounded px-3 py-1.5 text-sm border border-gray-700 focus:outline-none focus:border-emerald-500 mt-1"
+                  className="w-full bg-theme-bg-elevated rounded px-3 py-1.5 text-sm border border-theme-border-light focus:outline-none focus:border-theme-focus-ring mt-1"
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-500">Duration (days)</label>
+                <label className="text-xs text-theme-muted">Duration (days)</label>
                 <input
                   type="number"
                   value={newPlan.duration_days}
                   onChange={e => setNewPlan(p => ({ ...p, duration_days: parseInt(e.target.value) || 0 }))}
-                  className="w-full bg-gray-800 rounded px-3 py-1.5 text-sm border border-gray-700 focus:outline-none focus:border-emerald-500 mt-1"
+                  className="w-full bg-theme-bg-elevated rounded px-3 py-1.5 text-sm border border-theme-border-light focus:outline-none focus:border-theme-focus-ring mt-1"
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-500">Global token limit (optional)</label>
+                <label className="text-xs text-theme-muted">Global token limit (optional)</label>
                 <input
                   type="number"
                   value={newPlan.token_limit}
                   onChange={e => setNewPlan(p => ({ ...p, token_limit: e.target.value }))}
                   placeholder="Unlimited"
-                  className="w-full bg-gray-800 rounded px-3 py-1.5 text-sm border border-gray-700 focus:outline-none focus:border-emerald-500 mt-1"
+                  className="w-full bg-theme-bg-elevated rounded px-3 py-1.5 text-sm border border-theme-border-light focus:outline-none focus:border-theme-focus-ring mt-1"
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-500">Global image limit (optional)</label>
+                <label className="text-xs text-theme-muted">Global image limit (optional)</label>
                 <input
                   type="number"
                   value={newPlan.image_limit}
                   onChange={e => setNewPlan(p => ({ ...p, image_limit: e.target.value }))}
                   placeholder="Unlimited"
-                  className="w-full bg-gray-800 rounded px-3 py-1.5 text-sm border border-gray-700 focus:outline-none focus:border-emerald-500 mt-1"
+                  className="w-full bg-theme-bg-elevated rounded px-3 py-1.5 text-sm border border-theme-border-light focus:outline-none focus:border-theme-focus-ring mt-1"
                 />
               </div>
             </div>
             <div className="flex gap-2">
-              <button onClick={handleCreate} className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded text-sm">Create</button>
-              <button onClick={() => setCreating(false)} className="px-4 py-1.5 hover:bg-gray-700 rounded text-sm">Cancel</button>
+              <button onClick={handleCreate} className="px-4 py-1.5 bg-theme-accent hover:bg-theme-accent-hover rounded text-sm">Create</button>
+              <button onClick={() => setCreating(false)} className="px-4 py-1.5 hover:bg-theme-bg-active rounded text-sm">Cancel</button>
             </div>
           </div>
         )}
@@ -1036,75 +1036,75 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
           {plans.map(plan => (
             <div key={plan.id}>
               {editingPlan === plan.id ? (
-                <div className="bg-gray-800/40 rounded-lg p-4 space-y-3">
+                <div className="bg-theme-bg-elevated/40 rounded-lg p-4 space-y-3">
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="text-xs text-gray-500">Name</label>
+                      <label className="text-xs text-theme-muted">Name</label>
                       <input
                         value={editPlanData.name}
                         onChange={e => setEditPlanData(d => ({ ...d, name: e.target.value }))}
-                        className="w-full bg-gray-800 rounded px-3 py-1.5 text-sm border border-gray-700 focus:outline-none focus:border-emerald-500 mt-1"
+                        className="w-full bg-theme-bg-elevated rounded px-3 py-1.5 text-sm border border-theme-border-light focus:outline-none focus:border-theme-focus-ring mt-1"
                       />
                     </div>
                     <div>
-                      <label className="text-xs text-gray-500">Price (sats)</label>
+                      <label className="text-xs text-theme-muted">Price (sats)</label>
                       <input
                         type="number"
                         value={editPlanData.price_sats}
                         onChange={e => setEditPlanData(d => ({ ...d, price_sats: parseInt(e.target.value) || 0 }))}
-                        className="w-full bg-gray-800 rounded px-3 py-1.5 text-sm border border-gray-700 focus:outline-none focus:border-emerald-500 mt-1"
+                        className="w-full bg-theme-bg-elevated rounded px-3 py-1.5 text-sm border border-theme-border-light focus:outline-none focus:border-theme-focus-ring mt-1"
                       />
                     </div>
                     <div>
-                      <label className="text-xs text-gray-500">Duration (days)</label>
+                      <label className="text-xs text-theme-muted">Duration (days)</label>
                       <input
                         type="number"
                         value={editPlanData.duration_days}
                         onChange={e => setEditPlanData(d => ({ ...d, duration_days: parseInt(e.target.value) || 0 }))}
-                        className="w-full bg-gray-800 rounded px-3 py-1.5 text-sm border border-gray-700 focus:outline-none focus:border-emerald-500 mt-1"
+                        className="w-full bg-theme-bg-elevated rounded px-3 py-1.5 text-sm border border-theme-border-light focus:outline-none focus:border-theme-focus-ring mt-1"
                       />
                     </div>
                   <div>
-                    <label className="text-xs text-gray-500">Global token limit (optional)</label>
+                    <label className="text-xs text-theme-muted">Global token limit (optional)</label>
                     <input
                       type="number"
                       value={editPlanData.token_limit}
                       onChange={e => setEditPlanData(d => ({ ...d, token_limit: e.target.value }))}
                       placeholder="Unlimited"
-                      className="w-full bg-gray-800 rounded px-3 py-1.5 text-sm border border-gray-700 focus:outline-none focus:border-emerald-500 mt-1"
+                      className="w-full bg-theme-bg-elevated rounded px-3 py-1.5 text-sm border border-theme-border-light focus:outline-none focus:border-theme-focus-ring mt-1"
                     />
                   </div>
                   <div>
-                    <label className="text-xs text-gray-500">Global image limit (optional)</label>
+                    <label className="text-xs text-theme-muted">Global image limit (optional)</label>
                     <input
                       type="number"
                       value={editPlanData.image_limit}
                       onChange={e => setEditPlanData(d => ({ ...d, image_limit: e.target.value }))}
                       placeholder="Unlimited"
-                      className="w-full bg-gray-800 rounded px-3 py-1.5 text-sm border border-gray-700 focus:outline-none focus:border-emerald-500 mt-1"
+                      className="w-full bg-theme-bg-elevated rounded px-3 py-1.5 text-sm border border-theme-border-light focus:outline-none focus:border-theme-focus-ring mt-1"
                     />
                   </div>
                   </div>
                   <div className="flex gap-2">
-                    <button onClick={() => handleUpdate(plan.id)} className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded text-sm">Save</button>
-                    <button onClick={() => setEditingPlan(null)} className="px-4 py-1.5 hover:bg-gray-700 rounded text-sm">Cancel</button>
+                    <button onClick={() => handleUpdate(plan.id)} className="px-4 py-1.5 bg-theme-accent hover:bg-theme-accent-hover rounded text-sm">Save</button>
+                    <button onClick={() => setEditingPlan(null)} className="px-4 py-1.5 hover:bg-theme-bg-active rounded text-sm">Cancel</button>
                   </div>
                 </div>
               ) : (
-                <div className="bg-gray-800/40 rounded-lg px-4 py-3">
+                <div className="bg-theme-bg-elevated/40 rounded-lg px-4 py-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <span className="font-medium">{plan.name}</span>
-                      <span className="text-xs text-emerald-400">{plan.price_sats === 0 ? 'Free' : `${plan.price_sats.toLocaleString()} sats`}</span>
-                      <span className="text-xs text-gray-500">{plan.duration_days > 0 ? `${plan.duration_days}d` : 'Unlimited'}</span>
-                      {plan.token_limit && <span className="text-xs text-gray-500">{plan.token_limit.toLocaleString()} tokens</span>}
-                      {plan.image_limit && <span className="text-xs text-gray-500">{plan.image_limit.toLocaleString()} images</span>}
-                      {!plan.enabled && <span className="text-xs px-1.5 py-0.5 bg-red-600/30 text-red-400 rounded">Disabled</span>}
+                      <span className="text-xs text-theme-accent-text">{plan.price_sats === 0 ? 'Free' : `${plan.price_sats.toLocaleString()} sats`}</span>
+                      <span className="text-xs text-theme-muted">{plan.duration_days > 0 ? `${plan.duration_days}d` : 'Unlimited'}</span>
+                      {plan.token_limit && <span className="text-xs text-theme-muted">{plan.token_limit.toLocaleString()} tokens</span>}
+                      {plan.image_limit && <span className="text-xs text-theme-muted">{plan.image_limit.toLocaleString()} images</span>}
+                      {!plan.enabled && <span className="text-xs px-1.5 py-0.5 bg-theme-danger/30 text-theme-danger-text rounded">Disabled</span>}
                     </div>
                     <div className="flex items-center gap-1">
                       <button
                         onClick={() => limitsPlan === plan.id ? setLimitsPlan(null) : loadLimits(plan.id)}
-                        className={`p-1.5 rounded text-xs ${limitsPlan === plan.id ? 'bg-emerald-600/30 text-emerald-400' : 'hover:bg-gray-700 text-gray-500 hover:text-gray-300'}`}
+                        className={`p-1.5 rounded text-xs ${limitsPlan === plan.id ? 'bg-theme-accent/30 text-theme-accent-text' : 'hover:bg-theme-bg-active text-theme-muted hover:text-theme-text'}`}
                         title="Per-model limits"
                       >
                         <Wrench className="w-3.5 h-3.5" />
@@ -1120,14 +1120,14 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
                             image_limit: plan.image_limit?.toString() || '',
                           })
                         }}
-                        className="p-1.5 hover:bg-gray-700 rounded text-gray-500 hover:text-gray-300"
+                        className="p-1.5 hover:bg-theme-bg-active rounded text-theme-muted hover:text-theme-text"
                       >
                         <Edit3 className="w-3.5 h-3.5" />
                       </button>
                       {plan.name !== 'Free' && (
                         <button
                           onClick={() => handleDelete(plan.id, plan.name)}
-                          className="p-1.5 hover:bg-red-800/30 rounded text-gray-500 hover:text-red-400"
+                          className="p-1.5 hover:bg-theme-danger/30 rounded text-theme-muted hover:text-theme-danger-text"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -1136,32 +1136,32 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
                   </div>
 
                   {limitsPlan === plan.id && (
-                    <div className="mt-3 pt-3 border-t border-gray-700 space-y-2">
-                      <p className="text-xs text-gray-500">Per-model limits for <span className="text-emerald-400">{plan.name}</span>. Empty = no limit.</p>
+                    <div className="mt-3 pt-3 border-t border-theme-border-light space-y-2">
+                      <p className="text-xs text-theme-muted">Per-model limits for <span className="text-theme-accent-text">{plan.name}</span>. Empty = no limit.</p>
                       {models.length === 0 ? (
-                        <p className="text-xs text-gray-500">No enabled models</p>
+                        <p className="text-xs text-theme-muted">No enabled models</p>
                       ) : (
                         <>
                           {models.map(m => (
                             <div key={m.id} className="flex items-center gap-2">
-                              <span className="text-xs text-gray-400 w-32 truncate">{m.name}</span>
+                              <span className="text-xs text-theme-subtle w-32 truncate">{m.name}</span>
                               <input
                                 type="number"
                                 value={limitValues[m.id] || ''}
                                 onChange={e => setLimitValues(v => ({ ...v, [m.id]: e.target.value }))}
                                 placeholder="Token lim"
-                                className="w-20 bg-gray-800 rounded px-2 py-1 text-xs border border-gray-700 focus:outline-none focus:border-emerald-500"
+                                className="w-20 bg-theme-bg-elevated rounded px-2 py-1 text-xs border border-theme-border-light focus:outline-none focus:border-theme-focus-ring"
                               />
                               <input
                                 type="number"
                                 value={limitImageValues[m.id] || ''}
                                 onChange={e => setLimitImageValues(v => ({ ...v, [m.id]: e.target.value }))}
                                 placeholder="Image lim"
-                                className="w-20 bg-gray-800 rounded px-2 py-1 text-xs border border-gray-700 focus:outline-none focus:border-emerald-500"
+                                className="w-20 bg-theme-bg-elevated rounded px-2 py-1 text-xs border border-theme-border-light focus:outline-none focus:border-theme-focus-ring"
                               />
                             </div>
                           ))}
-                          <button onClick={handleSetLimits} disabled={savingLimits} className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded text-sm disabled:opacity-50">
+                          <button onClick={handleSetLimits} disabled={savingLimits} className="px-4 py-1.5 bg-theme-accent hover:bg-theme-accent-hover rounded text-sm disabled:opacity-50">
                             {savingLimits ? 'Saving...' : 'Save Limits'}
                           </button>
                         </>
@@ -1178,16 +1178,16 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
       {/* Active Subscriptions */}
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-gray-400">Active Subscriptions</h3>
+          <h3 className="text-sm font-semibold text-theme-subtle">Active Subscriptions</h3>
           <button
             onClick={handleClearExpired}
-            className="px-3 py-1.5 bg-red-600/20 hover:bg-red-600/40 rounded-lg text-xs text-red-400 flex items-center gap-1"
+            className="px-3 py-1.5 bg-theme-danger/20 hover:bg-theme-danger/40 rounded-lg text-xs text-theme-danger-text flex items-center gap-1"
           >
             <Trash2 className="w-3.5 h-3.5" /> Clear Expired
           </button>
         </div>
         {subs.length === 0 ? (
-          <p className="text-xs text-gray-500">No subscriptions yet.</p>
+          <p className="text-xs text-theme-muted">No subscriptions yet.</p>
         ) : (
           <div className="space-y-1">
             {subs.map(sub => {
@@ -1195,27 +1195,27 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
                 ? Math.max(0, Math.ceil((new Date(sub.expires_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
                 : 0
               return (
-                <div key={sub.id} className="flex items-center justify-between bg-gray-800/30 rounded-lg px-3 py-2">
+                <div key={sub.id} className="flex items-center justify-between bg-theme-bg-elevated/30 rounded-lg px-3 py-2">
                   <div>
                     <span className="text-sm">{sub.plan_name || `Plan #${sub.plan_id}`}</span>
                     <span className={`ml-2 text-xs px-1.5 py-0.5 rounded ${
-                      sub.status === 'active' ? 'bg-emerald-600/30 text-emerald-400' :
-                      sub.status === 'pending' ? 'bg-amber-600/30 text-amber-400' :
-                      'bg-red-600/30 text-red-400'
+                      sub.status === 'active' ? 'bg-theme-accent/30 text-theme-accent-text' :
+                      sub.status === 'pending' ? 'bg-theme-amber/30 text-theme-amber' :
+                      'bg-theme-danger/30 text-theme-danger-text'
                     }`}>{sub.status}</span>
-                    <span className="text-xs text-gray-500 ml-2">User #{sub.user_id}</span>
+                    <span className="text-xs text-theme-muted ml-2">User #{sub.user_id}</span>
                     {sub.expires_at && sub.status === 'active' && (
-                      <span className="text-xs text-gray-500 ml-2">{daysLeft}d left</span>
+                      <span className="text-xs text-theme-muted ml-2">{daysLeft}d left</span>
                     )}
                   </div>
                   <div className="flex gap-1">
                     <button
                       onClick={() => handleSubStatus(sub.id, 'active')}
-                      className="px-2 py-1 text-xs hover:bg-emerald-800/30 rounded text-gray-500 hover:text-emerald-400"
+                      className="px-2 py-1 text-xs hover:bg-theme-accent/30 rounded text-theme-muted hover:text-theme-accent-text"
                     >Activate</button>
                     <button
                       onClick={() => handleSubStatus(sub.id, 'expired')}
-                      className="px-2 py-1 text-xs hover:bg-red-800/30 rounded text-gray-500 hover:text-red-400"
+                      className="px-2 py-1 text-xs hover:bg-theme-danger/30 rounded text-theme-muted hover:text-theme-danger-text"
                     >Expire</button>
                   </div>
                 </div>
@@ -1251,121 +1251,121 @@ function UploadsTab() {
     setSaving(false)
   }
 
-  if (!settings) return <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-gray-400" /></div>
+  if (!settings) return <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-theme-subtle" /></div>
 
   return (
     <div className="space-y-6">
-      {error && <div className="bg-red-900/30 border border-red-800 rounded-lg px-3 py-2 text-sm text-red-300">{error}</div>}
+      {error && <div className="bg-theme-danger/30 border border-theme-danger rounded-lg px-3 py-2 text-sm text-theme-danger-text">{error}</div>}
 
       <div>
-        <h3 className="text-sm font-semibold text-gray-400 mb-3">File Upload Configuration</h3>
-        <p className="text-xs text-gray-500 mb-4">Control how file uploads are handled. Changes apply immediately to all users.</p>
+        <h3 className="text-sm font-semibold text-theme-subtle mb-3">File Upload Configuration</h3>
+        <p className="text-xs text-theme-muted mb-4">Control how file uploads are handled. Changes apply immediately to all users.</p>
 
-        <div className="bg-gray-800/40 rounded-lg p-4 space-y-4">
+        <div className="bg-theme-bg-elevated/40 rounded-lg p-4 space-y-4">
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm font-medium flex items-center gap-2">
-                <Upload className="w-4 h-4 text-emerald-400" />
+                <Upload className="w-4 h-4 text-theme-accent-text" />
                 Enable File Uploads
               </div>
-              <p className="text-xs text-gray-500 mt-1">Allow users to upload images, documents, and code files in chat</p>
+              <p className="text-xs text-theme-muted mt-1">Allow users to upload images, documents, and code files in chat</p>
             </div>
             <button
               onClick={() => handleSave('file_upload_enabled', !settings.file_upload_enabled)}
               disabled={saving}
-              className={`w-9 h-5 rounded-full transition-colors relative ${saving ? 'opacity-50' : ''} ${settings.file_upload_enabled ? 'bg-emerald-600' : 'bg-gray-600'}`}
+              className={`w-9 h-5 rounded-full transition-colors relative ${saving ? 'opacity-50' : ''} ${settings.file_upload_enabled ? 'bg-theme-accent' : 'bg-theme-switch-off'}`}
             >
               <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${settings.file_upload_enabled ? 'left-4' : 'left-0.5'}`} />
             </button>
           </div>
         </div>
 
-        <div className="mt-4 bg-gray-800/40 rounded-lg p-4 space-y-4">
+        <div className="mt-4 bg-theme-bg-elevated/40 rounded-lg p-4 space-y-4">
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm font-medium flex items-center gap-2">
-                <Mic className="w-4 h-4 text-blue-400" />
+                <Mic className="w-4 h-4 text-theme-blue-text" />
                 Whisper Model (Speech-to-Text)
               </div>
-              <p className="text-xs text-gray-500 mt-1">Choose the Whisper model for voice transcription. Tiny is faster, Small is more accurate</p>
+              <p className="text-xs text-theme-muted mt-1">Choose the Whisper model for voice transcription. Tiny is faster, Small is more accurate</p>
             </div>
             <div className="flex items-center gap-2">
-              <span className={`text-xs cursor-pointer select-none ${settings.whisper_model === 'tiny' ? 'text-white font-semibold' : 'text-gray-500'}`} onClick={() => handleSave('whisper_model', 'tiny')}>Tiny</span>
+              <span className={`text-xs cursor-pointer select-none ${settings.whisper_model === 'tiny' ? 'text-theme-text font-semibold' : 'text-theme-muted'}`} onClick={() => handleSave('whisper_model', 'tiny')}>Tiny</span>
               <button
                 onClick={() => handleSave('whisper_model', settings.whisper_model === 'tiny' ? 'small' : 'tiny')}
                 disabled={saving}
-                className={`w-9 h-5 rounded-full transition-colors relative ${saving ? 'opacity-50' : ''} ${settings.whisper_model === 'small' ? 'bg-blue-600' : 'bg-gray-600'}`}
+                className={`w-9 h-5 rounded-full transition-colors relative ${saving ? 'opacity-50' : ''} ${settings.whisper_model === 'small' ? 'bg-theme-blue' : 'bg-theme-switch-off'}`}
               >
                 <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${settings.whisper_model === 'small' ? 'left-4' : 'left-0.5'}`} />
               </button>
-              <span className={`text-xs cursor-pointer select-none ${settings.whisper_model === 'small' ? 'text-white font-semibold' : 'text-gray-500'}`} onClick={() => handleSave('whisper_model', 'small')}>Small</span>
+              <span className={`text-xs cursor-pointer select-none ${settings.whisper_model === 'small' ? 'text-theme-text font-semibold' : 'text-theme-muted'}`} onClick={() => handleSave('whisper_model', 'small')}>Small</span>
             </div>
           </div>
         </div>
 
-        <div className="mt-4 bg-gray-800/40 rounded-lg p-4 space-y-4">
+        <div className="mt-4 bg-theme-bg-elevated/40 rounded-lg p-4 space-y-4">
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm font-medium flex items-center gap-2">
-                <File className="w-4 h-4 text-amber-400" />
+                <File className="w-4 h-4 text-theme-amber" />
                 Enable OCR (Tesseract)
               </div>
-              <p className="text-xs text-gray-500 mt-1">Auto-extract text from images using Tesseract OCR when the AI model doesn't support vision</p>
+              <p className="text-xs text-theme-muted mt-1">Auto-extract text from images using Tesseract OCR when the AI model doesn't support vision</p>
             </div>
             <button
               onClick={() => handleSave('ocr_enabled', !settings.ocr_enabled)}
               disabled={saving}
-              className={`w-9 h-5 rounded-full transition-colors relative ${saving ? 'opacity-50' : ''} ${settings.ocr_enabled ? 'bg-emerald-600' : 'bg-gray-600'}`}
+              className={`w-9 h-5 rounded-full transition-colors relative ${saving ? 'opacity-50' : ''} ${settings.ocr_enabled ? 'bg-theme-accent' : 'bg-theme-switch-off'}`}
             >
               <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${settings.ocr_enabled ? 'left-4' : 'left-0.5'}`} />
             </button>
           </div>
         </div>
 
-        <div className="mt-4 bg-gray-800/40 rounded-lg p-4 space-y-4">
+        <div className="mt-4 bg-theme-bg-elevated/40 rounded-lg p-4 space-y-4">
           <div>
             <div className="text-sm font-medium flex items-center gap-2 mb-2">
-              <Eye className="w-4 h-4 text-purple-400" />
+              <Eye className="w-4 h-4 text-theme-purple" />
               Image Handling for Non-Vision Models
             </div>
-            <p className="text-xs text-gray-500 mb-3">What happens when a user uploads an image to a model that doesn't support vision:</p>
+            <p className="text-xs text-theme-muted mb-3">What happens when a user uploads an image to a model that doesn't support vision:</p>
             <div className="space-y-2">
-              <label className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors ${settings.ocr_strategy === 'ocr' ? 'bg-emerald-900/30 border border-emerald-700/40' : 'bg-gray-800/50 border border-gray-700/30'}`}>
+              <label className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors ${settings.ocr_strategy === 'ocr' ? 'bg-theme-accent/30 border border-theme-accent/40' : 'bg-theme-bg-elevated/50 border border-theme-border-light/30'}`}>
                 <input
                   type="radio"
                   name="ocr_strategy"
                   value="ocr"
                   checked={settings.ocr_strategy === 'ocr'}
                   onChange={() => handleSave('ocr_strategy', 'ocr')}
-                  className="accent-emerald-500"
+                  className="accent-theme-focus-ring"
                 />
                 <div>
                   <div className="text-sm">OCR Fallback</div>
-                  <div className="text-xs text-gray-500">Extract text from images using Tesseract OCR and pass it to the AI (recommended)</div>
+                  <div className="text-xs text-theme-muted">Extract text from images using Tesseract OCR and pass it to the AI (recommended)</div>
                 </div>
               </label>
-              <label className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors ${settings.ocr_strategy === 'deny' ? 'bg-red-900/30 border border-red-700/40' : 'bg-gray-800/50 border border-gray-700/30'}`}>
+              <label className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors ${settings.ocr_strategy === 'deny' ? 'bg-theme-danger/30 border border-theme-danger/40' : 'bg-theme-bg-elevated/50 border border-theme-border-light/30'}`}>
                 <input
                   type="radio"
                   name="ocr_strategy"
                   value="deny"
                   checked={settings.ocr_strategy === 'deny'}
                   onChange={() => handleSave('ocr_strategy', 'deny')}
-                  className="accent-red-500"
+                  className="accent-theme-danger"
                 />
                 <div>
                   <div className="text-sm">Deny Image Uploads</div>
-                  <div className="text-xs text-gray-500">Block image uploads for non-vision models. Users must use a vision-capable model</div>
+                  <div className="text-xs text-theme-muted">Block image uploads for non-vision models. Users must use a vision-capable model</div>
                 </div>
               </label>
             </div>
           </div>
         </div>
 
-        <div className="mt-4 p-4 bg-blue-900/20 border border-blue-800/30 rounded-lg">
-          <div className="text-xs text-blue-300 font-medium mb-1">What's a Vision Model?</div>
-          <p className="text-xs text-blue-200/70">Vision-capable models can "see" and understand images directly. Examples: GPT-4o, Claude 3.5 Sonnet, Gemini Pro Vision, Qwen-VL. These models bypass OCR entirely for more accurate image understanding.</p>
-          <p className="text-xs text-blue-200/70 mt-1">Set each model's Vision capability in the <span className="text-blue-300">Models</span> tab.</p>
+        <div className="mt-4 p-4 bg-theme-accent/10 border border-theme-accent/20 rounded-lg">
+          <div className="text-xs text-theme-accent-text font-medium mb-1">What's a Vision Model?</div>
+          <p className="text-xs text-theme-accent-text/70">Vision-capable models can "see" and understand images directly. Examples: GPT-4o, Claude 3.5 Sonnet, Gemini Pro Vision, Qwen-VL. These models bypass OCR entirely for more accurate image understanding.</p>
+          <p className="text-xs text-theme-accent-text/70 mt-1">Set each model's Vision capability in the <span className="text-theme-accent-text">Models</span> tab.</p>
         </div>
       </div>
     </div>

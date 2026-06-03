@@ -773,8 +773,8 @@ function App() {
   // Auth screens
   if (authLoading) {
     return (
-      <div className="h-screen flex items-center justify-center bg-gray-950">
-        <Loader2 className="w-8 h-8 animate-spin text-emerald-400" />
+      <div className="h-screen flex items-center justify-center bg-theme-bg">
+        <Loader2 className="w-8 h-8 animate-spin text-theme-accent-text" />
       </div>
     )
   }
@@ -790,20 +790,20 @@ function App() {
   const isAdmin = currentUser.role === 'owner' || currentUser.role === 'admin'
 
   return (
-    <div className="h-screen flex bg-gray-950 text-gray-100 overflow-hidden">
+    <div className="h-screen flex bg-theme-bg text-theme-text overflow-hidden">
       {/* Sidebar */}
-      <div className={`${showSidebar ? 'w-72' : 'w-0'} transition-all duration-200 border-r border-gray-800 flex flex-col overflow-hidden bg-gray-900`}>
-        <div className="p-3 border-b border-gray-800 flex items-center justify-between">
+      <div className={`${showSidebar ? 'w-72' : 'w-0'} transition-all duration-200 border-r border-theme-border flex flex-col overflow-hidden bg-theme-bg-secondary`}>
+        <div className="p-3 border-b border-theme-border flex items-center justify-between">
           <h1 className="font-bold text-lg flex items-center gap-2">
-            <Bot className="w-5 h-5 text-emerald-400" />
+            <Bot className="w-5 h-5 text-theme-accent-text" />
             LLMDash
           </h1>
-          <button onClick={() => setShowSidebar(false)} className="p-1 hover:bg-gray-800 rounded">
+          <button onClick={() => setShowSidebar(false)} className="p-1 hover:bg-theme-bg-elevated rounded">
             <ChevronLeft className="w-4 h-4" />
           </button>
         </div>
         <div className="p-2">
-          <button onClick={createConv} className="w-full flex items-center gap-2 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm font-medium transition-colors">
+          <button onClick={createConv} className="w-full flex items-center gap-2 px-3 py-2 bg-theme-accent hover:bg-theme-accent-hover rounded-lg text-sm font-medium transition-colors">
             <Plus className="w-4 h-4" /> New Chat
           </button>
         </div>
@@ -813,67 +813,67 @@ function App() {
               key={conv.id}
               onClick={() => selectConv(conv)}
               className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer text-sm group transition-colors ${
-                activeConv?.id === conv.id ? 'bg-gray-700' : 'hover:bg-gray-800'
+                activeConv?.id === conv.id ? 'bg-theme-bg-hover' : 'hover:bg-theme-bg-elevated'
               }`}
             >
-              <MessageSquare className="w-4 h-4 shrink-0 text-gray-400" />
+              <MessageSquare className="w-4 h-4 shrink-0 text-theme-subtle" />
               <span className="truncate flex-1">{conv.title}</span>
               <button
                 onClick={e => { e.stopPropagation(); deleteConv(conv.id) }}
-                className="p-1 hover:bg-red-600/20 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                className="p-1 hover:bg-theme-danger/20 rounded opacity-0 group-hover:opacity-100 transition-opacity"
               >
-                <Trash2 className="w-3 h-3 text-red-400" />
+                <Trash2 className="w-3 h-3 text-theme-danger-text" />
               </button>
             </div>
           ))}
         </div>
         {models.find(m => m.id === selectedModelId) && (
-          <div className="px-3 py-2 border-t border-gray-800 text-xs text-gray-500 flex items-center gap-2">
+          <div className="px-3 py-2 border-t border-theme-border text-xs text-theme-muted flex items-center gap-2">
             {models.find(m => m.id === selectedModelId)?.model_type === 'image'
-              ? <Image className="w-3 h-3 text-purple-400" />
-              : <Bot className="w-3 h-3 text-emerald-400" />}
+              ? <Image className="w-3 h-3 text-theme-purple" />
+              : <Bot className="w-3 h-3 text-theme-accent-text" />}
             <span className="truncate">{models.find(m => m.id === selectedModelId)?.name}</span>
           </div>
         )}
-        <div className="p-2 border-t border-gray-800 space-y-1">
+        <div className="p-2 border-t border-theme-border space-y-1">
           {isAdmin && (
-            <button onClick={() => setShowAdmin(true)} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-800 rounded-lg text-sm">
-              <Shield className="w-4 h-4 text-emerald-400" /> Admin Panel
+            <button onClick={() => setShowAdmin(true)} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-theme-bg-elevated rounded-lg text-sm">
+              <Shield className="w-4 h-4 text-theme-accent-text" /> Admin Panel
             </button>
           )}
-          <button onClick={() => setShowSubscription(true)} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-800 rounded-lg text-sm">
-            <CreditCard className="w-4 h-4 text-emerald-400" /> Subscription
+          <button onClick={() => setShowSubscription(true)} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-theme-bg-elevated rounded-lg text-sm">
+            <CreditCard className="w-4 h-4 text-theme-accent-text" /> Subscription
           </button>
-          <button onClick={() => setShowCustomCss(true)} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-800 rounded-lg text-sm">
-            <Palette className="w-4 h-4 text-emerald-400" /> Custom CSS
+          <button onClick={() => setShowCustomCss(true)} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-theme-bg-elevated rounded-lg text-sm">
+            <Palette className="w-4 h-4 text-theme-accent-text" /> Custom CSS
           </button>
-          <div className="flex items-center gap-2 px-3 py-2 text-xs text-gray-500">
+          <div className="flex items-center gap-2 px-3 py-2 text-xs text-theme-muted">
             <span className="truncate flex-1">
               {currentUser.username}
-              <span className={`ml-1 ${currentUser.role === 'owner' ? 'text-amber-400' : currentUser.role === 'admin' ? 'text-emerald-400' : 'text-gray-500'}`}>
+              <span className={`ml-1 ${currentUser.role === 'owner' ? 'text-theme-amber' : currentUser.role === 'admin' ? 'text-theme-accent-text' : 'text-theme-muted'}`}>
                 ({currentUser.role})
               </span>
             </span>
-            <button onClick={handleLogout} className="p-1 hover:bg-gray-800 rounded text-gray-500 hover:text-red-400" title="Logout">
+            <button onClick={handleLogout} className="p-1 hover:bg-theme-bg-elevated rounded text-theme-muted hover:text-theme-danger-text" title="Logout">
               <LogOut className="w-3.5 h-3.5" />
             </button>
           </div>
-          <div className="px-3 py-1 text-xs text-gray-500">
+          <div className="px-3 py-1 text-xs text-theme-muted">
             <span className="font-mono">{(() => {
               const modelUsage = selectedModelId && currentUser.token_usage_by_model ? currentUser.token_usage_by_model[selectedModelId]?.token_usage : undefined
               return modelUsage !== undefined ? modelUsage.toLocaleString() : (currentUser.token_usage || 0).toLocaleString()
             })()}</span> tokens used
             {selectedModelId && currentUser.token_usage_by_model && currentUser.token_usage_by_model[selectedModelId] !== undefined && (
-              <span className="text-gray-600"> on this model</span>
+              <span className="text-theme-subtle"> on this model</span>
             )}
             {!selectedModelId && currentUser.token_limit && (
-              <span> / <span className={currentUser.token_usage >= currentUser.token_limit ? 'text-red-400' : ''}>{currentUser.token_limit.toLocaleString()}</span></span>
+              <span> / <span className={currentUser.token_usage >= currentUser.token_limit ? 'text-theme-danger-text' : ''}>{currentUser.token_limit.toLocaleString()}</span></span>
             )}
           </div>
-          <div className="px-3 py-1 text-xs text-gray-500">
+          <div className="px-3 py-1 text-xs text-theme-muted">
             <span className="font-mono">{(currentUser.image_usage || 0).toLocaleString()}</span> images used
             {currentUser.image_limit && (
-              <span> / <span className={currentUser.image_usage >= currentUser.image_limit ? 'text-red-400' : ''}>{currentUser.image_limit.toLocaleString()}</span></span>
+              <span> / <span className={currentUser.image_usage >= currentUser.image_limit ? 'text-theme-danger-text' : ''}>{currentUser.image_limit.toLocaleString()}</span></span>
             )}
           </div>
         </div>
@@ -882,13 +882,13 @@ function App() {
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col min-w-0">
         {!showSidebar && (
-          <div className="p-2 border-b border-gray-800 flex items-center justify-between">
-            <button onClick={() => setShowSidebar(true)} className="p-1 hover:bg-gray-800 rounded">
+          <div className="p-2 border-b border-theme-border flex items-center justify-between">
+            <button onClick={() => setShowSidebar(true)} className="p-1 hover:bg-theme-bg-elevated rounded">
               <ChevronRight className="w-4 h-4" />
             </button>
-            <div className="text-xs text-gray-500 flex items-center gap-2">
+            <div className="text-xs text-theme-muted flex items-center gap-2">
               <span>{currentUser.username}</span>
-              <button onClick={handleLogout} className="hover:text-red-400"><LogOut className="w-3 h-3" /></button>
+              <button onClick={handleLogout} className="hover:text-theme-danger-text"><LogOut className="w-3 h-3" /></button>
             </div>
           </div>
         )}
@@ -896,9 +896,9 @@ function App() {
         {/* Messages */}
         <div className="flex-1 overflow-y-auto">
           {messages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-gray-500 p-8">
-              <Bot className="w-16 h-16 mb-4 text-gray-700" />
-              <h2 className="text-xl font-semibold text-gray-400 mb-2">LLMDash</h2>
+            <div className="h-full flex flex-col items-center justify-center text-theme-muted p-8">
+              <Bot className="w-16 h-16 mb-4 text-theme-icon-muted" />
+              <h2 className="text-xl font-semibold text-theme-subtle mb-2">LLMDash</h2>
               <p className="text-sm text-center max-w-md">
                 Multi-model AI chat with web search, document editing, HTML preview, and Alpine sandbox.
               </p>
@@ -906,25 +906,25 @@ function App() {
                 <div className="relative mt-4">
                   <button
                     onClick={(e) => { e.stopPropagation(); setShowModelPickerEmpty(!showModelPickerEmpty) }}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-xs transition-colors"
+                    className="flex items-center gap-2 px-3 py-1.5 bg-theme-bg-elevated hover:bg-theme-bg-hover rounded-lg text-xs transition-colors"
                   >
                     {models.find(m => m.id === selectedModelId)?.model_type === 'image'
-                      ? <Image className="w-3.5 h-3.5 text-purple-400" />
-                      : <Bot className="w-3.5 h-3.5 text-emerald-400" />}
+                      ? <Image className="w-3.5 h-3.5 text-theme-purple" />
+                      : <Bot className="w-3.5 h-3.5 text-theme-accent-text" />}
                     <span>{models.find(m => m.id === selectedModelId)?.name || 'Select model'}</span>
                     <ChevronDown className="w-3 h-3" />
                   </button>
                   {showModelPickerEmpty && (
-                    <div onClick={e => e.stopPropagation()} className="absolute left-1/2 -translate-x-1/2 mt-1 w-64 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 overflow-hidden">
+                    <div onClick={e => e.stopPropagation()} className="absolute left-1/2 -translate-x-1/2 mt-1 w-64 bg-theme-bg-elevated border border-theme-border-light rounded-lg shadow-xl z-50 overflow-hidden">
                       {models.map(m => (
                         <button
                           key={m.id}
                           onClick={() => { setSelectedModelId(m.id); closeModelPickers() }}
-                          className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-700 transition-colors flex items-center gap-2 ${m.id === selectedModelId ? 'bg-gray-700 text-emerald-400' : 'text-gray-300'}`}
+                          className={`w-full text-left px-3 py-2 text-xs hover:bg-theme-bg-hover transition-colors flex items-center gap-2 ${m.id === selectedModelId ? 'bg-theme-bg-hover text-theme-accent-text' : 'text-theme-text-secondary'}`}
                         >
                           {m.model_type === 'image'
-                            ? <Image className="w-3 h-3 shrink-0 text-purple-400" />
-                            : <Bot className="w-3 h-3 shrink-0 text-emerald-400" />}
+                            ? <Image className="w-3 h-3 shrink-0 text-theme-purple" />
+                            : <Bot className="w-3 h-3 shrink-0 text-theme-accent-text" />}
                           <span className="truncate">{m.name}</span>
                           {m.id === selectedModelId && <Check className="w-3 h-3 shrink-0 ml-auto" />}
                         </button>
@@ -933,7 +933,7 @@ function App() {
                   )}
                 </div>
               ) : (
-                <p className="text-xs text-gray-600 mt-4">No models configured. {isAdmin ? 'Go to Admin Panel to set one up.' : 'Contact an admin.'}</p>
+                <p className="text-xs text-theme-subtle mt-4">No models configured. {isAdmin ? 'Go to Admin Panel to set one up.' : 'Contact an admin.'}</p>
               )}
             </div>
           ) : (
@@ -956,12 +956,12 @@ function App() {
                       setSidePanel={setSidePanel}
                     />
                     {siblings.length > 1 && (
-                      <div className="flex items-center justify-center gap-1 mt-1 text-xs text-gray-500">
-                        <button onClick={() => { const prev = (branchIdx - 1 + siblings.length) % siblings.length; handleSwitchBranch(siblings[prev]) }} className="p-0.5 hover:text-gray-300">
+                      <div className="flex items-center justify-center gap-1 mt-1 text-xs text-theme-muted">
+                        <button onClick={() => { const prev = (branchIdx - 1 + siblings.length) % siblings.length; handleSwitchBranch(siblings[prev]) }} className="p-0.5 hover:text-theme-text">
                           <ChevronUp className="w-4 h-4" />
                         </button>
                         <span>{branchIdx + 1}/{siblings.length}</span>
-                        <button onClick={() => { const next = (branchIdx + 1) % siblings.length; handleSwitchBranch(siblings[next]) }} className="p-0.5 hover:text-gray-300">
+                        <button onClick={() => { const next = (branchIdx + 1) % siblings.length; handleSwitchBranch(siblings[next]) }} className="p-0.5 hover:text-theme-text">
                           <ChevronDown className="w-4 h-4" />
                         </button>
                       </div>
@@ -975,21 +975,21 @@ function App() {
         </div>
 
         {/* Input */}
-        <div className="border-t border-gray-800 p-4">
+        <div className="border-t border-theme-border p-4">
           <div className="max-w-4xl mx-auto">
             {attachments.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-2">
                 {attachments.map((att, i) => (
-                  <div key={i} className="flex items-center gap-1.5 bg-gray-800 rounded-lg px-3 py-1.5 text-xs border border-gray-700">
+                  <div key={i} className="flex items-center gap-1.5 bg-theme-bg-elevated rounded-lg px-3 py-1.5 text-xs border border-theme-border-light">
                     {['.png','.jpg','.jpeg','.gif','.webp','.bmp'].includes(att.file_type.toLowerCase()) ? (
-                      <Image className="w-3.5 h-3.5 text-purple-400" />
+                      <Image className="w-3.5 h-3.5 text-theme-purple" />
                     ) : (
-                      <File className="w-3.5 h-3.5 text-emerald-400" />
+                      <File className="w-3.5 h-3.5 text-theme-accent-text" />
                     )}
-                    <span className="text-gray-300 truncate max-w-[150px]">{att.filename}</span>
+                    <span className="text-theme-text-secondary truncate max-w-[150px]">{att.filename}</span>
                     <button
                       onClick={() => removeAttachment(i)}
-                      className="p-0.5 hover:bg-red-600/20 rounded text-gray-500 hover:text-red-400"
+                      className="p-0.5 hover:bg-theme-danger/20 rounded text-theme-muted hover:text-theme-danger-text"
                     >
                       <X className="w-3 h-3" />
                     </button>
@@ -1011,10 +1011,10 @@ function App() {
                 disabled={streaming || uploading}
                 title="Upload files (images, documents, code)"
                 className={`p-3 rounded-xl transition-colors ${
-                  uploading ? 'bg-purple-600/50' : 'bg-gray-800 hover:bg-gray-700'
+                  uploading ? 'bg-theme-purple/50' : 'bg-theme-bg-elevated hover:bg-theme-bg-hover'
                 } disabled:opacity-50 disabled:cursor-not-allowed`}
               >
-                {uploading ? <Loader2 className="w-5 h-5 animate-spin text-purple-400" /> : <Paperclip className="w-5 h-5 text-gray-400" />}
+                {uploading ? <Loader2 className="w-5 h-5 animate-spin text-theme-purple" /> : <Paperclip className="w-5 h-5 text-theme-subtle" />}
               </button>
               <div className="flex-1 relative">
                 <textarea
@@ -1024,7 +1024,7 @@ function App() {
                   placeholder={streaming ? 'Waiting for response...' : uploading ? 'Uploading...' : 'Type a message...'}
                   rows={1}
                   disabled={streaming || uploading}
-                  className="w-full bg-gray-800 rounded-xl px-4 py-3 pr-12 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500/50 disabled:opacity-50"
+                  className="w-full bg-theme-bg-elevated rounded-xl px-4 py-3 pr-12 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-theme-focus-ring/50 disabled:opacity-50"
                   onInput={e => {
                     const el = e.currentTarget
                     el.style.height = 'auto'
@@ -1040,7 +1040,7 @@ function App() {
                 onClick={streaming ? handleCancel : handleSend}
                 disabled={!streaming && !input.trim() && attachments.length === 0}
                 className={`p-3 rounded-xl transition-colors ${
-                  streaming ? 'bg-red-600 hover:bg-red-500' : 'bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 disabled:text-gray-500'
+                  streaming ? 'bg-theme-danger hover:bg-theme-danger-hover' : 'bg-theme-accent hover:bg-theme-accent-hover disabled:bg-theme-bg-hover disabled:text-theme-muted'
                 }`}
               >
                 {streaming ? <Square className="w-5 h-5" /> : <Send className="w-5 h-5" />}
@@ -1050,11 +1050,11 @@ function App() {
               {models.length > 0 && (
                 <button
                   onClick={(e) => { e.stopPropagation(); setShowModelPickerFooter(!showModelPickerFooter) }}
-                  className="flex items-center gap-1.5 px-2 py-1 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors text-gray-400 hover:text-gray-300"
+                  className="flex items-center gap-1.5 px-2 py-1 bg-theme-bg-elevated hover:bg-theme-bg-hover rounded-lg transition-colors text-theme-subtle hover:text-theme-text"
                 >
                   {models.find(m => m.id === selectedModelId)?.model_type === 'image'
-                    ? <Image className="w-3 h-3 text-purple-400" />
-                    : <Bot className="w-3 h-3 text-emerald-400" />}
+                    ? <Image className="w-3 h-3 text-theme-purple" />
+                    : <Bot className="w-3 h-3 text-theme-accent-text" />}
                   <span>{models.find(m => m.id === selectedModelId)?.name || 'Select'}</span>
                   <ChevronDown className="w-3 h-3" />
                 </button>
@@ -1063,7 +1063,7 @@ function App() {
                 <select
                   value={imageGenSize}
                   onChange={e => setImageGenSize(e.target.value)}
-                  className="bg-gray-800 rounded-lg px-2 py-1 text-xs text-gray-400 border border-gray-700 focus:outline-none focus:border-purple-500"
+                  className="bg-theme-bg-elevated rounded-lg px-2 py-1 text-xs text-theme-subtle border border-theme-border-light focus:outline-none focus:border-theme-purple"
                 >
                   <option value="1024x1024">1024x1024</option>
                   <option value="1792x1024">1792x1024</option>
@@ -1071,16 +1071,16 @@ function App() {
                 </select>
               )}
               {showModelPickerFooter && models.length > 0 && (
-                    <div onClick={e => e.stopPropagation()} className="absolute bottom-full left-0 mb-1 w-64 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 overflow-hidden">
+                    <div onClick={e => e.stopPropagation()} className="absolute bottom-full left-0 mb-1 w-64 bg-theme-bg-elevated border border-theme-border-light rounded-lg shadow-xl z-50 overflow-hidden">
                       {models.map(m => (
                         <button
                           key={m.id}
                           onClick={() => { setSelectedModelId(m.id); closeModelPickers() }}
-                          className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-700 transition-colors flex items-center gap-2 ${m.id === selectedModelId ? 'bg-gray-700 text-emerald-400' : 'text-gray-300'}`}
+                          className={`w-full text-left px-3 py-2 text-xs hover:bg-theme-bg-hover transition-colors flex items-center gap-2 ${m.id === selectedModelId ? 'bg-theme-bg-hover text-theme-accent-text' : 'text-theme-text-secondary'}`}
                         >
                           {m.model_type === 'image'
-                            ? <Image className="w-3 h-3 shrink-0 text-purple-400" />
-                            : <Bot className="w-3 h-3 shrink-0 text-emerald-400" />}
+                            ? <Image className="w-3 h-3 shrink-0 text-theme-purple" />
+                            : <Bot className="w-3 h-3 shrink-0 text-theme-accent-text" />}
                           <span className="truncate">{m.name}</span>
                           {m.id === selectedModelId && <Check className="w-3 h-3 shrink-0 ml-auto" />}
                         </button>
@@ -1094,22 +1094,22 @@ function App() {
 
       {/* Document Preview Side Panel */}
       {sidePanel && (
-        <div className="w-[420px] border-l border-gray-700 bg-gray-900 flex flex-col overflow-hidden">
-          <div className="flex items-center justify-between px-3 py-2 bg-gray-800 border-b border-gray-700 shrink-0">
+        <div className="w-[420px] border-l border-theme-border-light bg-theme-bg-secondary flex flex-col overflow-hidden">
+          <div className="flex items-center justify-between px-3 py-2 bg-theme-bg-elevated border-b border-theme-border-light shrink-0">
             <div className="flex items-center gap-2 text-xs min-w-0">
-              <FileText className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              <span className="font-mono text-emerald-300 truncate">{sidePanel.filename}.{sidePanel.format}</span>
-              <span className="text-gray-500 shrink-0">({sidePanel.format.toUpperCase()})</span>
+              <FileText className="w-3.5 h-3.5 text-theme-accent-text shrink-0" />
+              <span className="font-mono text-theme-accent-dim truncate">{sidePanel.filename}.{sidePanel.format}</span>
+              <span className="text-theme-muted shrink-0">({sidePanel.format.toUpperCase()})</span>
             </div>
             <button
               onClick={() => setSidePanel(null)}
-              className="p-1 hover:bg-gray-700 rounded transition-colors text-gray-500 hover:text-gray-300"
+              className="p-1 hover:bg-theme-bg-hover rounded transition-colors text-theme-muted hover:text-theme-text"
               title="Hide preview"
             >
               <Minus className="w-4 h-4" />
             </button>
           </div>
-          <div className="flex-1 bg-white">
+          <div className="flex-1 bg-theme-preview-bg">
             <iframe
               srcDoc={sidePanel.html}
               sandbox="allow-scripts"
@@ -1148,8 +1148,8 @@ function App() {
 
       {/* AI CSS Undo Toast */}
       {cssUndoToast && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 shadow-2xl">
-          <span className="text-sm text-gray-200">CSS updated by AI</span>
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-theme-bg-elevated border border-theme-border-light rounded-xl px-4 py-3 shadow-2xl">
+          <span className="text-sm text-theme-text">CSS updated by AI</span>
           <button
             onClick={async () => {
               injectUserCss(cssUndoToast.previousCss)
@@ -1157,11 +1157,11 @@ function App() {
               cssPreviousRef.current = cssUndoToast.previousCss
               setCssUndoToast(null)
             }}
-            className="px-3 py-1 text-sm font-medium bg-emerald-600 hover:bg-emerald-500 rounded-lg"
+            className="px-3 py-1 text-sm font-medium bg-theme-accent hover:bg-theme-accent-hover rounded-lg"
           >
             Undo?
           </button>
-          <button onClick={() => setCssUndoToast(null)} className="p-1 hover:bg-gray-700 rounded text-gray-400">
+          <button onClick={() => setCssUndoToast(null)} className="p-1 hover:bg-theme-bg-hover rounded text-theme-subtle">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -1205,11 +1205,11 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
       return (
         <div>
           <div className="flex justify-start">
-            <div className="max-w-full rounded-xl overflow-hidden border border-gray-700 bg-gray-900">
-              <div className="flex items-center gap-2 px-3 py-2 bg-gray-800 text-xs text-gray-400 border-b border-gray-700">
+            <div className="max-w-full rounded-xl overflow-hidden border border-theme-border-light bg-theme-bg-secondary">
+              <div className="flex items-center gap-2 px-3 py-2 bg-theme-bg-elevated text-xs text-theme-subtle border-b border-theme-border-light">
                 <Eye className="w-3.5 h-3.5" /> HTML Preview
               </div>
-              <iframe srcDoc={html} sandbox="allow-scripts" className="w-full h-96 bg-white" title="HTML Preview" />
+              <iframe srcDoc={html} sandbox="allow-scripts" className="w-full h-96 bg-theme-preview-bg" title="HTML Preview" />
             </div>
           </div>
         </div>
@@ -1237,43 +1237,43 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
       return (
         <div>
           <div className="flex justify-start">
-            <div className="max-w-3xl rounded-xl border border-gray-700 bg-gray-850 overflow-hidden">
-              <div className="flex items-center gap-2 px-3 py-2 bg-gray-800 text-xs text-gray-400 border-b border-gray-700">
-                <FileText className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="font-mono text-emerald-300">{docFilename}.{docFormat}</span>
-                <span className="text-gray-500">({docFormat.toUpperCase()})</span>
+            <div className="max-w-3xl rounded-xl border border-theme-border-light bg-theme-bg-elevated overflow-hidden">
+              <div className="flex items-center gap-2 px-3 py-2 bg-theme-bg-elevated text-xs text-theme-subtle border-b border-theme-border-light">
+                <FileText className="w-3.5 h-3.5 text-theme-accent-text" />
+                <span className="font-mono text-theme-accent-dim">{docFilename}.{docFormat}</span>
+                <span className="text-theme-muted">({docFormat.toUpperCase()})</span>
               </div>
               {visualFormat ? (
-                <div className="p-3 bg-gray-900 flex flex-col items-center gap-2">
-                  <p className="text-xs text-gray-400">Document preview available</p>
+                <div className="p-3 bg-theme-bg-secondary flex flex-col items-center gap-2">
+                  <p className="text-xs text-theme-subtle">Document preview available</p>
                   <button
                     onClick={() => setSidePanel({
                       html: atob(htmlRenderMatch![1]),
                       filename: docFilename,
                       format: docFormat,
                     })}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm font-medium transition-colors cursor-pointer border-0"
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-theme-accent hover:bg-theme-accent-hover rounded-lg text-sm font-medium transition-colors cursor-pointer border-0"
                   >
                     <Eye className="w-4 h-4" />
                     Open Preview
                   </button>
                 </div>
               ) : docContent ? (
-                <div className="p-3 bg-gray-900">
+                <div className="p-3 bg-theme-bg-secondary">
                   {isCode ? (
                     <MarkdownRenderer content={'```' + docFormat + '\n' + docContent.slice(0, 8000) + (docContent.length > 8000 ? '\n\n... (truncated)' : '') + '\n```'} />
                   ) : (
-                    <pre className="text-xs text-gray-300 whitespace-pre-wrap font-mono max-h-96 overflow-y-auto">
+                    <pre className="text-xs text-theme-text-secondary whitespace-pre-wrap font-mono max-h-96 overflow-y-auto">
                       {docContent.length > 8000 ? docContent.slice(0, 8000) + '\n\n... (truncated)' : docContent}
                     </pre>
                   )}
                 </div>
               ) : null}
-              <div className="px-3 py-2 bg-gray-800/50 text-xs text-gray-500 border-t border-gray-700/50 truncate">
+              <div className="px-3 py-2 bg-theme-bg-elevated/50 text-xs text-theme-muted border-t border-theme-border-light/50 truncate">
                 {message.content.replace(/\n?HTML_RENDER:[A-Za-z0-9+/=]+/, '').trim()}
               </div>
               {downloadMatch && (
-                <div className="px-3 pb-2 bg-gray-800/50">
+                <div className="px-3 pb-2 bg-theme-bg-elevated/50">
                   <button
                     onClick={async () => {
                       try {
@@ -1295,7 +1295,7 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
                         console.error('Download error:', e);
                       }
                     }}
-                    className="inline-flex items-center gap-2 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-xs font-medium transition-colors cursor-pointer border-0"
+                    className="inline-flex items-center gap-2 px-3 py-1.5 bg-theme-accent hover:bg-theme-accent-hover rounded-lg text-xs font-medium transition-colors cursor-pointer border-0"
                   >
                     <Download className="w-3.5 h-3.5" />
                     Download {downloadMatch![1].split('/').pop()}
@@ -1310,15 +1310,15 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
     return (
       <div>
         <div className="flex justify-start">
-          <div className="max-w-2xl rounded-xl bg-gray-800/50 border border-gray-700/50 px-4 py-2">
-            <div className="flex items-center gap-2 text-xs text-gray-500 mb-1">
+          <div className="max-w-2xl rounded-xl bg-theme-bg-elevated/50 border border-theme-border-light/50 px-4 py-2">
+            <div className="flex items-center gap-2 text-xs text-theme-muted mb-1">
               {message.tool_name === 'web_search' && <Globe className="w-3 h-3" />}
               {message.tool_name === 'web_scrape' && <Search className="w-3 h-3" />}
               {message.tool_name === 'run_command' && <Terminal className="w-3 h-3" />}
               {message.tool_name === 'render_html' && <Eye className="w-3 h-3" />}
               <span className="font-mono">{message.tool_name}</span>
             </div>
-            <pre className="text-xs text-gray-300 whitespace-pre-wrap font-mono">
+            <pre className="text-xs text-theme-text-secondary whitespace-pre-wrap font-mono">
               {message.content.length > 500 ? message.content.slice(0, 500) + '...' : message.content}
             </pre>
             {downloadMatch && (
@@ -1343,7 +1343,7 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
                     console.error('Download error:', e);
                   }
                 }}
-                className="mt-2 inline-flex items-center gap-2 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-xs font-medium transition-colors cursor-pointer border-0"
+                className="mt-2 inline-flex items-center gap-2 px-3 py-1.5 bg-theme-accent hover:bg-theme-accent-hover rounded-lg text-xs font-medium transition-colors cursor-pointer border-0"
               >
                 <Download className="w-3.5 h-3.5" />
                 Download {downloadMatch[1].split('/').pop()}
@@ -1352,8 +1352,8 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
           </div>
         </div>
         <div className="flex gap-1 mt-0.5 justify-start ml-10">
-          <button onClick={() => onCopy(message.content || '', message.id)} className="p-1 hover:bg-gray-700 rounded transition-colors text-gray-500 hover:text-gray-300" title="Copy">
-            {copiedId === message.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+          <button onClick={() => onCopy(message.content || '', message.id)} className="p-1 hover:bg-theme-bg-hover rounded transition-colors text-theme-muted hover:text-theme-text" title="Copy">
+            {copiedId === message.id ? <Check className="w-3.5 h-3.5 text-theme-accent-text" /> : <Copy className="w-3.5 h-3.5" />}
           </button>
         </div>
       </div>
@@ -1370,14 +1370,14 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
               {toolCalls.map((tc, i) => {
                 const isExecuting = executingTools.has(tc.id)
                 return (
-                <div key={i} className={`flex items-center gap-2 px-3 py-2 bg-gray-800 rounded-lg border text-xs ${isExecuting ? 'border-emerald-500/40 animate-pulse' : 'border-gray-700'}`}>
+                <div key={i} className={`flex items-center gap-2 px-3 py-2 bg-theme-bg-elevated rounded-lg border text-xs ${isExecuting ? 'border-theme-focus-ring/40 animate-pulse' : 'border-theme-border-light'}`}>
                   {isExecuting ? (
-                    <Loader2 className="w-3.5 h-3.5 text-emerald-400 animate-spin" />
+                    <Loader2 className="w-3.5 h-3.5 text-theme-accent-text animate-spin" />
                   ) : (
-                    <Bot className="w-3.5 h-3.5 text-emerald-400" />
+                    <Bot className="w-3.5 h-3.5 text-theme-accent-text" />
                   )}
-                  <span className="font-mono text-emerald-300">{tc.name}</span>
-                  <span className={isExecuting ? 'text-emerald-400' : 'text-gray-500'}>{isExecuting ? 'executing...' : 'calling...'}</span>
+                  <span className="font-mono text-theme-accent-dim">{tc.name}</span>
+                  <span className={isExecuting ? 'text-theme-accent-text' : 'text-theme-muted'}>{isExecuting ? 'executing...' : 'calling...'}</span>
                 </div>
                 )
               })}
@@ -1386,8 +1386,8 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
         </div>
         {message.content && (
           <div className="flex gap-1 mt-0.5 justify-start ml-10">
-            <button onClick={() => onCopy(message.content || '', message.id)} className="p-1 hover:bg-gray-700 rounded transition-colors text-gray-500 hover:text-gray-300" title="Copy">
-              {copiedId === message.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+            <button onClick={() => onCopy(message.content || '', message.id)} className="p-1 hover:bg-theme-bg-hover rounded transition-colors text-theme-muted hover:text-theme-text" title="Copy">
+              {copiedId === message.id ? <Check className="w-3.5 h-3.5 text-theme-accent-text" /> : <Copy className="w-3.5 h-3.5" />}
             </button>
           </div>
         )}
@@ -1412,20 +1412,20 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
     return (
       <div>
         <div className="flex justify-start">
-          <div className="max-w-[80%] bg-gray-800 rounded-xl px-4 py-3 space-y-3">
-            <div className="flex items-center gap-2 text-xs text-gray-400">
-              <Image className="w-3.5 h-3.5 text-purple-400" />
+          <div className="max-w-[80%] bg-theme-bg-elevated rounded-xl px-4 py-3 space-y-3">
+            <div className="flex items-center gap-2 text-xs text-theme-subtle">
+              <Image className="w-3.5 h-3.5 text-theme-purple" />
               <span>Image Generation{imageData.size ? ` (${imageData.size})` : ''}</span>
             </div>
             {imageData.prompt && (
-              <div className="text-xs text-gray-500 italic">Prompt: {imageData.prompt}</div>
+              <div className="text-xs text-theme-muted italic">Prompt: {imageData.prompt}</div>
             )}
             {imageData.revised_prompt && (
-              <div className="text-xs text-gray-500 italic">Revised: {imageData.revised_prompt}</div>
+              <div className="text-xs text-theme-muted italic">Revised: {imageData.revised_prompt}</div>
             )}
             <div className="flex flex-wrap gap-2">
               {imageData.images.map((img, i) => (
-                <div key={i} className="rounded-lg overflow-hidden border border-gray-700 max-w-sm">
+                <div key={i} className="rounded-lg overflow-hidden border border-theme-border-light max-w-sm">
                   <img src={img} alt={`Generated ${i + 1}`} className="w-full object-contain" />
                 </div>
               ))}
@@ -1434,8 +1434,8 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
         </div>
         {message.content && (
           <div className="flex gap-1 mt-0.5 justify-start ml-10">
-            <button onClick={() => onCopy(message.content || '', message.id)} className="p-1 hover:bg-gray-700 rounded transition-colors text-gray-500 hover:text-gray-300" title="Copy">
-              {copiedId === message.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+            <button onClick={() => onCopy(message.content || '', message.id)} className="p-1 hover:bg-theme-bg-hover rounded transition-colors text-theme-muted hover:text-theme-text" title="Copy">
+              {copiedId === message.id ? <Check className="w-3.5 h-3.5 text-theme-accent-text" /> : <Copy className="w-3.5 h-3.5" />}
             </button>
           </div>
         )}
@@ -1448,17 +1448,17 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
     return (
       <div>
         <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
-          <div className={`max-w-[80%] ${isUser ? 'bg-emerald-700' : 'bg-gray-800'} rounded-xl px-4 py-2`}>
+          <div className={`max-w-[80%] ${isUser ? 'bg-theme-msg-user' : 'bg-theme-bg-elevated'} rounded-xl px-4 py-2`}>
             {parts.map((part, i) => {
               if (part.startsWith('HTML_RENDER:')) {
                 try {
                   const html = atob(part.slice(12))
                   return (
-                    <div key={i} className="my-2 rounded-lg overflow-hidden border border-gray-700">
-                      <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-900 text-xs text-gray-400 border-b border-gray-700">
+                    <div key={i} className="my-2 rounded-lg overflow-hidden border border-theme-border-light">
+                      <div className="flex items-center gap-2 px-3 py-1.5 bg-theme-bg-secondary text-xs text-theme-subtle border-b border-theme-border-light">
                         <Eye className="w-3 h-3" /> Preview
                       </div>
-                      <iframe srcDoc={html} sandbox="allow-scripts" className="w-full h-96 bg-white" title="Preview" />
+                      <iframe srcDoc={html} sandbox="allow-scripts" className="w-full h-96 bg-theme-preview-bg" title="Preview" />
                     </div>
                   )
                 } catch { return <span key={i}>{part}</span> }
@@ -1468,11 +1468,11 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
           </div>
         </div>
         <div className={`flex gap-1 mt-0.5 ${isUser ? 'justify-end mr-10' : 'justify-start ml-10'}`}>
-          <button onClick={() => onCopy(content, message.id)} className="p-1 hover:bg-gray-700 rounded transition-colors text-gray-500 hover:text-gray-300" title="Copy">
-            {copiedId === message.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+          <button onClick={() => onCopy(content, message.id)} className="p-1 hover:bg-theme-bg-hover rounded transition-colors text-theme-muted hover:text-theme-text" title="Copy">
+            {copiedId === message.id ? <Check className="w-3.5 h-3.5 text-theme-accent-text" /> : <Copy className="w-3.5 h-3.5" />}
           </button>
           {isUser && (
-            <button onClick={() => onRegenerate(msgIndex)} className="p-1 hover:bg-gray-700 rounded transition-colors text-gray-500 hover:text-emerald-400" title="Regenerate">
+            <button onClick={() => onRegenerate(msgIndex)} className="p-1 hover:bg-theme-bg-hover rounded transition-colors text-theme-muted hover:text-theme-accent-text" title="Regenerate">
               <RefreshCw className="w-3.5 h-3.5" />
             </button>
           )}
@@ -1491,29 +1491,29 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
               const token = localStorage.getItem('llmdash_token')
               const fileUrl = att.file_path.startsWith('/api/') ? att.file_path : null
               return (
-                <div key={i} className="flex items-center gap-1.5 bg-gray-800/80 rounded-lg px-2.5 py-1.5 text-xs border border-gray-700/50">
+                <div key={i} className="flex items-center gap-1.5 bg-theme-bg-elevated/80 rounded-lg px-2.5 py-1.5 text-xs border border-theme-border-light/50">
                   {isImg ? (
                     fileUrl ? (
                       <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 hover:opacity-80">
-                        <Image className="w-3.5 h-3.5 text-purple-400" />
-                        <span className="text-gray-300 truncate max-w-[120px]">{att.filename}</span>
+                        <Image className="w-3.5 h-3.5 text-theme-purple" />
+                        <span className="text-theme-text-secondary truncate max-w-[120px]">{att.filename}</span>
                       </a>
                     ) : (
                       <>
-                        <Image className="w-3.5 h-3.5 text-purple-400" />
-                        <span className="text-gray-300 truncate max-w-[120px]">{att.filename}</span>
+                        <Image className="w-3.5 h-3.5 text-theme-purple" />
+                        <span className="text-theme-text-secondary truncate max-w-[120px]">{att.filename}</span>
                       </>
                     )
                   ) : (
                     fileUrl ? (
                       <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 hover:opacity-80">
-                        <File className="w-3.5 h-3.5 text-emerald-400" />
-                        <span className="text-gray-300 truncate max-w-[120px]">{att.filename}</span>
+                        <File className="w-3.5 h-3.5 text-theme-accent-text" />
+                        <span className="text-theme-text-secondary truncate max-w-[120px]">{att.filename}</span>
                       </a>
                     ) : (
                       <>
-                        <File className="w-3.5 h-3.5 text-emerald-400" />
-                        <span className="text-gray-300 truncate max-w-[120px]">{att.filename}</span>
+                        <File className="w-3.5 h-3.5 text-theme-accent-text" />
+                        <span className="text-theme-text-secondary truncate max-w-[120px]">{att.filename}</span>
                       </>
                     )
                   )}
@@ -1529,17 +1529,17 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
           <div className="max-w-[75%] min-w-0">
             <button
               onClick={() => setThinkingExpanded(!thinkingExpanded)}
-              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 transition-colors py-0.5 w-full"
+              className="flex items-center gap-1.5 text-xs text-theme-muted hover:text-theme-text transition-colors py-0.5 w-full"
             >
               {message.status === 'generating' ? (
-                <><Loader2 className="w-3 h-3 animate-spin text-purple-400" /><span className="text-purple-400">Thinking...</span></>
+                <><Loader2 className="w-3 h-3 animate-spin text-theme-purple" /><span className="text-theme-purple">Thinking...</span></>
               ) : (
-                <><Brain className="w-3 h-3 text-purple-400" /><span>Reasoning</span></>
+                <><Brain className="w-3 h-3 text-theme-purple" /><span>Reasoning</span></>
               )}
               {thinkingExpanded ? <ChevronUp className="w-3 h-3 ml-auto" /> : <ChevronDown className="w-3 h-3 ml-auto" />}
             </button>
             {thinkingExpanded && (
-              <div className="mt-1 rounded-xl bg-gray-800/50 border border-gray-700/50 px-3 py-2 text-sm text-gray-400 italic">
+              <div className="mt-1 rounded-xl bg-theme-bg-elevated/50 border border-theme-border-light/50 px-3 py-2 text-sm text-theme-subtle italic">
                 <MarkdownRenderer content={message.reasoning_content || ''} />
               </div>
             )}
@@ -1548,25 +1548,25 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
       )}
       <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
         {isAssistant && (
-          <div className="w-8 h-8 rounded-full bg-emerald-600 flex items-center justify-center mr-2 mt-0.5 shrink-0">
+          <div className="w-8 h-8 rounded-full bg-theme-accent flex items-center justify-center mr-2 mt-0.5 shrink-0">
             <Bot className="w-4 h-4" />
           </div>
         )}
-        <div className={`max-w-[75%] ${isUser ? 'bg-emerald-700' : 'bg-gray-800'} rounded-xl px-4 py-2.5`}>
+        <div className={`max-w-[75%] ${isUser ? 'bg-theme-msg-user' : 'bg-theme-bg-elevated'} rounded-xl px-4 py-2.5`}>
           <MarkdownRenderer content={content} />
         </div>
         {isUser && (
-          <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center ml-2 mt-0.5 shrink-0">
+          <div className="w-8 h-8 rounded-full bg-theme-icon-user flex items-center justify-center ml-2 mt-0.5 shrink-0">
             <span className="text-xs font-bold">U</span>
           </div>
         )}
       </div>
       <div className={`flex gap-1 mt-0.5 ${isUser ? 'justify-end mr-10' : 'justify-start ml-10'}`}>
-        <button onClick={() => onCopy(content, message.id)} className="p-1 hover:bg-gray-700 rounded transition-colors text-gray-500 hover:text-gray-300" title="Copy">
-          {copiedId === message.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+        <button onClick={() => onCopy(content, message.id)} className="p-1 hover:bg-theme-bg-hover rounded transition-colors text-theme-muted hover:text-theme-text" title="Copy">
+          {copiedId === message.id ? <Check className="w-3.5 h-3.5 text-theme-accent-text" /> : <Copy className="w-3.5 h-3.5" />}
         </button>
         {isUser && (
-          <button onClick={() => onRegenerate(msgIndex)} className="p-1 hover:bg-gray-700 rounded transition-colors text-gray-500 hover:text-emerald-400" title="Regenerate">
+          <button onClick={() => onRegenerate(msgIndex)} className="p-1 hover:bg-theme-bg-hover rounded transition-colors text-theme-muted hover:text-theme-accent-text" title="Regenerate">
             <RefreshCw className="w-3.5 h-3.5" />
           </button>
         )}
