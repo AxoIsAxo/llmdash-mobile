@@ -814,8 +814,14 @@ function App() {
             </button>
           </div>
           <div className="px-3 py-1 text-xs text-gray-500">
-            <span className="font-mono">{(currentUser.token_usage || 0).toLocaleString()}</span> tokens used
-            {currentUser.token_limit && (
+            <span className="font-mono">{(() => {
+              const modelUsage = selectedModelId && currentUser.token_usage_by_model ? currentUser.token_usage_by_model[selectedModelId]?.token_usage : undefined
+              return modelUsage !== undefined ? modelUsage.toLocaleString() : (currentUser.token_usage || 0).toLocaleString()
+            })()}</span> tokens used
+            {selectedModelId && currentUser.token_usage_by_model && currentUser.token_usage_by_model[selectedModelId] !== undefined && (
+              <span className="text-gray-600"> on this model</span>
+            )}
+            {!selectedModelId && currentUser.token_limit && (
               <span> / <span className={currentUser.token_usage >= currentUser.token_limit ? 'text-red-400' : ''}>{currentUser.token_limit.toLocaleString()}</span></span>
             )}
           </div>

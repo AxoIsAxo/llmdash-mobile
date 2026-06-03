@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
 
 from . import config as app_config
-from .database import init_db, get_db, async_session, ModelConfig, Conversation, Message, User, TokenUsageLog, SubscriptionPlan, PlanModelLimit, UserSubscription
+from .database import init_db, get_db, async_session, ModelConfig, Conversation, Message, User, TokenUsageLog, UserModelUsage, SubscriptionPlan, PlanModelLimit, UserSubscription
 from .models import (
     ModelConfigCreate, ModelConfigUpdate, ModelConfigResponse,
     ConversationCreate, ConversationResponse,
@@ -757,16 +757,26 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
         if model_limit and model_limit.token_limit is not None:
             model_subscription_limit = model_limit.token_limit
 
-    effective_limit = None
+    global_limit = None
     if user and user.token_limit is not None:
-        effective_limit = user.token_limit
+        global_limit = user.token_limit
     if subscription_limit is not None:
-        effective_limit = subscription_limit if effective_limit is None else min(effective_limit, subscription_limit)
-    if model_subscription_limit is not None:
-        effective_limit = model_subscription_limit if effective_limit is None else min(effective_limit, model_subscription_limit)
+        global_limit = subscription_limit if global_limit is None else min(global_limit, subscription_limit)
 
-    if user and effective_limit is not None and (user.token_usage or 0) >= effective_limit:
-        raise HTTPException(403, f"Token limit reached ({user.token_usage}/{effective_limit}). Upgrade your plan or contact an admin.")
+    if user and model_subscription_limit is not None:
+        per_model_result = await db.execute(
+            select(UserModelUsage).where(
+                UserModelUsage.user_id == current_user["user_id"],
+                UserModelUsage.model_id == model_id,
+            )
+        )
+        per_model_row = per_model_result.scalar_one_or_none()
+        per_model_usage = per_model_row.token_usage if per_model_row else 0
+        if per_model_usage >= model_subscription_limit:
+            raise HTTPException(403, f"Token limit reached for this model ({per_model_usage}/{model_subscription_limit}). Upgrade your plan or contact an admin.")
+
+    if user and global_limit is not None and (user.token_usage or 0) >= global_limit:
+        raise HTTPException(403, f"Token limit reached ({user.token_usage}/{global_limit}). Upgrade your plan or contact an admin.")
 
     msg_result = await db.execute(
         select(Message).where(Message.conversation_id == req.conversation_id).order_by(Message.created_at)
@@ -1084,6 +1094,15 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                         reasoning_tokens=total_reasoning_tokens or None,
                         total_tokens=total_total_tokens,
                     ))
+                    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+                    await sess.execute(
+                        sqlite_insert(UserModelUsage)
+                        .values(user_id=current_user["user_id"], model_id=model_id, token_usage=total_total_tokens)
+                        .on_conflict_do_update(
+                            index_elements=["user_id", "model_id"],
+                            set_={"token_usage": UserModelUsage.token_usage + total_total_tokens},
+                        )
+                    )
                     await sess.execute(
                         update(User)
                         .where(User.id == current_user["user_id"])
@@ -1335,17 +1354,27 @@ async def generate_image(req: ImageGenerationRequest, current_user: dict = Depen
             if model_limit and getattr(model_limit, "image_limit", None) is not None:
                 model_sub_image_limit = model_limit.image_limit
 
-    effective_image_limit = None
+    global_image_limit = None
     if user and getattr(user, "image_limit", None) is not None:
-        effective_image_limit = user.image_limit
+        global_image_limit = user.image_limit
     if subscription_image_limit is not None:
-        effective_image_limit = subscription_image_limit if effective_image_limit is None else min(effective_image_limit, subscription_image_limit)
+        global_image_limit = subscription_image_limit if global_image_limit is None else min(global_image_limit, subscription_image_limit)
+
     if model_sub_image_limit is not None:
-        effective_image_limit = model_sub_image_limit if effective_image_limit is None else min(effective_image_limit, model_sub_image_limit)
+        per_model_result = await db.execute(
+            select(UserModelUsage).where(
+                UserModelUsage.user_id == current_user["user_id"],
+                UserModelUsage.model_id == req.model_id,
+            )
+        )
+        per_model_row = per_model_result.scalar_one_or_none()
+        per_model_img_usage = per_model_row.image_usage if per_model_row else 0
+        if per_model_img_usage >= model_sub_image_limit * req.n:
+            raise HTTPException(403, f"Image limit reached for this model ({per_model_img_usage}/{model_sub_image_limit}). Upgrade your plan or contact an admin.")
 
     user_image_usage = getattr(user, "image_usage", 0) or 0
-    if effective_image_limit is not None and user_image_usage >= effective_image_limit * req.n:
-        raise HTTPException(403, f"Image limit reached ({user_image_usage}/{effective_image_limit}). Upgrade your plan or contact an admin.")
+    if global_image_limit is not None and user_image_usage >= global_image_limit * req.n:
+        raise HTTPException(403, f"Image limit reached ({user_image_usage}/{global_image_limit}). Upgrade your plan or contact an admin.")
 
     user_prompt_msg = Message(conversation_id=req.conversation_id, role="user", content=f"[Image Generation] {req.prompt}")
     db.add(user_prompt_msg)
@@ -1367,6 +1396,15 @@ async def generate_image(req: ImageGenerationRequest, current_user: dict = Depen
     await db.commit()
 
     try:
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+        await db.execute(
+            sqlite_insert(UserModelUsage)
+            .values(user_id=current_user["user_id"], model_id=req.model_id, image_usage=req.n)
+            .on_conflict_do_update(
+                index_elements=["user_id", "model_id"],
+                set_={"image_usage": UserModelUsage.image_usage + req.n},
+            )
+        )
         await db.execute(
             update(User)
             .where(User.id == current_user["user_id"])

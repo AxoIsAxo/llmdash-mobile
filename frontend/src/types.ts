@@ -6,6 +6,7 @@ export interface User {
   token_usage: number;
   image_limit: number | null;
   image_usage: number;
+  token_usage_by_model?: Record<number, { token_usage: number; image_usage: number }>;
   created_at: string;
 }
 

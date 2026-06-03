@@ -133,6 +133,16 @@ class PlanModelLimit(Base):
     image_limit = Column(Integer, nullable=True)
 
 
+class UserModelUsage(Base):
+    __tablename__ = "user_model_usage"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    model_id = Column(Integer, ForeignKey("model_configs.id", ondelete="CASCADE"), nullable=False)
+    token_usage = Column(Integer, nullable=False, default=0)
+    image_usage = Column(Integer, nullable=False, default=0)
+
+
 class UserSubscription(Base):
     __tablename__ = "user_subscriptions"
 
@@ -212,6 +222,17 @@ def _migrate(conn):
 
     try:
         existing_tables = {row[0] for row in conn.exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        if "user_model_usage" not in existing_tables:
+            conn.exec_driver_sql("""
+                CREATE TABLE IF NOT EXISTS user_model_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    model_id INTEGER NOT NULL REFERENCES model_configs(id) ON DELETE CASCADE,
+                    token_usage INTEGER NOT NULL DEFAULT 0,
+                    image_usage INTEGER NOT NULL DEFAULT 0,
+                    UNIQUE(user_id, model_id)
+                )
+            """)
         if "subscription_plans" not in existing_tables:
             conn.exec_driver_sql("""
                 CREATE TABLE IF NOT EXISTS subscription_plans (

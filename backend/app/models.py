@@ -42,6 +42,7 @@ class UserResponse(BaseModel):
     token_usage: int = 0
     image_limit: Optional[int] = None
     image_usage: int = 0
+    token_usage_by_model: dict = {}
     created_at: str
 
 

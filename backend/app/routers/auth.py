@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import config as app_config
-from ..database import get_db, User, Conversation
+from ..database import get_db, User, Conversation, UserModelUsage
 from ..models import (
     AuthSetupRequest, AuthLoginRequest, AuthRegisterRequest,
     UserResponse, UserUpdateRequest, RegistrationToggleRequest,
@@ -31,6 +31,22 @@ def decode_token(token: str) -> dict:
     return jwt.decode(token, app_config.settings.jwt_secret, algorithms=["HS256"])
 
 
+async def _get_user_model_usage(db: AsyncSession, user_id: int) -> dict:
+    result = await db.execute(
+        select(UserModelUsage).where(UserModelUsage.user_id == user_id)
+    )
+    rows = result.scalars().all()
+    return {row.model_id: {"token_usage": row.token_usage, "image_usage": row.image_usage} for row in rows}
+
+
+def _user_dict(user) -> dict:
+    return {
+        "id": user.id, "username": user.username, "role": user.role,
+        "token_usage": user.token_usage or 0, "token_limit": user.token_limit,
+        "image_usage": getattr(user, "image_usage", 0) or 0, "image_limit": getattr(user, "image_limit", None),
+    }
+
+
 async def get_current_user(request: Request, db: AsyncSession = Depends(get_db)):
     token = None
     auth = request.headers.get("Authorization", "")
@@ -49,10 +65,13 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(401, "User not found")
+
+    usage_by_model = await _get_user_model_usage(db, user.id)
     return {
         "user_id": user.id, "username": user.username, "role": user.role,
         "token_usage": user.token_usage or 0, "token_limit": user.token_limit,
         "image_usage": getattr(user, "image_usage", 0) or 0, "image_limit": getattr(user, "image_limit", None),
+        "token_usage_by_model": usage_by_model,
     }
 
 
@@ -94,7 +113,7 @@ async def setup_owner(req: AuthSetupRequest, db: AsyncSession = Depends(get_db))
     await db.refresh(user)
 
     token = create_token(user.id, user.username, user.role)
-    return {"token": token, "user": {"id": user.id, "username": user.username, "role": user.role, "token_usage": user.token_usage or 0, "token_limit": user.token_limit, "image_usage": getattr(user, "image_usage", 0) or 0, "image_limit": getattr(user, "image_limit", None)}}
+    return {"token": token, "user": {**_user_dict(user), "token_usage_by_model": {}}}
 
 
 @router.post("/login")
@@ -105,7 +124,8 @@ async def login(req: AuthLoginRequest, db: AsyncSession = Depends(get_db)):
         raise HTTPException(401, "Invalid username or password")
 
     token = create_token(user.id, user.username, user.role)
-    return {"token": token, "user": {"id": user.id, "username": user.username, "role": user.role, "token_usage": user.token_usage or 0, "token_limit": user.token_limit, "image_usage": getattr(user, "image_usage", 0) or 0, "image_limit": getattr(user, "image_limit", None)}}
+    usage_by_model = await _get_user_model_usage(db, user.id)
+    return {"token": token, "user": {**_user_dict(user), "token_usage_by_model": usage_by_model}}
 
 
 @router.post("/register")
@@ -149,11 +169,17 @@ async def get_me(current_user: dict = Depends(get_current_user)):
 async def list_users(current_user: dict = Depends(require_role("owner", "admin")), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).order_by(User.id))
     users = result.scalars().all()
+    all_model_usage = await db.execute(select(UserModelUsage))
+    usage_rows = all_model_usage.scalars().all()
+    usage_by_user: dict = {}
+    for row in usage_rows:
+        usage_by_user.setdefault(row.user_id, {})[row.model_id] = {"token_usage": row.token_usage, "image_usage": row.image_usage}
     return [
         UserResponse(
             id=u.id, username=u.username, role=u.role,
             token_limit=u.token_limit, token_usage=u.token_usage or 0,
             image_limit=getattr(u, "image_limit", None), image_usage=getattr(u, "image_usage", 0) or 0,
+            token_usage_by_model=usage_by_user.get(u.id, {}),
             created_at=u.created_at.isoformat() if u.created_at else "",
         )
         for u in users
@@ -194,6 +220,7 @@ async def create_user(
         "id": user.id, "username": user.username, "role": user.role,
         "token_limit": user.token_limit, "token_usage": user.token_usage or 0,
         "image_limit": getattr(user, "image_limit", None), "image_usage": getattr(user, "image_usage", 0) or 0,
+        "token_usage_by_model": {},
         "created_at": user.created_at.isoformat() if user.created_at else "",
     }
 
@@ -364,6 +391,8 @@ async def reset_user_usage(
 
     target.token_usage = 0
     target.image_usage = 0
+    from sqlalchemy import delete
+    await db.execute(delete(UserModelUsage).where(UserModelUsage.user_id == user_id))
     await db.commit()
     return {"status": "reset"}
 
