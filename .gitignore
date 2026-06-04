@@ -1,39 +1,71 @@
-# --- Python ---
+# ============================================================
+# LLMDash .gitignore
+# ============================================================
+# Per-folder .gitignore files complement these rules:
+#   - frontend/android/.gitignore   (Android-specific)
+#   - frontend/android/app/.gitignore
+# ============================================================
+
+# --- Python (backend) -----------------------------------------
 __pycache__/
 *.py[cod]
 *.pyo
 *.egg-info/
-dist/
 *.egg
+*.so
 .venv/
 venv/
 env/
-*.so
 
-# --- Environment ---
-.env
-.env.local
-.env.*.local
-
-# --- Node ---
+# --- Node / Vite (frontend) -----------------------------------
 node_modules/
-frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 *.tsbuildinfo
 
-# --- Database ---
+# --- Environment / secrets ------------------------------------
+# Never commit credentials, the JWT secret, or the build-time
+# LLMDASH_SERVER_URL (it bakes into the APK).
+.env
+.env.local
+.env.*.local
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+backend/.env
+
+# --- Capacitor / Android build outputs ------------------------
+# (frontend/android/.gitignore covers most; these are belt-and-
+# suspenders for the case where someone runs gradle from the
+# repo root or adds new platform folders.)
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+*.hprof
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+captures/
+.cxx/
+.kotlin/
+.externalNativeBuild/
+
+# --- Database -------------------------------------------------
 *.db
 *.sqlite
 *.sqlite3
 
-# --- Data ---
+# --- Data (mounted into the container) ------------------------
 data/documents/*
 !data/documents/.gitkeep
 data/uploads/*
 !data/uploads/.gitkeep
 
-# --- IDE ---
+# --- IDE / editor --------------------------------------------
 .vscode/
 .idea/
 *.swp
@@ -42,5 +74,5 @@ data/uploads/*
 .DS_Store
 Thumbs.db
 
-# --- Docker ---
+# --- Docker ---------------------------------------------------
 .docker/

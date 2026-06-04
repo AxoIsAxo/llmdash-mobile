@@ -1,0 +1,70 @@
+name: Build Mobile APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'LLMDash server URL to bake into the APK (e.g. https://ai.redforged.eu/)'
+        required: true
+        type: string
+
+jobs:
+  build-android:
+    name: Build debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          api-level: '35'
+          build-tools-version: '35.0.0'
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('frontend/android/**/*.gradle*', 'frontend/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Write build-time .env
+        working-directory: frontend
+        run: |
+          cd ..
+          echo "LLMDASH_SERVER_URL=${{ inputs.url }}" > .env
+          cat .env
+
+      - name: Install npm dependencies
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Build debug APK
+        working-directory: frontend
+        run: npm run mobile:build:debug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: llmdash-debug-apk
+          path: frontend/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30

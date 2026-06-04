@@ -6,9 +6,24 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "mobile:prebuild": "node scripts/prebuild.mjs",
+    "mobile:setup": "npm run mobile:prebuild && cap add android",
+    "mobile:sync": "npm run mobile:prebuild && vite build && cap sync android",
+    "mobile:icons": "cap assets generate",
+    "mobile:build:debug": "npm run mobile:sync && cd android && ./gradlew assembleDebug",
+    "mobile:build:release": "npm run mobile:sync && cd android && ./gradlew assembleRelease",
+    "mobile:open:android": "cap open android"
   },
   "dependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/app": "^7.0.0",
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/keyboard": "^7.0.0",
+    "@capacitor/network": "^7.0.0",
+    "@capacitor/preferences": "^7.0.0",
+    "@capacitor/splash-screen": "^7.0.0",
+    "@capacitor/status-bar": "^7.0.0",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -17,6 +32,9 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^7.0.0",
+    "@clack/prompts": "^0.7.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",

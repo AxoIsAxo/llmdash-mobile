@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">LLMDash</string>
+    <string name="title_activity_main">LLMDash</string>
+    <string name="package_name">eu.redforged.llmdash</string>
+    <string name="custom_url_scheme">eu.redforged.llmdash</string>
+</resources>

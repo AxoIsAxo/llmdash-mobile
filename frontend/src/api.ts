@@ -1,13 +1,6 @@
-const BASE = '/api';
+import { getToken, setToken } from './storage'
 
-function getToken(): string | null {
-  return localStorage.getItem('llmdash_token');
-}
-
-function setToken(token: string | null) {
-  if (token) localStorage.setItem('llmdash_token', token);
-  else localStorage.removeItem('llmdash_token');
-}
+const BASE = (import.meta.env.VITE_API_BASE as string) || '/api'
 
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   const token = getToken();
@@ -21,7 +14,7 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
     ...opts,
   });
   if (res.status === 401) {
-    setToken(null);
+    void setToken(null);
     window.location.reload();
     throw new Error('Unauthorized');
   }

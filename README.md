@@ -152,6 +152,80 @@ cd frontend
 npm run build    # Outputs to frontend/dist/
 ```
 
+### Mobile App (Android, Capacitor)
+
+A native Android wrapper around the same React SPA. The LLMDash server URL is **baked into the APK at build time** and cannot be changed by the end user at runtime — to ship a build for a different server, fork this repo and rebuild.
+
+#### Prerequisites
+
+- Node.js 22+ and npm
+- JDK 17 or newer
+- Android SDK with platform `android-35` and `build-tools;35.0.0`
+- `ANDROID_HOME` exported and `cmdline-tools/latest/bin` on `PATH`
+- An Android device or emulator for testing
+
+#### One-time setup
+
+```bash
+cd frontend
+npm install
+npm run mobile:setup        # scaffolds frontend/android/ (only needed once)
+```
+
+#### Build a debug APK
+
+```bash
+cd frontend
+npm run mobile:build:debug
+```
+
+The prebuild step will interactively prompt for the LLMDash server URL (e.g. `https://ai.redforged.eu/`) and write it to `frontend/.env`. Subsequent builds reuse the value from `.env` (or from the `LLMDASH_SERVER_URL` env var). The APK lands at:
+
+```
+frontend/android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+Install it on a connected device with:
+
+```bash
+adb install -r frontend/android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+#### Building for your own server
+
+Edit `.env` at the repo root and set `LLMDASH_SERVER_URL` to your instance, then rebuild:
+
+```bash
+echo "LLMDASH_SERVER_URL=https://llmdash.example.com/" > ../.env
+npm run mobile:build:debug
+```
+
+The build fails fast (with a clear error) if `LLMDASH_SERVER_URL` is not set and stdin is not a TTY.
+
+#### Building via CI
+
+The repository includes a GitHub Actions workflow at `.github/workflows/build-mobile.yml` that builds the debug APK on demand:
+
+1. Push this repo (or a fork) to GitHub
+2. Go to **Actions → Build Mobile APK → Run workflow**
+3. Enter your LLMDash server URL
+4. Download the `llmdash-debug-apk` artifact from the completed run
+
+#### Customizing the icon and splash
+
+Drop a `frontend/resources/icon.png` (1024×1024) and `frontend/resources/splash.png` (2732×2732) and run:
+
+```bash
+cd frontend
+npm run mobile:icons
+```
+
+This regenerates all density-specific icons and splash drawables via `@capacitor/assets`.
+
+#### Local development against a running backend
+
+The easiest setup is to point `LLMDASH_SERVER_URL` at `http://10.0.2.2:8000/` (Android emulator's view of the host) while you have the backend running on your machine.
+
 ---
 
 ## API Overview
