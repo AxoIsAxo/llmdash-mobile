@@ -140,6 +140,49 @@ def _parse_tool_arguments(raw: str, tool_name: str) -> tuple[dict, bool]:
             except (json.JSONDecodeError, TypeError):
                 pass
 
+    # Recovery 3: the stream was cut mid-string AND mid-key. The model is
+    # likely still inside a string value (e.g. a multi-line CSS block).
+    # Find the last position where we are OUTSIDE any string value, then
+    # find the last comma-or-open-brace AFTER that point and close the
+    # object from there, dropping the unfinished trailing value.
+    try:
+        in_string = False
+        escape = False
+        last_outside = -1
+        for i, ch in enumerate(raw):
+            if escape:
+                escape = False
+                continue
+            if ch == "\\" and in_string:
+                escape = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                if not in_string:
+                    last_outside = i
+                continue
+            if in_string:
+                continue
+            if ch in "{,:":
+                last_outside = i
+        if last_outside > 0:
+            for cut in range(last_outside, 0, -1):
+                if raw[cut] in "{,":
+                    candidate = raw[:cut].rstrip()
+                    if not candidate.endswith("{"):
+                        candidate += "}"
+                    if not candidate.startswith("{"):
+                        continue
+                    try:
+                        parsed = json.loads(candidate)
+                        if isinstance(parsed, dict) and parsed:
+                            return parsed, False
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    break
+    except Exception:
+        pass
+
     return {}, False
 
 
@@ -838,9 +881,17 @@ class OpenAICompatibleProvider(AIProvider):
                     flush=True,
                 )
             elif not recovered:
+                try:
+                    json.loads(raw_args)
+                    err = "(unknown parse error)"
+                except json.JSONDecodeError as e:
+                    err = f"{e.msg} at pos {e.pos}"
+                except Exception as e:
+                    err = str(e)
                 print(
-                    f"[tool-call] malformed JSON arguments for {tc_data['name']!r}: "
-                    f"{raw_args[:200]!r}{'...' if len(raw_args) > 200 else ''}",
+                    f"[tool-call] malformed JSON arguments for {tc_data['name']!r} "
+                    f"(len={len(raw_args)}): {err}\n"
+                    f"  raw tail: ...{raw_args[-200:]!r}",
                     flush=True,
                 )
             accumulated_tool_calls.append({
