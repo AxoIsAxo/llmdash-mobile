@@ -183,6 +183,51 @@ def _parse_tool_arguments(raw: str, tool_name: str) -> tuple[dict, bool]:
     except Exception:
         pass
 
+    # Recovery 4: the stream was cut inside the ONLY string value of the
+    # object (no earlier key-value boundary to fall back to). This happens
+    # with large values like a full :root CSS block. Close the string and
+    # the object as-is. If the partial value contained an unescaped "
+    # that would prematurely end the string, json.loads still fails and
+    # we fall back to a substring search for the last safe cutoff.
+    candidate = raw + '"}'
+    try:
+        parsed = json.loads(candidate)
+        if isinstance(parsed, dict) and parsed:
+            return parsed, False
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    # Recovery 4b: walk through the raw text after the opening `":` and
+    # find the last position where an unescaped `"` could legitimately
+    # appear (i.e. the value contains a `"` that we treat as a premature
+    # end of the JSON string). Try parsing with that as the close.
+    if raw.lstrip().startswith("{"):
+        colon = raw.find(":")
+        if colon > 0:
+            value_start = colon + 1
+            while value_start < len(raw) and raw[value_start] in " \t\r\n":
+                value_start += 1
+            if value_start < len(raw) and raw[value_start] == '"':
+                # Find the first unescaped " in the value (which would be
+                # the real end of the string in a complete JSON) and try
+                # parsing up to there.
+                i = value_start + 1
+                while i < len(raw):
+                    ch = raw[i]
+                    if ch == "\\":
+                        i += 2
+                        continue
+                    if ch == '"':
+                        candidate = raw[: i + 1] + "}"
+                        try:
+                            parsed = json.loads(candidate)
+                            if isinstance(parsed, dict) and parsed:
+                                return parsed, False
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                        break
+                    i += 1
+
     return {}, False
 
 
