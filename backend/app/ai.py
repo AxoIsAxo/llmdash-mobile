@@ -831,7 +831,13 @@ class OpenAICompatibleProvider(AIProvider):
         for tc_data in tool_call_accumulator.values():
             raw_args = tc_data["arguments_str"]
             args, recovered = _parse_tool_arguments(raw_args, tc_data["name"])
-            if not recovered and raw_args:
+            if not raw_args:
+                print(
+                    f"[tool-call] {tc_data['name']!r} emitted with NO arguments "
+                    f"(id={tc_data['id']!r}) — model did not stream any argument chunks",
+                    flush=True,
+                )
+            elif not recovered:
                 print(
                     f"[tool-call] malformed JSON arguments for {tc_data['name']!r}: "
                     f"{raw_args[:200]!r}{'...' if len(raw_args) > 200 else ''}",
