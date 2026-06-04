@@ -77,6 +77,72 @@ def _xml_tag_value(m: "re.Match[str]") -> str:
     return ""
 
 
+def _parse_tool_arguments(raw: str, tool_name: str) -> tuple[dict, bool]:
+    """Parse the concatenated JSON arguments string for a streamed tool call.
+
+    Returns (arguments, recovered). If the first json.loads fails, try a
+    few common recovery strategies for truncated/malformed streaming output
+    before giving up. When recovery succeeds the recovered flag is True so
+    callers can log/observe that something was off.
+    """
+    if not raw or not raw.strip():
+        return {}, True
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            return parsed, True
+        return {"value": parsed}, True
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    # Recovery 1: locate the outermost object by balancing braces and try
+    # parsing the prefix that ends at the last successfully-closed '}'.
+    depth = 0
+    last_close = -1
+    in_string = False
+    escape = False
+    for i, ch in enumerate(raw):
+        if escape:
+            escape = False
+            continue
+        if ch == "\\" and in_string:
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                last_close = i
+    if last_close > 0:
+        try:
+            parsed = json.loads(raw[: last_close + 1])
+            if isinstance(parsed, dict):
+                return parsed, False
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # Recovery 2: the stream was cut mid-string. Re-parse up to the last
+    # successfully-closed key, append a closing quote and brace, drop the
+    # last unfinished value. Best-effort only.
+    if raw.lstrip().startswith("{"):
+        head = raw.rfind('"')
+        if head > 0:
+            try:
+                parsed = json.loads(raw[:head] + '"}')
+                if isinstance(parsed, dict):
+                    return parsed, False
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+    return {}, False
+
+
 def _parse_inline_tool_call(json_str: str, fallback_id: str) -> Optional[dict]:
     if not json_str or not json_str.strip():
         return None
@@ -763,10 +829,14 @@ class OpenAICompatibleProvider(AIProvider):
 
         accumulated_tool_calls = []
         for tc_data in tool_call_accumulator.values():
-            try:
-                args = json.loads(tc_data["arguments_str"])
-            except (json.JSONDecodeError, KeyError):
-                args = {}
+            raw_args = tc_data["arguments_str"]
+            args, recovered = _parse_tool_arguments(raw_args, tc_data["name"])
+            if not recovered and raw_args:
+                print(
+                    f"[tool-call] malformed JSON arguments for {tc_data['name']!r}: "
+                    f"{raw_args[:200]!r}{'...' if len(raw_args) > 200 else ''}",
+                    flush=True,
+                )
             accumulated_tool_calls.append({
                 "id": tc_data["id"],
                 "name": tc_data["name"],

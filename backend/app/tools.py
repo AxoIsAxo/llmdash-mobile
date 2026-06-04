@@ -505,6 +505,8 @@ async def execute_tool(name: str, arguments: dict, **context) -> str:
             f"Tool execution error: {e}\n"
             f"Function signature: {name}({params})\n"
             f"You provided arguments: {{{provided}}}\n"
+            f"If the argument you intended to send is large or contains special "
+            f"characters, try sending it as a shorter, properly-escaped JSON string.\n"
             f"Please retry with the correct arguments matching the signature above."
         )
     except Exception as e:
