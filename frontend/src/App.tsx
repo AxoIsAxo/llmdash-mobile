@@ -33,6 +33,32 @@ function injectUserCss(css: string) {
   }
 }
 
+function mergeMessages(local: Message[], server: Message[]): Message[] {
+  const serverById = new Map<number, Message>()
+  for (const m of server) serverById.set(m.id, m)
+  const localById = new Map<number, Message>()
+  for (const m of local) localById.set(m.id, m)
+  const result: Message[] = []
+  const seen = new Set<number>()
+  for (const sm of server) {
+    const lm = localById.get(sm.id)
+    if (lm && lm.status === 'generating') {
+      result.push(lm)
+    } else if (sm.role === 'tool' && !sm.tool_name && lm?.tool_name) {
+      result.push(lm)
+    } else {
+      result.push(sm)
+    }
+    seen.add(sm.id)
+  }
+  for (const lm of local) {
+    if (!seen.has(lm.id) && lm.status === 'generating') {
+      result.push(lm)
+    }
+  }
+  return result
+}
+
 function App() {
   const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null)
   const [currentUser, setCurrentUser] = useState<User | null>(null)
@@ -60,7 +86,17 @@ function App() {
   const [branchConvToKey, setBranchConvToKey] = useState<Record<number, string>>({})
   const [copiedId, setCopiedId] = useState<number | null>(null)
   const [executingTools, setExecutingTools] = useState<Set<string>>(new Set())
+  const [expandedToolCalls, setExpandedToolCalls] = useState<Set<string>>(new Set())
   const [sidePanel, setSidePanel] = useState<SidePanel | null>(null)
+
+  const toggleToolCall = useCallback((id: string) => {
+    setExpandedToolCalls(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
 
   const [attachments, setAttachments] = useState<AttachmentRecord[]>([])
   const [uploading, setUploading] = useState(false)
@@ -459,7 +495,7 @@ function App() {
                 return updated
               }
               return [...prev, {
-                id: Date.now(), role: 'assistant' as const,
+                id: (conv?.id || 0) * -1, role: 'assistant' as const,
                 content: event.content || '', tool_calls_json: event.tool_calls || null,
                 tool_call_id: null, tool_name: null, status: 'generating', created_at: new Date().toISOString()
               }]
@@ -544,7 +580,7 @@ function App() {
             setExecutingTools(new Set())
           }
           const full = await api.conversations.messages(convId)
-          setMessages(full)
+          setMessages(prev => mergeMessages(prev, full))
           loadConversations()
           return
         }
@@ -552,7 +588,7 @@ function App() {
         const lastAssistant = msgs.filter((m: Message) => m.role === 'assistant').pop()
         if (lastAssistant && lastAssistant.id !== lastMsgId) {
           lastMsgId = lastAssistant.id
-          setMessages(msgs)
+          setMessages(prev => mergeMessages(prev, msgs))
         }
       } catch { /* keep polling */ }
     }, 500)
@@ -701,7 +737,7 @@ function App() {
                 return updated
               }
               return [...prev, {
-                id: Date.now(), role: 'assistant' as const,
+                id: branch.id * -1, role: 'assistant' as const,
                 content: event.content || '', tool_calls_json: event.tool_calls || null,
                 tool_call_id: null, tool_name: null, status: 'generating', created_at: new Date().toISOString()
               }]
@@ -943,7 +979,7 @@ function App() {
                 const siblings = branchSiblings[key] || []
                 const branchIdx = siblings.indexOf(activeConv?.id ?? 0)
                 return (
-                  <div key={msg.id || i}>
+                  <div key={`${msg.role}-${msg.tool_call_id ?? ''}-${msg.id ?? i}`}>
                     <MessageBubble
                       message={msg}
                       msgIndex={i}
@@ -953,6 +989,8 @@ function App() {
                       onCopy={handleCopy}
                       copiedId={copiedId}
                       executingTools={executingTools}
+                      expandedToolCalls={expandedToolCalls}
+                      onToggleToolCall={toggleToolCall}
                       setSidePanel={setSidePanel}
                     />
                     {siblings.length > 1 && (
@@ -1172,7 +1210,7 @@ function App() {
 
 // --- Message Bubble ---
 
-function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCopy, copiedId, executingTools, setSidePanel }: {
+function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCopy, copiedId, executingTools, expandedToolCalls, onToggleToolCall, setSidePanel }: {
   message: Message
   msgIndex: number
   messages: Message[]
@@ -1181,8 +1219,28 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
   onCopy: (content: string, id: number) => void
   copiedId: number | null
   executingTools: Set<string>
+  expandedToolCalls: Set<string>
+  onToggleToolCall: (id: string) => void
   setSidePanel: (panel: SidePanel | null) => void
 }) {
+  if (message.role === 'tool') {
+    const isWebTool = message.tool_name === 'web_search' || message.tool_name === 'web_scrape'
+    let matchedWebCall = false
+    if (!isWebTool && message.tool_call_id) {
+      for (let i = msgIndex - 1; i >= 0; i--) {
+        const prev = messages[i]
+        if (prev?.role === 'assistant' && prev.tool_calls_json) {
+          const tc = prev.tool_calls_json.find(t => t.id === message.tool_call_id)
+          if (tc) {
+            if (tc.name === 'web_search' || tc.name === 'web_scrape') matchedWebCall = true
+            break
+          }
+        }
+      }
+    }
+    if (isWebTool || matchedWebCall) return null
+  }
+
   const isUser = message.role === 'user'
   const isTool = message.role === 'tool'
   const isAssistant = message.role === 'assistant'
@@ -1351,11 +1409,6 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
             )}
           </div>
         </div>
-        <div className="flex gap-1 mt-0.5 justify-start ml-10">
-          <button onClick={() => onCopy(message.content || '', message.id)} className="p-1 hover:bg-theme-bg-hover rounded transition-colors text-theme-muted hover:text-theme-text" title="Copy">
-            {copiedId === message.id ? <Check className="w-3.5 h-3.5 text-theme-accent-text" /> : <Copy className="w-3.5 h-3.5" />}
-          </button>
-        </div>
       </div>
     )
   }
@@ -1363,34 +1416,88 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
   if (toolCalls && Array.isArray(toolCalls) && toolCalls.length > 0) {
     return (
       <div>
+        {isAssistant && message.reasoning_content && (
+          <div className="flex justify-start mb-1">
+            <div className="w-8 shrink-0" />
+            <div className="max-w-[75%] min-w-0">
+              <button
+                onClick={() => setThinkingExpanded(!thinkingExpanded)}
+                className="flex items-center gap-1.5 text-xs text-theme-muted hover:text-theme-text transition-colors py-0.5 w-full"
+              >
+                {message.status === 'generating' ? (
+                  <><Loader2 className="w-3 h-3 animate-spin text-theme-purple" /><span className="text-theme-purple">Thinking...</span></>
+                ) : (
+                  <><Brain className="w-3 h-3 text-theme-purple" /><span>Reasoning</span></>
+                )}
+                {thinkingExpanded ? <ChevronUp className="w-3 h-3 ml-auto" /> : <ChevronDown className="w-3 h-3 ml-auto" />}
+              </button>
+              {thinkingExpanded && (
+                <div className="mt-1 rounded-xl bg-theme-bg-elevated/50 border border-theme-border-light/50 px-3 py-2 text-sm text-theme-subtle italic">
+                  <MarkdownRenderer content={message.reasoning_content || ''} />
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         <div className="flex justify-start">
-          <div className="max-w-2xl space-y-2">
-            {message.content && <MarkdownRenderer content={message.content} />}
+          {isAssistant && (
+            <div className="w-8 h-8 rounded-full bg-theme-accent flex items-center justify-center mr-2 mt-0.5 shrink-0">
+              <Bot className="w-4 h-4" />
+            </div>
+          )}
+          <div className="max-w-[75%] min-w-0 space-y-2">
             <div className="flex flex-wrap gap-2">
               {toolCalls.map((tc, i) => {
                 const isExecuting = executingTools.has(tc.id)
+                const resultMsg = messages.find(m => m.role === 'tool' && m.tool_call_id === tc.id)
+                const isCollapsibleWebCall = !isExecuting && (tc.name === 'web_search' || tc.name === 'web_scrape') && !!resultMsg
+                const callExpanded = isCollapsibleWebCall && expandedToolCalls.has(tc.id)
+                const summary = isExecuting
+                  ? 'executing...'
+                  : isCollapsibleWebCall
+                    ? (() => {
+                        const count = (resultMsg!.content!.match(/^\d+\.\s/gm) || []).length
+                        return count > 0 ? `${count} result${count === 1 ? '' : 's'}` : 'done'
+                      })()
+                    : 'done'
                 return (
-                <div key={i} className={`flex items-center gap-2 px-3 py-2 bg-theme-bg-elevated rounded-lg border text-xs ${isExecuting ? 'border-theme-focus-ring/40 animate-pulse' : 'border-theme-border-light'}`}>
-                  {isExecuting ? (
-                    <Loader2 className="w-3.5 h-3.5 text-theme-accent-text animate-spin" />
-                  ) : (
-                    <Bot className="w-3.5 h-3.5 text-theme-accent-text" />
-                  )}
-                  <span className="font-mono text-theme-accent-dim">{tc.name}</span>
-                  <span className={isExecuting ? 'text-theme-accent-text' : 'text-theme-muted'}>{isExecuting ? 'executing...' : 'calling...'}</span>
-                </div>
+                  <div key={i} className="flex flex-col">
+                    <button
+                      onClick={() => { if (isCollapsibleWebCall) onToggleToolCall(tc.id) }}
+                      disabled={!isCollapsibleWebCall}
+                      className={`flex items-center gap-2 px-3 py-2 bg-theme-bg-elevated rounded-lg border text-xs ${isExecuting ? 'border-theme-focus-ring/40 animate-pulse' : 'border-theme-border-light'} ${isCollapsibleWebCall ? 'cursor-pointer hover:bg-theme-bg-hover' : 'cursor-default'}`}
+                    >
+                      {isExecuting ? (
+                        <Loader2 className="w-3.5 h-3.5 text-theme-accent-text animate-spin" />
+                      ) : (
+                        <Bot className="w-3.5 h-3.5 text-theme-accent-text" />
+                      )}
+                      <span className="font-mono text-theme-accent-dim">{tc.name}</span>
+                      <span className={isExecuting ? 'text-theme-accent-text' : 'text-theme-muted'}>{summary}</span>
+                      {isCollapsibleWebCall && (
+                        callExpanded
+                          ? <ChevronDown className="w-3 h-3 ml-1 text-theme-muted" />
+                          : <ChevronRight className="w-3 h-3 ml-1 text-theme-muted" />
+                      )}
+                    </button>
+                    {isCollapsibleWebCall && callExpanded && resultMsg && (
+                      <div className="mt-1 rounded-xl bg-theme-bg-elevated/50 border border-theme-border-light/50 px-4 py-2 max-h-96 overflow-y-auto">
+                        <pre className="text-xs text-theme-text-secondary whitespace-pre-wrap font-mono">
+                          {resultMsg.content}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
                 )
               })}
             </div>
+            {message.content && (
+              <div className="bg-theme-bg-elevated rounded-xl px-4 py-2.5">
+                <MarkdownRenderer content={message.content} />
+              </div>
+            )}
           </div>
         </div>
-        {message.content && (
-          <div className="flex gap-1 mt-0.5 justify-start ml-10">
-            <button onClick={() => onCopy(message.content || '', message.id)} className="p-1 hover:bg-theme-bg-hover rounded transition-colors text-theme-muted hover:text-theme-text" title="Copy">
-              {copiedId === message.id ? <Check className="w-3.5 h-3.5 text-theme-accent-text" /> : <Copy className="w-3.5 h-3.5" />}
-            </button>
-          </div>
-        )}
       </div>
     )
   }
@@ -1432,13 +1539,6 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
             </div>
           </div>
         </div>
-        {message.content && (
-          <div className="flex gap-1 mt-0.5 justify-start ml-10">
-            <button onClick={() => onCopy(message.content || '', message.id)} className="p-1 hover:bg-theme-bg-hover rounded transition-colors text-theme-muted hover:text-theme-text" title="Copy">
-              {copiedId === message.id ? <Check className="w-3.5 h-3.5 text-theme-accent-text" /> : <Copy className="w-3.5 h-3.5" />}
-            </button>
-          </div>
-        )}
       </div>
     )
   }

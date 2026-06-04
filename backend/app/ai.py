@@ -1,5 +1,6 @@
 import base64
 import json
+import re
 from typing import Optional, AsyncGenerator
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -9,6 +10,408 @@ from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
 
 from . import config as app_config
+
+
+# Hermes/Qwen/mimo style inline tool call tags.
+# Some models (notably Xiaomi MiMo) emit `<tool_call>{...}</tool_call>` text in
+# their content stream instead of using the OpenAI tool_calls API. This breaks
+# the chat UX and causes malformed output. We detect/strip these blocks and
+# convert them to real tool calls.
+_INLINE_TOOL_CALL_OPEN = "<tool_call>"
+_INLINE_TOOL_CALL_CLOSE = "</tool_call>"
+_INLINE_TOOL_CALL_RE = re.compile(
+    r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL
+)
+
+# XML-attribute style inline tool call tags, used by some Anthropic-style
+# proxies, the Xiaomi MiMo family and a handful of other chat models:
+#   <function=NAME>
+#   <parameter=KEY>
+#   VALUE
+#   <parameter=KEY2>
+#   VALUE2
+#   </function>
+# We also accept the `<invoke name="...">` and `<parameter name="...">` forms.
+#
+# Each tag has two opener variants:
+#   1. <function=NAME>      / <parameter=KEY>
+#   2. <invoke name="NAME"> / <parameter name="KEY">
+# Both forms accept the value quoted with " or ' or unquoted.
+#
+# Group layout: (1,2,3) carry the first-form value, (4,5,6) carry the
+# second-form value. Whichever was populated is the actual tag value.
+_XML_FUNC_OPEN_RE = re.compile(
+    r"<(?:function|antml:function)\s*=\s*"
+    r"(?:\"([^\"]*)\"|'([^']*)'|([^\s>]+))"
+    r"\s*>"
+    r"|"
+    r"<(?:invoke|antml:invoke)\s+name\s*=\s*"
+    r"(?:\"([^\"]*)\"|'([^']*)'|([^\s>]+))"
+    r"\s*>"
+)
+_XML_FUNC_CLOSE_RE = re.compile(
+    r"</(?:function|antml:function|antml:invoke|invoke)>"
+)
+_XML_PARAM_RE = re.compile(
+    r"<(?:parameter|antml:param|antml:parameter)\s*=\s*"
+    r"(?:\"([^\"]*)\"|'([^']*)'|([^\s>]+))"
+    r"\s*>"
+    r"|"
+    r"<(?:parameter|antml:param|antml:parameter)\s+name\s*=\s*"
+    r"(?:\"([^\"]*)\"|'([^']*)'|([^\s>]+))"
+    r"\s*>"
+)
+# A parameter-value terminator: either the next parameter tag, the function
+# close tag, or a parameter close tag (used by some models).
+_XML_PARAM_END_RE = re.compile(
+    r"<(?:parameter|antml:param|antml:parameter)"
+    r"|</(?:parameter|antml:param|antml:parameter|function|antml:function|invoke|antml:invoke)>"
+)
+
+
+def _xml_tag_value(m: "re.Match[str]") -> str:
+    for i in range(1, m.lastindex + 1 if m.lastindex else 7):
+        v = m.group(i)
+        if v:
+            return v
+    return ""
+
+
+def _parse_inline_tool_call(json_str: str, fallback_id: str) -> Optional[dict]:
+    if not json_str or not json_str.strip():
+        return None
+    try:
+        data = json.loads(json_str)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    name = data.get("name") or data.get("function") or data.get("tool")
+    if not isinstance(name, str) or not name:
+        return None
+    args = data.get("arguments", data.get("parameters", {}))
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except json.JSONDecodeError:
+            args = {}
+        except TypeError:
+            args = {}
+    if not isinstance(args, dict):
+        args = {}
+    return {"id": fallback_id, "name": name, "arguments": args}
+
+
+def _parse_xml_attr_tool_call(
+    func_name: str, body: str, fallback_id: str
+) -> Optional[dict]:
+    if not func_name:
+        return None
+    params: dict = {}
+    pos = 0
+    while pos < len(body):
+        m = _XML_PARAM_RE.search(body, pos)
+        if not m:
+            break
+        key = _xml_tag_value(m).strip()
+        value_start = m.end()
+        # Value extends until the next parameter tag, a parameter-close tag,
+        # or the function-close tag.
+        end_m = _XML_PARAM_END_RE.search(body, value_start)
+        if end_m:
+            value = body[value_start : end_m.start()]
+            pos = end_m.start()
+        else:
+            value = body[value_start:]
+            pos = len(body)
+        # Trim a single leading newline (model often inserts one for
+        # readability) plus any trailing whitespace.
+        if value.startswith("\n"):
+            value = value[1:]
+        elif value.startswith("\r\n"):
+            value = value[2:]
+        params[key] = value.rstrip()
+    if not params:
+        return None
+    return {"id": fallback_id, "name": func_name, "arguments": params}
+
+
+def _extract_inline_tool_calls(content: str, id_prefix: str = "call_text") -> list[dict]:
+    out: list[dict] = []
+    consumed_spans: list[tuple[int, int]] = []
+
+    # Hermes/Qwen/mimo JSON format: <tool_call>{...}</tool_call>
+    for i, match in enumerate(_INLINE_TOOL_CALL_RE.finditer(content)):
+        tc = _parse_inline_tool_call(match.group(1), f"{id_prefix}_{i}")
+        if tc:
+            out.append(tc)
+            consumed_spans.append(match.span())
+
+    # XML-attribute format: <function=NAME>...<parameter=KEY>VALUE</function>
+    i = len(out)
+    pos = 0
+    while pos < len(content):
+        open_m = _XML_FUNC_OPEN_RE.search(content, pos)
+        if not open_m:
+            break
+        func_name = _xml_tag_value(open_m)
+        # Find the matching close tag
+        close_m = _XML_FUNC_CLOSE_RE.search(content, open_m.end())
+        if not close_m:
+            break
+        body = content[open_m.end() : close_m.start()]
+        tc = _parse_xml_attr_tool_call(
+            func_name, body, f"{id_prefix}_{i}"
+        )
+        if tc:
+            out.append(tc)
+            consumed_spans.append((open_m.start(), close_m.end()))
+            i += 1
+        pos = close_m.end()
+
+    return out
+
+
+def _strip_inline_tool_calls(content: str) -> str:
+    # Strip JSON-style blocks first
+    content = _INLINE_TOOL_CALL_RE.sub("", content)
+    # Then strip XML-attribute blocks. Walk through and keep only the gaps.
+    out_parts: list[str] = []
+    pos = 0
+    while pos < len(content):
+        open_m = _XML_FUNC_OPEN_RE.search(content, pos)
+        if not open_m:
+            out_parts.append(content[pos:])
+            break
+        out_parts.append(content[pos : open_m.start()])
+        close_m = _XML_FUNC_CLOSE_RE.search(content, open_m.end())
+        if not close_m:
+            # Unterminated block, emit the opener and stop
+            out_parts.append(content[open_m.start() :])
+            break
+        pos = close_m.end()
+    return "".join(out_parts)
+
+
+def _has_inline_tool_call(content: str) -> bool:
+    if not content:
+        return False
+    if _INLINE_TOOL_CALL_RE.search(content):
+        return True
+    if _XML_FUNC_OPEN_RE.search(content) and _XML_FUNC_CLOSE_RE.search(content):
+        return True
+    return False
+
+
+class _InlineToolCallFilter:
+    """Stateful filter that strips inline tool call text from a streamed
+    content stream and yields the parsed tool calls.
+
+    Handles two common inline formats produced by models that don't use the
+    OpenAI tool_calls API (e.g. Xiaomi MiMo, certain Hermes/Qwen builds and
+    some Anthropic-SDK-style proxies):
+
+      1. JSON-wrapped:  <tool_call>{...}</tool_call>
+      2. XML-attribute: <function=NAME>...<parameter=KEY>VALUE...</function>
+                       (also `<invoke name="...">...</invoke>` variants)
+
+    Both filters run on every chunk. If a tag straddles several deltas, the
+    filter buffers it. When the stream ends with an unterminated tag, the
+    buffered text is emitted verbatim so the user still sees it.
+    """
+
+    def __init__(self) -> None:
+        self._json = _JsonInlineToolCallFilter()
+        self._xml = _XmlAttrToolCallFilter()
+
+    def feed(self, chunk: str) -> tuple[str, list[dict]]:
+        if not chunk:
+            return "", []
+        out1, calls1 = self._json.feed(chunk)
+        out2, calls2 = self._xml.feed(out1)
+        return out2, calls1 + calls2
+
+    def flush(self) -> str:
+        return self._json.flush() + self._xml.flush()
+
+    @property
+    def collected(self) -> list[dict]:
+        return self._json.collected + self._xml.collected
+
+
+class _JsonInlineToolCallFilter:
+    """Stateful filter for the JSON-wrapped `<tool_call>{...}</tool_call>` form."""
+
+    _OPEN = _INLINE_TOOL_CALL_OPEN
+    _CLOSE = _INLINE_TOOL_CALL_CLOSE
+
+    def __init__(self) -> None:
+        self._state = "normal"
+        self._tag_buf = ""
+        self._idx = 0
+        self._collected: list[dict] = []
+
+    def _emit_tag_completion(self) -> Optional[dict]:
+        buf = self._tag_buf
+        self._tag_buf = ""
+        self._state = "normal"
+        json_str = buf[: -len(self._CLOSE)]
+        tc = _parse_inline_tool_call(json_str, f"call_text_{self._idx}")
+        if tc is not None:
+            self._idx += 1
+            self._collected.append(tc)
+            return tc
+        return None
+
+    def feed(self, chunk: str) -> tuple[str, list[dict]]:
+        if not chunk:
+            return "", []
+        out: list[str] = []
+        new_calls: list[dict] = []
+        i = 0
+        n = len(chunk)
+        while i < n:
+            c = chunk[i]
+            if self._state == "normal":
+                if c == "<":
+                    self._state = "tag_start"
+                    self._tag_buf = "<"
+                else:
+                    out.append(c)
+                i += 1
+                continue
+
+            if self._state == "tag_start":
+                self._tag_buf += c
+                if self._tag_buf == self._OPEN:
+                    self._state = "in_tool_call"
+                    self._tag_buf = ""
+                elif not self._OPEN.startswith(self._tag_buf):
+                    out.append(self._tag_buf)
+                    self._tag_buf = ""
+                    self._state = "normal"
+                i += 1
+                continue
+
+            # in_tool_call
+            self._tag_buf += c
+            if self._tag_buf.endswith(self._CLOSE):
+                tc = self._emit_tag_completion()
+                if tc is not None:
+                    new_calls.append(tc)
+            i += 1
+        return "".join(out), new_calls
+
+    def flush(self) -> str:
+        if not self._tag_buf:
+            return ""
+        if self._state == "tag_start":
+            out = self._tag_buf
+        elif self._state == "in_tool_call":
+            out = f"{self._OPEN}{self._tag_buf}"
+        else:
+            out = ""
+        self._tag_buf = ""
+        self._state = "normal"
+        return out
+
+    @property
+    def collected(self) -> list[dict]:
+        return self._collected
+
+
+class _XmlAttrToolCallFilter:
+    """Stateful filter for the XML-attribute inline tool call form:
+
+        <function=NAME>
+        <parameter=KEY>
+        VALUE
+        </function>
+
+    (also accepts `<invoke name="...">` and the `antml:` namespaced variants).
+    Buffers content until a complete block is visible, then emits the parsed
+    tool call. Unterminated blocks at end-of-stream are flushed verbatim.
+    """
+
+    def __init__(self) -> None:
+        self._buf = ""
+        self._idx = 0
+        self._collected: list[dict] = []
+
+    @staticmethod
+    def _partial_opener_len(buf: str) -> int:
+        """Return how many trailing characters of `buf` to keep as a possible
+        partial opener. A '<' is only treated as a candidate opener start if
+        it is at the very end of `buf` (we don't know the next char yet) or
+        is followed by an alphabetic character (a real tag would be
+        `<function=...>`, `<invoke ...>`, `<antml:...>`, etc.). Bare '<' in
+        math/comparisons like `a < b` is followed by whitespace and is not a
+        candidate, so we don't buffer.
+        """
+        last_lt = buf.rfind("<")
+        if last_lt == -1:
+            return 0
+        # The '<' is the very last char: hold it (waiting for next char).
+        if last_lt == len(buf) - 1:
+            return 1
+        # Otherwise, only hold if followed by an alpha char.
+        if not buf[last_lt + 1].isalpha():
+            return 0
+        return len(buf) - last_lt
+
+    def feed(self, chunk: str) -> tuple[str, list[dict]]:
+        if chunk:
+            self._buf += chunk
+        out: list[str] = []
+        new_calls: list[dict] = []
+
+        while True:
+            open_m = _XML_FUNC_OPEN_RE.search(self._buf)
+            if not open_m:
+                keep = self._partial_opener_len(self._buf)
+                if keep and len(self._buf) > keep:
+                    out.append(self._buf[:-keep])
+                    self._buf = self._buf[-keep:]
+                elif not keep and self._buf:
+                    out.append(self._buf)
+                    self._buf = ""
+                break
+
+            # Emit everything before the opener
+            out.append(self._buf[: open_m.start()])
+            # Try to find the matching close
+            close_m = _XML_FUNC_CLOSE_RE.search(self._buf, open_m.end())
+            if not close_m:
+                # Incomplete: keep from the opener onward in the buffer so we
+                # can finish it on the next chunk.
+                self._buf = self._buf[open_m.start():]
+                break
+
+            # We have a complete block: opener at open_m, closer at close_m.
+            func_name = _xml_tag_value(open_m)
+            body = self._buf[open_m.end() : close_m.start()]
+            tc = _parse_xml_attr_tool_call(
+                func_name, body, f"call_xml_{self._idx}"
+            )
+            if tc is not None:
+                self._idx += 1
+                self._collected.append(tc)
+                new_calls.append(tc)
+            # Drop the entire block from the buffer and loop
+            self._buf = self._buf[close_m.end():]
+
+        return "".join(out), new_calls
+
+    def flush(self) -> str:
+        if not self._buf:
+            return ""
+        out = self._buf
+        self._buf = ""
+        return out
+
+    @property
+    def collected(self) -> list[dict]:
+        return self._collected
 
 
 class ToolDef:
@@ -170,17 +573,10 @@ class OpenAICompatibleProvider(AIProvider):
                 raise e
         msg = response.choices[0].message
 
-        tool_calls = []
-        if msg.tool_calls:
-            for tc in msg.tool_calls:
-                tool_calls.append({
-                    "id": tc.id,
-                    "name": tc.function.name,
-                    "arguments": json.loads(tc.function.arguments),
-                })
+        tool_calls, content = self._extract_tool_calls(msg)
 
         return AIResponse(
-            content=msg.content or "",
+            content=content,
             tool_calls=tool_calls,
             reasoning_content=getattr(msg, "reasoning_content", "") or getattr(msg, "reasoning", "") or "",
         )
@@ -223,20 +619,45 @@ class OpenAICompatibleProvider(AIProvider):
                 raise e
         msg = response.choices[0].message
 
-        tool_calls = []
-        if msg.tool_calls:
-            for tc in msg.tool_calls:
-                tool_calls.append({
-                    "id": tc.id,
-                    "name": tc.function.name,
-                    "arguments": json.loads(tc.function.arguments),
-                })
+        tool_calls, content = self._extract_tool_calls(msg)
 
         return AIResponse(
-            content=msg.content or "",
+            content=content,
             tool_calls=tool_calls,
             reasoning_content=getattr(msg, "reasoning_content", "") or getattr(msg, "reasoning", "") or "",
         )
+
+    @staticmethod
+    def _extract_tool_calls(msg) -> tuple[list[dict], str]:
+        """Pull tool calls out of an OpenAI message, falling back to inline
+        `<tool_call>...</tool_call>` text for models that don't use the
+        tool_calls API (e.g. mimo v2.5). Returns (tool_calls, cleaned_content).
+        """
+        tool_calls: list[dict] = []
+        if msg.tool_calls:
+            for tc in msg.tool_calls:
+                try:
+                    args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+                except (json.JSONDecodeError, TypeError):
+                    args = {}
+                tool_calls.append({
+                    "id": tc.id,
+                    "name": tc.function.name,
+                    "arguments": args,
+                })
+
+        content = msg.content or ""
+        if not tool_calls:
+            inline = _extract_inline_tool_calls(content)
+            if inline:
+                tool_calls = inline
+                content = _strip_inline_tool_calls(content)
+        else:
+            # API returned proper tool calls — still strip any stray
+            # `<tool_call>` text fragments so the user never sees them.
+            if _INLINE_TOOL_CALL_RE.search(content):
+                content = _strip_inline_tool_calls(content)
+        return tool_calls, content
 
     async def _stream_openai(self, messages: list[dict], tools: list[ToolDef], model_config, retry_without_tools: bool = True, retry_without_thinking: bool = True) -> AsyncGenerator[StreamChunk, None]:
         client = await self._get_client(model_config)
@@ -288,6 +709,7 @@ class OpenAICompatibleProvider(AIProvider):
             return
 
         tool_call_accumulator: dict[int, dict] = {}
+        inline_tool_call_filter = _InlineToolCallFilter()
         finish_reason = None
         usage = None
         reasoning_tokens = 0
@@ -299,7 +721,11 @@ class OpenAICompatibleProvider(AIProvider):
             finish_reason = chunk.choices[0].finish_reason
 
             if delta and delta.content:
-                yield StreamChunk(content_delta=delta.content)
+                cleaned, inline_calls = inline_tool_call_filter.feed(delta.content)
+                if cleaned:
+                    yield StreamChunk(content_delta=cleaned)
+                if inline_calls:
+                    pass  # collected on filter; emitted after stream end
 
             reasoning_delta = (
                 getattr(delta, "reasoning_content", None)
@@ -331,6 +757,10 @@ class OpenAICompatibleProvider(AIProvider):
                 if reasoning_tokens:
                     reasoning_tokens = getattr(reasoning_tokens, "reasoning_tokens", 0) or 0
 
+        flushed = inline_tool_call_filter.flush()
+        if flushed:
+            yield StreamChunk(content_delta=flushed)
+
         accumulated_tool_calls = []
         for tc_data in tool_call_accumulator.values():
             try:
@@ -342,6 +772,14 @@ class OpenAICompatibleProvider(AIProvider):
                 "name": tc_data["name"],
                 "arguments": args,
             })
+
+        # If the API did not return proper tool_calls, fall back to tool calls
+        # extracted from inline `<tool_call>...</tool_call>` text emitted by
+        # models that don't use the OpenAI tool_calls API (e.g. mimo v2.5).
+        if not accumulated_tool_calls:
+            inline_calls = inline_tool_call_filter.collected
+            if inline_calls:
+                accumulated_tool_calls = inline_calls
 
         yield StreamChunk(
             tool_calls=accumulated_tool_calls if accumulated_tool_calls else None,

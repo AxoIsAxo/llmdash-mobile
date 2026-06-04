@@ -70,6 +70,15 @@ def get_active_provider_configs():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    async with async_session() as sess:
+        result = await sess.execute(
+            select(Message).where(Message.status == "generating")
+        )
+        stuck = result.scalars().all()
+        for msg in stuck:
+            msg.status = "interrupted"
+        if stuck:
+            await sess.commit()
     yield
 
 
@@ -846,7 +855,11 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
         "When searching the web, use specific and concise queries. Cite sources when providing "
         "information obtained from web searches.\n"
         "You can also create and edit documents, render HTML, and execute code in a sandboxed "
-        "environment. Be thorough, accurate, and helpful."
+        "environment. Be thorough, accurate, and helpful.\n"
+        "IMPORTANT: Always invoke tools through the platform's native tool-calling "
+        "interface (the tools you were given). Never output raw `<tool_call>...</tool_call>` "
+        "XML/JSON in your visible reply — the chat renderer does not interpret those "
+        "tags and they will appear as broken text to the user."
     )
     messages.insert(0, {"role": "system", "content": system_prompt})
 
@@ -1035,7 +1048,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                     for tc in final_tool_calls:
                         await push_event("tool_start", name=tc["name"], id=tc["id"])
                         result = await execute_tool(tc["name"], tc["arguments"], _current_user=current_user)
-                        tool_results.append({"tool_call_id": tc["id"], "content": result})
+                        tool_results.append({"tool_call_id": tc["id"], "tool_name": tc["name"], "content": result})
                         await push_event("tool_result", name=tc["name"], id=tc["id"], result=result)
 
                     assistant_entry = {
@@ -1055,17 +1068,21 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                             role="tool",
                             content=tr["content"],
                             tool_call_id=tr["tool_call_id"],
+                            tool_name=tr["tool_name"],
                         )
                         sess.add(tool_msg)
                         await sess.commit()
-                        messages.append({"role": "tool", "tool_call_id": tr["tool_call_id"], "content": tr["content"]})
+                        messages.append({"role": "tool", "tool_call_id": tr["tool_call_id"], "tool_name": tr["tool_name"], "content": tr["content"]})
 
                     accumulated_content = ""
                     accumulated_reasoning = ""
                     final_tool_calls = []
                     last_save_len = 0
 
-                    next_tools = tools if tool_round == 1 else []
+                    # Always send tools so the model can retry after a failed
+                    # tool call. The `while ... and tool_round < 5` loop already
+                    # caps the number of rounds, so there's no infinite-loop risk.
+                    next_tools = tools
                     async for chunk in provider.stream_chat_with_results(messages, next_tools, model, tool_results):
                         if chunk.content_delta and chunk.content_delta.strip():
                             accumulated_content += chunk.content_delta
@@ -1088,12 +1105,18 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                     draft.status = "done"
                     draft.created_at = datetime.now(timezone.utc)
                     if final_tool_calls:
-                        draft.tool_calls_json = json.dumps([
-                            {"id": tc["id"], "name": tc["name"], "arguments": tc["arguments"]}
-                            for tc in final_tool_calls
-                        ])
-                    else:
-                        draft.tool_calls_json = None
+                        existing_tcs = []
+                        if draft.tool_calls_json:
+                            try:
+                                existing_tcs = json.loads(draft.tool_calls_json)
+                            except Exception:
+                                existing_tcs = []
+                        seen_ids = {tc.get("id") for tc in existing_tcs}
+                        merged = list(existing_tcs)
+                        for tc in final_tool_calls:
+                            if tc["id"] not in seen_ids:
+                                merged.append({"id": tc["id"], "name": tc["name"], "arguments": tc["arguments"]})
+                        draft.tool_calls_json = json.dumps(merged) if merged else None
                     await sess.commit()
                 else:
                     sess.add(Message(
@@ -1217,6 +1240,24 @@ async def chat_resume(conv_id: int, current_user: dict = Depends(get_current_use
 
     gen = active_generations.get(conv_id)
     if not gen:
+        result = await db.execute(
+            select(Message).where(Message.conversation_id == conv_id, Message.status == "generating").order_by(Message.id.desc()).limit(1)
+        )
+        draft = result.scalar_one_or_none()
+        if draft:
+            draft.status = "interrupted"
+            await db.commit()
+            content_event: dict = {"type": "content", "content": draft.content or ""}
+            if draft.tool_calls_json:
+                content_event["tool_calls"] = json.loads(draft.tool_calls_json)
+            if draft.reasoning_content:
+                content_event["reasoning_content"] = draft.reasoning_content
+
+            async def stale_stream():
+                yield f"data: {json.dumps(content_event)}\n\n"
+                yield "data: [DONE]\n\n"
+
+            return StreamingResponse(stale_stream(), media_type="text/event-stream")
         raise HTTPException(404, "No active generation for this conversation")
 
     my_queue: asyncio.Queue = asyncio.Queue()
