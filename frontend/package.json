@@ -8,7 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "mobile:prebuild": "node scripts/prebuild.mjs",
-    "mobile:setup": "npm run mobile:prebuild && cap add android",
+    "mobile:setup": "npm run mobile:prebuild && node scripts/setup.mjs",
     "mobile:sync": "npm run mobile:prebuild && vite build && cap sync android",
     "mobile:icons": "cap assets generate",
     "mobile:build:debug": "npm run mobile:sync && cd android && ./gradlew assembleDebug",
