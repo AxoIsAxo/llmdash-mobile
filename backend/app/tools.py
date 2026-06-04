@@ -499,7 +499,7 @@ async def run_command(command: str, timeout: int = 30) -> str:
 
 @tool(
     name="get_user_css",
-    description="Get the current user's custom CSS. Returns the full CSS string the user has saved, or empty string if none. ALWAYS call this first before any CSS edit so you operate on the real current state, not a stale memory.",
+    description="Get the current user's custom stylesheet. Returns the FULL CSS string the user has saved (or empty string if none). This stylesheet controls the entire LLMDash UI — not just colors. It can contain rules for colors, backgrounds, borders, border-radius, shadows, spacing, font family/size/weight, line-height, opacity, transitions, animations, layout widths, z-index, and any other CSS property. ALWAYS call this first before any styling edit so you operate on the real current state, not a stale memory.",
     input_schema={
         "type": "object",
         "properties": {},
@@ -520,7 +520,7 @@ async def get_user_css(_current_user: dict = None) -> str:
 
 @tool(
     name="patch_user_css",
-    description="Make a targeted edit to the user's custom CSS by finding an exact block of text and replacing it. This is the PRIMARY edit tool. Always call get_user_css first so old_str matches the real current state. Provide enough surrounding lines in old_str to make it unique. Matching tries (in order): 1) exact match, 2) trim leading/trailing whitespace per line, 3) collapse all whitespace runs to single space. On success, saves server-side and applies immediately.",
+    description="Make a targeted edit to the user's custom stylesheet by finding an exact block of text and replacing it. This is the PRIMARY edit tool and is NOT limited to colors — use it for any CSS change (fonts, spacing, borders, radius, shadows, layout, animations, etc.). Always call get_user_css first so old_str matches the real current state. Provide enough surrounding lines in old_str to make it unique. Matching tries (in order): 1) exact match, 2) trim leading/trailing whitespace per line, 3) collapse all whitespace runs to single space. On success, saves server-side and applies immediately.",
     input_schema={
         "type": "object",
         "properties": {
@@ -553,7 +553,7 @@ async def patch_user_css(old_str: str, new_str: str, description: str = None, _c
 
 @tool(
     name="append_user_css",
-    description="Append new CSS rules to the END of the user's custom stylesheet. Use this when adding entirely new rules that don't exist yet. Saves server-side and applies immediately.",
+    description="Append new CSS rules to the END of the user's custom stylesheet. Use this when adding entirely new rules that don't exist yet. Works for any kind of style — colors, fonts, spacing, borders, radius, shadows, layout, animations, etc. Saves server-side and applies immediately.",
     input_schema={
         "type": "object",
         "properties": {
@@ -588,7 +588,7 @@ async def append_user_css(css: str, _current_user: dict = None) -> str:
 
 @tool(
     name="set_user_css",
-    description="FULL REPLACEMENT of the user's custom CSS. Do NOT use this for targeted edits — use patch_user_css instead. Only call this when the user explicitly asks to 'reset', 'completely redo', or 'overwrite' all styles. Pass the COMPLETE CSS string (including any existing styles you want to keep).",
+    description="FULL REPLACEMENT of the user's custom stylesheet. Do NOT use this for targeted edits — use patch_user_css instead. Only call this when the user explicitly asks to 'reset', 'completely redo', or 'overwrite' all styles. The replacement can target any CSS property (colors, fonts, spacing, borders, layout, animations, etc.), not just colors. Pass the COMPLETE CSS string (including any existing styles you want to keep).",
     input_schema={
         "type": "object",
         "properties": {
