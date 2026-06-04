@@ -1031,8 +1031,19 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                     total_reasoning_tokens += chunk.reasoning_tokens
 
                 tool_round = 0
+                seen_tool_signatures: set[tuple] = set()
                 while final_tool_calls and tool_round < 5:
                     tool_round += 1
+
+                    current_sig = tuple(sorted(
+                        (tc["name"], json.dumps(tc.get("arguments") or {}, sort_keys=True, default=str))
+                        for tc in final_tool_calls
+                    ))
+                    if current_sig in seen_tool_signatures:
+                        accumulated_content = (accumulated_content + "\n\n[Aborted: the same tool call failed twice in a row. Stop calling this tool and tell the user what went wrong.]").strip()
+                        final_tool_calls = []
+                        break
+                    seen_tool_signatures.add(current_sig)
 
                     draft.content = accumulated_content or ""
                     draft.tool_calls_json = json.dumps([

@@ -495,5 +495,17 @@ async def execute_tool(name: str, arguments: dict, **context) -> str:
         else:
             result = fn(**arguments, **filtered_context)
         return str(result)
+    except TypeError as e:
+        params = ", ".join(
+            f"{p.name}: {p.annotation if p.annotation is not inspect.Parameter.empty else 'any'}"
+            for p in sig.parameters.values()
+        )
+        provided = ", ".join(arguments.keys()) or "(none)"
+        return (
+            f"Tool execution error: {e}\n"
+            f"Function signature: {name}({params})\n"
+            f"You provided arguments: {{{provided}}}\n"
+            f"Please retry with the correct arguments matching the signature above."
+        )
     except Exception as e:
-        return f"Tool execution error: {str(e)}"
+        return f"Tool execution error: {e}"
