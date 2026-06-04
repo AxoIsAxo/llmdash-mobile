@@ -33,6 +33,78 @@ function injectUserCss(css: string) {
   }
 }
 
+function applyPatchLocally(current: string, oldStr: string, newStr: string): string | null {
+  if (!oldStr) return null
+  if (current === '') return null
+
+  const strategies: Array<(s: string) => string> = [
+    (s) => s,
+    (s) => s.split('\n').map(l => l.trim()).join('\n'),
+    (s) => s.replace(/\s+/g, ' ').trim(),
+  ]
+
+  let ambiguous = false
+
+  for (const norm of strategies) {
+    const haystack = norm(current)
+    const needle = norm(oldStr)
+    const count = haystack.split(needle).length - 1
+    if (count === 1) {
+      return haystack.replace(needle, newStr)
+    }
+    if (count > 1) {
+      ambiguous = true
+    }
+  }
+
+  void ambiguous
+  return null
+}
+
+function deriveNewCssForToolCall(tc: any, currentCss: string): string | null {
+  const args = (tc && tc.arguments) || {}
+  if (tc.name === 'set_user_css') {
+    return typeof args.css === 'string' ? args.css : null
+  }
+  if (tc.name === 'append_user_css') {
+    const addition = typeof args.css === 'string' ? args.css : ''
+    if (!addition) return currentCss
+    let base = currentCss || ''
+    if (base && !base.endsWith('\n')) base += '\n'
+    if (base && !base.endsWith('\n\n')) base += '\n'
+    let out = base + addition
+    if (!out.endsWith('\n')) out += '\n'
+    return out
+  }
+  if (tc.name === 'patch_user_css') {
+    if (typeof args.old_str !== 'string' || typeof args.new_str !== 'string') return null
+    return applyPatchLocally(currentCss || '', args.old_str, args.new_str)
+  }
+  return null
+}
+
+function extractNewCssMarker(result: string | null | undefined): string | null {
+  if (!result) return null
+  const idx = result.indexOf('NEW_CSS:')
+  if (idx < 0) return null
+  const b64 = result.slice(idx + 'NEW_CSS:'.length).split('\n')[0].trim()
+  try {
+    return atob(b64)
+  } catch {
+    return null
+  }
+}
+
+function stripNewCssLineForDisplay(content: string, toolName: string | null | undefined): string {
+  if (!toolName) return content
+  if (toolName !== 'set_user_css' && toolName !== 'patch_user_css' && toolName !== 'append_user_css') return content
+  return content
+    .split('\n')
+    .filter(line => !line.trim().startsWith('NEW_CSS:'))
+    .join('\n')
+    .replace(/\n+$/, '')
+}
+
 function mergeMessages(local: Message[], server: Message[]): Message[] {
   const serverById = new Map<number, Message>()
   for (const m of server) serverById.set(m.id, m)
@@ -316,17 +388,32 @@ function App() {
               created_at: new Date().toISOString()
             }]
           })
-          const cssTool = (event as any).tool_calls?.find((tc: any) => tc.name === 'set_user_css')
-          if (cssTool?.arguments?.css) {
+          const cssTool = (event as any).tool_calls?.find((tc: any) =>
+            tc.name === 'set_user_css' || tc.name === 'patch_user_css' || tc.name === 'append_user_css'
+          )
+          if (cssTool) {
             const cur = (document.getElementById(STYLE_ID) as HTMLStyleElement)?.textContent || DEFAULT_CSS
-            cssPreviousRef.current = cur
-            injectUserCss(cssTool.arguments.css as string)
-            setCssUndoToast({ previousCss: cur })
+            const newCss = deriveNewCssForToolCall(cssTool, cur)
+            if (newCss !== null && newCss !== cur) {
+              cssPreviousRef.current = cur
+              injectUserCss(newCss)
+              setCssUndoToast({ previousCss: cur })
+            }
           }
         } else if (event.type === 'tool_start') {
           if (event.id) setExecutingTools(prev => new Set(prev).add(event.id!))
         } else if (event.type === 'tool_result') {
           if (event.id) setExecutingTools(prev => { const next = new Set(prev); next.delete(event.id!); return next })
+          if (event.name === 'set_user_css' || event.name === 'patch_user_css' || event.name === 'append_user_css') {
+            const authoritative = extractNewCssMarker(event.result)
+            if (authoritative !== null) {
+              const cur = (document.getElementById(STYLE_ID) as HTMLStyleElement)?.textContent || DEFAULT_CSS
+              if (authoritative !== cur) {
+                injectUserCss(authoritative)
+                cssPreviousRef.current = authoritative
+              }
+            }
+          }
           setMessages(prev => [...prev, {
             id: Date.now(), role: 'tool' as const, content: event.result || '',
             tool_calls_json: null, tool_call_id: event.id || null,
@@ -500,17 +587,32 @@ function App() {
                 tool_call_id: null, tool_name: null, status: 'generating', created_at: new Date().toISOString()
               }]
             })
-            const cssTool2 = event.tool_calls?.find((tc: any) => tc.name === 'set_user_css')
-            if (cssTool2?.arguments?.css) {
+            const cssTool2 = event.tool_calls?.find((tc: any) =>
+              tc.name === 'set_user_css' || tc.name === 'patch_user_css' || tc.name === 'append_user_css'
+            )
+            if (cssTool2) {
               const cur = (document.getElementById(STYLE_ID) as HTMLStyleElement)?.textContent || DEFAULT_CSS
-              cssPreviousRef.current = cur
-              injectUserCss(cssTool2.arguments.css as string)
-              setCssUndoToast({ previousCss: cur })
+              const newCss = deriveNewCssForToolCall(cssTool2, cur)
+              if (newCss !== null && newCss !== cur) {
+                cssPreviousRef.current = cur
+                injectUserCss(newCss)
+                setCssUndoToast({ previousCss: cur })
+              }
             }
           } else if (event.type === 'tool_start') {
             if (event.id) setExecutingTools(prev => new Set(prev).add(event.id!))
           } else if (event.type === 'tool_result') {
             if (event.id) setExecutingTools(prev => { const next = new Set(prev); next.delete(event.id!); return next })
+            if (event.name === 'set_user_css' || event.name === 'patch_user_css' || event.name === 'append_user_css') {
+              const authoritative = extractNewCssMarker(event.result)
+              if (authoritative !== null) {
+                const cur = (document.getElementById(STYLE_ID) as HTMLStyleElement)?.textContent || DEFAULT_CSS
+                if (authoritative !== cur) {
+                  injectUserCss(authoritative)
+                  cssPreviousRef.current = authoritative
+                }
+              }
+            }
             if (event.name === 'edit_document' && event.result) {
               const htmlMatch = event.result.match(/HTML_RENDER:([A-Za-z0-9+/=]+)/)
               if (htmlMatch) {
@@ -742,17 +844,32 @@ function App() {
                 tool_call_id: null, tool_name: null, status: 'generating', created_at: new Date().toISOString()
               }]
             })
-            const cssTool3 = event.tool_calls?.find((tc: any) => tc.name === 'set_user_css')
-            if (cssTool3?.arguments?.css) {
+            const cssTool3 = event.tool_calls?.find((tc: any) =>
+              tc.name === 'set_user_css' || tc.name === 'patch_user_css' || tc.name === 'append_user_css'
+            )
+            if (cssTool3) {
               const cur = (document.getElementById(STYLE_ID) as HTMLStyleElement)?.textContent || DEFAULT_CSS
-              cssPreviousRef.current = cur
-              injectUserCss(cssTool3.arguments.css as string)
-              setCssUndoToast({ previousCss: cur })
+              const newCss = deriveNewCssForToolCall(cssTool3, cur)
+              if (newCss !== null && newCss !== cur) {
+                cssPreviousRef.current = cur
+                injectUserCss(newCss)
+                setCssUndoToast({ previousCss: cur })
+              }
             }
           } else if (event.type === 'tool_start') {
             if (event.id) setExecutingTools(prev => new Set(prev).add(event.id!))
           } else if (event.type === 'tool_result') {
             if (event.id) setExecutingTools(prev => { const next = new Set(prev); next.delete(event.id!); return next })
+            if (event.name === 'set_user_css' || event.name === 'patch_user_css' || event.name === 'append_user_css') {
+              const authoritative = extractNewCssMarker(event.result)
+              if (authoritative !== null) {
+                const cur = (document.getElementById(STYLE_ID) as HTMLStyleElement)?.textContent || DEFAULT_CSS
+                if (authoritative !== cur) {
+                  injectUserCss(authoritative)
+                  cssPreviousRef.current = authoritative
+                }
+              }
+            }
             if (event.name === 'edit_document' && event.result) {
               const htmlMatch = event.result.match(/HTML_RENDER:([A-Za-z0-9+/=]+)/)
               if (htmlMatch) {
@@ -1186,8 +1303,7 @@ function App() {
 
       {/* AI CSS Undo Toast */}
       {cssUndoToast && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-theme-bg-elevated border border-theme-border-light rounded-xl px-4 py-3 shadow-2xl">
-          <span className="text-sm text-theme-text">CSS updated by AI</span>
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-theme-bg-elevated border border-theme-border-light rounded-xl pl-4 pr-2 py-2 shadow-2xl">
           <button
             onClick={async () => {
               injectUserCss(cssUndoToast.previousCss)
@@ -1195,9 +1311,9 @@ function App() {
               cssPreviousRef.current = cssUndoToast.previousCss
               setCssUndoToast(null)
             }}
-            className="px-3 py-1 text-sm font-medium bg-theme-accent hover:bg-theme-accent-hover rounded-lg"
+            className="text-sm text-theme-text hover:text-theme-accent-text transition-colors"
           >
-            Undo?
+            CSS updated — Undo?
           </button>
           <button onClick={() => setCssUndoToast(null)} className="p-1 hover:bg-theme-bg-hover rounded text-theme-subtle">
             <X className="w-4 h-4" />
@@ -1377,7 +1493,10 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
               <span className="font-mono">{message.tool_name}</span>
             </div>
             <pre className="text-xs text-theme-text-secondary whitespace-pre-wrap font-mono">
-              {message.content.length > 500 ? message.content.slice(0, 500) + '...' : message.content}
+              {(() => {
+                const cleaned = stripNewCssLineForDisplay(message.content, message.tool_name)
+                return cleaned.length > 500 ? cleaned.slice(0, 500) + '...' : cleaned
+              })()}
             </pre>
             {downloadMatch && (
               <button

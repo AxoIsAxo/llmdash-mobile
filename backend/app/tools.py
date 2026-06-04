@@ -22,6 +22,78 @@ from . import config as app_config
 from .sandbox import run_in_alpine
 
 
+def _normalize_ws_collapse(s: str) -> str:
+    return re.sub(r'\s+', ' ', s).strip()
+
+
+def _trim_per_line(s: str) -> str:
+    return '\n'.join(line.strip() for line in s.split('\n'))
+
+
+def _count_and_replace(haystack: str, needle: str, replacement: str) -> tuple[int, str]:
+    """Returns (count, replaced) where replaced is haystack with the first match swapped in (only if count==1)."""
+    count = haystack.count(needle)
+    if count != 1:
+        return count, haystack
+    return count, haystack.replace(needle, replacement, 1)
+
+
+def _try_patch_strategies(current: str, old_str: str, new_str: str) -> tuple[str, str]:
+    """Try matching strategies in order: exact, trim-per-line, whitespace-collapse.
+    Returns (outcome, new_css). outcome is one of: 'ok', 'no_match', 'ambiguous'.
+    On 'ok', new_css holds the patched string. On other outcomes, new_css is the original current."""
+    if not old_str:
+        return "no_match", current
+
+    ambiguous = False
+
+    count, replaced = _count_and_replace(current, old_str, new_str)
+    if count == 1:
+        return "ok", replaced
+    if count > 1:
+        ambiguous = True
+
+    cur_trimmed = _trim_per_line(current)
+    old_trimmed = _trim_per_line(old_str)
+    count, replaced = _count_and_replace(cur_trimmed, old_trimmed, new_str)
+    if count == 1:
+        return "ok", replaced
+    if count > 1:
+        ambiguous = True
+
+    cur_collapsed = _normalize_ws_collapse(current)
+    old_collapsed = _normalize_ws_collapse(old_str)
+    count, replaced = _count_and_replace(cur_collapsed, old_collapsed, new_str)
+    if count == 1:
+        return "ok", replaced
+    if count > 1:
+        ambiguous = True
+
+    return ("ambiguous" if ambiguous else "no_match"), current
+
+
+def _apply_patch(current: str, old_str: str, new_str: str) -> tuple[bool, str, str]:
+    """Returns (success, error_message, new_css). error_message set on failure."""
+    if not old_str:
+        return False, "old_str is empty — cannot patch", current
+    if current == "":
+        return False, "no match found — user CSS is empty. Did you call get_user_css first?", current
+
+    outcome, new_css = _try_patch_strategies(current, old_str, new_str)
+    if outcome == "ok":
+        return True, "", new_css
+    if outcome == "ambiguous":
+        return False, "ambiguous match — add more context lines to old_str", current
+
+    preview_lines = old_str.split('\n')[:3]
+    preview = '\n'.join(preview_lines)
+    return False, f"no match found. First lines of old_str:\n{preview}", current
+
+
+def _encode_new_css_marker(new_css: str) -> str:
+    return "NEW_CSS:" + base64.b64encode(new_css.encode("utf-8")).decode("ascii")
+
+
 available_tools: dict[str, dict] = {}
 
 
@@ -427,7 +499,7 @@ async def run_command(command: str, timeout: int = 30) -> str:
 
 @tool(
     name="get_user_css",
-    description="Get the current user's custom CSS. Returns the full CSS string the user has saved, or empty string if none.",
+    description="Get the current user's custom CSS. Returns the full CSS string the user has saved, or empty string if none. ALWAYS call this first before any CSS edit so you operate on the real current state, not a stale memory.",
     input_schema={
         "type": "object",
         "properties": {},
@@ -447,12 +519,80 @@ async def get_user_css(_current_user: dict = None) -> str:
 
 
 @tool(
-    name="set_user_css",
-    description="Replace the current user's custom CSS, save it server-side, and apply it immediately. Pass the complete CSS string including any existing styles the user wants to keep.",
+    name="patch_user_css",
+    description="Make a targeted edit to the user's custom CSS by finding an exact block of text and replacing it. This is the PRIMARY edit tool. Always call get_user_css first so old_str matches the real current state. Provide enough surrounding lines in old_str to make it unique. Matching tries (in order): 1) exact match, 2) trim leading/trailing whitespace per line, 3) collapse all whitespace runs to single space. On success, saves server-side and applies immediately.",
     input_schema={
         "type": "object",
         "properties": {
-            "css": {"type": "string", "description": "The complete CSS string to set as the user's custom CSS"},
+            "old_str": {"type": "string", "description": "The exact block of CSS to find. Include enough surrounding lines (a few lines before and after) to make it unique in the current stylesheet."},
+            "new_str": {"type": "string", "description": "The replacement CSS block. Pass an empty string to delete the matched block."},
+            "description": {"type": "string", "description": "Optional one-line description of what this patch changes (for your own reasoning; not displayed to the user)."},
+        },
+        "required": ["old_str", "new_str"],
+    },
+)
+async def patch_user_css(old_str: str, new_str: str, description: str = None, _current_user: dict = None) -> str:
+    if not _current_user:
+        return "Error: Not authenticated"
+    from .database import async_session, User
+    async with async_session() as sess:
+        result = await sess.execute(select(User).where(User.id == _current_user["user_id"]))
+        user = result.scalar_one_or_none()
+        if not user:
+            return "Error: User not found"
+
+        current = user.custom_css or ""
+        success, err, new_css = _apply_patch(current, old_str, new_str)
+        if not success:
+            return f"Error: {err}"
+
+        user.custom_css = new_css or None
+        await sess.commit()
+        return f"patched successfully\n{_encode_new_css_marker(new_css)}"
+
+
+@tool(
+    name="append_user_css",
+    description="Append new CSS rules to the END of the user's custom stylesheet. Use this when adding entirely new rules that don't exist yet. Saves server-side and applies immediately.",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "css": {"type": "string", "description": "The CSS rules to append. Do not include existing rules — only the new ones."},
+        },
+        "required": ["css"],
+    },
+)
+async def append_user_css(css: str, _current_user: dict = None) -> str:
+    if not _current_user:
+        return "Error: Not authenticated"
+    from .database import async_session, User
+    async with async_session() as sess:
+        result = await sess.execute(select(User).where(User.id == _current_user["user_id"]))
+        user = result.scalar_one_or_none()
+        if not user:
+            return "Error: User not found"
+
+        current = user.custom_css or ""
+        if current and not current.endswith("\n"):
+            current += "\n"
+        if current and not current.endswith("\n\n"):
+            current += "\n"
+        new_css = current + css
+        if not new_css.endswith("\n"):
+            new_css += "\n"
+
+        user.custom_css = new_css or None
+        await sess.commit()
+        return f"appended successfully\n{_encode_new_css_marker(new_css)}"
+
+
+@tool(
+    name="set_user_css",
+    description="FULL REPLACEMENT of the user's custom CSS. Do NOT use this for targeted edits — use patch_user_css instead. Only call this when the user explicitly asks to 'reset', 'completely redo', or 'overwrite' all styles. Pass the COMPLETE CSS string (including any existing styles you want to keep).",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "css": {"type": "string", "description": "The complete CSS string to set as the user's custom CSS."},
         },
         "required": ["css"],
     },
@@ -468,7 +608,7 @@ async def set_user_css(css: str, _current_user: dict = None) -> str:
             return "Error: User not found"
         user.custom_css = css or None
         await sess.commit()
-        return f"CSS saved successfully ({len(css)} characters)"
+        return f"CSS saved successfully ({len(css)} characters)\n{_encode_new_css_marker(css or '')}"
 
 
 def get_tool_definitions():

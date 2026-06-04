@@ -859,7 +859,14 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
         "IMPORTANT: Always invoke tools through the platform's native tool-calling "
         "interface (the tools you were given). Never output raw `<tool_call>...</tool_call>` "
         "XML/JSON in your visible reply — the chat renderer does not interpret those "
-        "tags and they will appear as broken text to the user."
+        "tags and they will appear as broken text to the user.\n"
+        "\n"
+        "When editing the user's CSS:\n"
+        "1. Always call get_user_css first to read the current state.\n"
+        "2. Use patch_user_css for targeted changes — provide enough surrounding lines in old_str to make it unique.\n"
+        "3. Use append_user_css to add new rules.\n"
+        "4. Never use set_user_css unless asked to fully reset or rewrite all styles.\n"
+        "5. If patch_user_css returns an error, call get_user_css again, find the correct block, and retry with a corrected old_str."
     )
     messages.insert(0, {"role": "system", "content": system_prompt})
 
