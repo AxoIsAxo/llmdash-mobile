@@ -19,10 +19,29 @@ The web frontend (chat, models, tools, settings) is identical to the upstream LL
 
 - **Node.js 22+** and **npm**
 - **JDK 17 or newer** with `JAVA_HOME` set and `$JAVA_HOME/bin` on `PATH`
-- **Android SDK** with `platforms;android-35` and `build-tools;35.0.0` installed, `ANDROID_HOME` exported, and `$ANDROID_HOME/cmdline-tools/latest/bin` + `$ANDROID_HOME/platform-tools` on `PATH`
+- **Android SDK** with `platforms;android-35` and `build-tools;35.0.0` installed
 - An **Android device or emulator** for testing
 
 > This branch is mobile-only and does **not** contain the LLMDash backend. Run the backend separately (see the [upstream repo](https://codeberg.org/axoisaxo/LLMDash)) or point the app at an existing instance.
+
+#### Tell the build where the Android SDK is
+
+The Gradle build needs to know where the SDK is. Either **export `ANDROID_HOME`** in your shell, or just let `mobile:setup` auto-detect it (it probes `~/android-sdk`, `~/Android/Sdk`, `/opt/android-sdk`, `/usr/local/android-sdk`, and falls back to `ANDROID_SDK_ROOT`). To silence the auto-detect warning, add the export to your shell rc:
+
+```bash
+# ~/.bashrc, ~/.zshrc, etc.
+export ANDROID_HOME="$HOME/Android/Sdk"
+export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+```
+
+#### Installing the SDK packages you need
+
+If you have the SDK at `$ANDROID_HOME` but not `platforms;android-35` / `build-tools;35.0.0`, accept the licenses and install them:
+
+```bash
+yes | sdkmanager --licenses
+sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+```
 
 ### One-time setup
 
@@ -32,7 +51,9 @@ npm install
 npm run mobile:setup
 ```
 
-`mobile:setup` will ask for your LLMDash server URL the first time and write it to `frontend/.env` (gitignored). It then scaffolds `frontend/android/`.
+`mobile:setup` will ask for your LLMDash server URL the first time and write it to `frontend/.env` (gitignored). It then scaffolds `frontend/android/` and writes `frontend/android/local.properties` (gitignored) pointing at your Android SDK.
+
+`mobile:setup` is idempotent: if `frontend/android/build.gradle` already exists, it skips `cap add android` so you can never accidentally clobber customizations. To re-scaffold from scratch, delete `frontend/android/` and re-run.
 
 ### Build a debug APK
 
@@ -162,6 +183,35 @@ JWT auth tokens are stored in `@capacitor/preferences` on Android (encrypted sha
 | `@capacitor/app` | Back-button handling, lifecycle events |
 | `@capacitor/network` | Detect online/offline state |
 | `@capacitor/keyboard` | Adjust viewport when the keyboard appears |
+
+---
+
+## Troubleshooting
+
+### `SDK location not found` / `mobile:setup` bails out about `ANDROID_HOME`
+
+Gradle can't find the Android SDK. Either:
+
+```bash
+export ANDROID_HOME=/path/to/android-sdk
+export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+```
+
+…or create `frontend/android/local.properties` (gitignored) with:
+
+```
+sdk.dir=/path/to/android-sdk
+```
+
+`mobile:setup` will also auto-detect the SDK at `~/android-sdk`, `~/Android/Sdk`, `/opt/android-sdk`, or `/usr/local/android-sdk` and write `local.properties` for you (it prints a warning suggesting you add the export to your shell rc so future shells find it too).
+
+### `mobile:setup` says "android platform has not been added yet" on the next build
+
+`mobile:setup` exited without scaffolding `frontend/android/` (probably because of the SDK error above). Re-run it once the SDK path is resolved, then `mobile:build:debug` will work.
+
+### Build is missing the dark theme or allows cleartext HTTP
+
+A `cap add android` run from a dirty tree may have overwritten the customizations in `AndroidManifest.xml`, `res/values/colors.xml`, and `res/xml/network_security_config.xml`. The fix is checked in on the `mobile` branch — make sure your local files match. To avoid the problem: re-apply the three customizations *after* any `cap add android` (or just never delete `frontend/android/`).
 
 ---
 
