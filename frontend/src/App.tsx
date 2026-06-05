@@ -946,7 +946,7 @@ function App() {
     <div className="h-screen flex bg-theme-bg text-theme-text overflow-hidden">
       {/* Sidebar */}
       <div className={`${showSidebar ? 'w-72' : 'w-0'} transition-all duration-200 border-r border-theme-border flex flex-col overflow-hidden bg-theme-bg-secondary`}>
-        <div className="p-3 border-b border-theme-border flex items-center justify-between">
+        <div className="pt-[env(safe-area-inset-top)] px-3 pb-3 border-b border-theme-border flex items-center justify-between">
           <h1 className="font-bold text-lg flex items-center gap-2">
             <Bot className="w-5 h-5 text-theme-accent-text" />
             LLMDash
@@ -1035,7 +1035,7 @@ function App() {
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col min-w-0">
         {!showSidebar && (
-          <div className="p-2 border-b border-theme-border flex items-center justify-between">
+          <div className="pt-[env(safe-area-inset-top)] px-2 pb-2 border-b border-theme-border flex items-center justify-between">
             <button onClick={() => setShowSidebar(true)} className="p-1 hover:bg-theme-bg-elevated rounded">
               <ChevronRight className="w-4 h-4" />
             </button>
