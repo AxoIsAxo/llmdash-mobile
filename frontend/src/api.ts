@@ -355,11 +355,31 @@ export const api = {
         body: formData,
       });
       if (!response.ok) {
-        let detail = ''
-        try { const err = await response.json(); detail = err.detail ? `: ${err.detail}` : '' } catch {}
-        throw new Error(`Upload error ${response.status}${detail}`)
+        throw new Error(`Upload error ${response.status}`);
       }
       return response.json() as Promise<import('./types').UploadResponse>;
+    },
+
+    transcribe: async (audioBlob: Blob, filename: string) => {
+      const token = getToken();
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const formData = new FormData();
+      formData.append('file', audioBlob, filename);
+      const response = await fetch(`${BASE}/chat/transcribe`, {
+        method: 'POST',
+        headers,
+        body: formData,
+      });
+      if (!response.ok) {
+        let detail = '';
+        try {
+          const err = await response.json();
+          detail = err.detail ? `: ${err.detail}` : '';
+        } catch {}
+        throw new Error(`Transcription error ${response.status}${detail}`);
+      }
+      return response.json() as Promise<{ text: string }>;
     },
   },
 };
