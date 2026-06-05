@@ -20,7 +20,11 @@ class Settings(BaseSettings):
     uploads_dir: str = "data/uploads"
     ocr_enabled: bool = True
     ocr_strategy: str = "ocr"
-    whisper_model: str = "tiny"
+    whisper_model: str = "small"
+    whisper_compute_type: str = "int8"
+    whisper_device: str = "auto"
+    whisper_language: Optional[str] = None
+    whisper_beam_size: int = 1
 
     model_config = {"env_file": "data/.env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
@@ -39,6 +43,10 @@ ENV_VAR_MAP = {
     "OCR_ENABLED": "ocr_enabled",
     "OCR_STRATEGY": "ocr_strategy",
     "WHISPER_MODEL": "whisper_model",
+    "WHISPER_COMPUTE_TYPE": "whisper_compute_type",
+    "WHISPER_DEVICE": "whisper_device",
+    "WHISPER_LANGUAGE": "whisper_language",
+    "WHISPER_BEAM_SIZE": "whisper_beam_size",
 }
 
 

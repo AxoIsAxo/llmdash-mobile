@@ -588,6 +588,10 @@ async def get_upload_settings(current_user: dict = Depends(require_role("owner",
         ocr_enabled=app_config.settings.ocr_enabled,
         ocr_strategy=app_config.settings.ocr_strategy,
         whisper_model=app_config.settings.whisper_model,
+        whisper_compute_type=app_config.settings.whisper_compute_type,
+        whisper_device=app_config.settings.whisper_device,
+        whisper_language=app_config.settings.whisper_language,
+        whisper_beam_size=app_config.settings.whisper_beam_size,
     )
 
 
@@ -602,6 +606,14 @@ async def update_upload_settings(req: FileUploadSettingsUpdate, current_user: di
         updates["OCR_STRATEGY"] = req.ocr_strategy
     if req.whisper_model is not None:
         updates["WHISPER_MODEL"] = req.whisper_model
+    if req.whisper_compute_type is not None:
+        updates["WHISPER_COMPUTE_TYPE"] = req.whisper_compute_type
+    if req.whisper_device is not None:
+        updates["WHISPER_DEVICE"] = req.whisper_device
+    if req.whisper_language is not None:
+        updates["WHISPER_LANGUAGE"] = req.whisper_language
+    if req.whisper_beam_size is not None:
+        updates["WHISPER_BEAM_SIZE"] = str(int(req.whisper_beam_size))
 
     if updates:
         env_path = "data/.env"
@@ -638,15 +650,33 @@ async def update_upload_settings(req: FileUploadSettingsUpdate, current_user: di
         ocr_enabled=app_config.settings.ocr_enabled,
         ocr_strategy=app_config.settings.ocr_strategy,
         whisper_model=app_config.settings.whisper_model,
+        whisper_compute_type=app_config.settings.whisper_compute_type,
+        whisper_device=app_config.settings.whisper_device,
+        whisper_language=app_config.settings.whisper_language,
+        whisper_beam_size=app_config.settings.whisper_beam_size,
     )
 
 
 @router.get("/config/whisper")
 async def get_whisper_config(current_user: dict = Depends(get_current_user)):
+    from .whisper_stt import VALID_MODEL_SIZES, VALID_COMPUTE_TYPES, DEFAULT_MODEL_SIZE
     model = app_config.settings.whisper_model
-    if model not in ("tiny", "small"):
-        model = "tiny"
-    return {"model": model}
+    if model not in VALID_MODEL_SIZES:
+        model = DEFAULT_MODEL_SIZE
+    compute_type = app_config.settings.whisper_compute_type
+    if compute_type not in VALID_COMPUTE_TYPES:
+        compute_type = "int8"
+    beam = app_config.settings.whisper_beam_size or 1
+    beam = max(1, min(int(beam), 10))
+    return {
+        "model": model,
+        "compute_type": compute_type,
+        "device": app_config.settings.whisper_device or "auto",
+        "language": app_config.settings.whisper_language,
+        "beam_size": beam,
+        "available_models": list(VALID_MODEL_SIZES),
+        "available_compute_types": list(VALID_COMPUTE_TYPES),
+    }
 
 
 @router.post("/chat/upload", response_model=UploadResponse)

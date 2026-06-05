@@ -9,7 +9,7 @@ RUN npm run build
 # Stage 2: Python backend
 FROM python:3.12-slim
 
-# Install system deps (including Docker CLI for sandbox and Tesseract OCR)
+# Install system deps (Docker CLI for sandbox and Tesseract OCR; ffmpeg is bundled in faster-whisper)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-dejavu \
     ca-certificates \
@@ -24,7 +24,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr-deu \
     tesseract-ocr-spa \
     tesseract-ocr-ara \
-    ffmpeg \
     && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
     && chmod a+r /etc/apt/keyrings/docker.asc \
     && echo "deb [signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" > /etc/apt/sources.list.d/docker.list \
@@ -51,4 +50,6 @@ RUN pip install --no-cache-dir pydantic-settings
 VOLUME ["/app/data"]
 
 # Run
+ENV HF_HOME=/app/data/.cache/huggingface
+ENV TRANSFORMERS_CACHE=/app/data/.cache/huggingface
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port 8000"]

@@ -32,6 +32,7 @@ data/documents/*
 !data/documents/.gitkeep
 data/uploads/*
 !data/uploads/.gitkeep
+data/.cache/
 
 # --- IDE ---
 .vscode/

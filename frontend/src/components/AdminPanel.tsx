@@ -1239,11 +1239,11 @@ function UploadsTab() {
 
   useEffect(() => { load() }, [])
 
-  const handleSave = async (key: string, value: boolean | string) => {
+  const handleSave = async (key: string, value: boolean | string | number | null) => {
     setSaving(true)
     setError('')
     try {
-      const update: Record<string, boolean | string> = {}
+      const update: Record<string, boolean | string | number | null> = {}
       update[key] = value
       const updated = await api.config.uploads.update(update)
       setSettings(updated)
@@ -1281,25 +1281,81 @@ function UploadsTab() {
         </div>
 
         <div className="mt-4 bg-theme-bg-elevated/40 rounded-lg p-4 space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm font-medium flex items-center gap-2">
-                <Mic className="w-4 h-4 text-theme-blue-text" />
-                Whisper Model (Speech-to-Text)
-              </div>
-              <p className="text-xs text-theme-muted mt-1">Choose the Whisper model for voice transcription. Tiny is faster, Small is more accurate</p>
+          <div>
+            <div className="text-sm font-medium flex items-center gap-2">
+              <Mic className="w-4 h-4 text-theme-blue-text" />
+              Speech-to-Text (faster-whisper, multilingual)
             </div>
-            <div className="flex items-center gap-2">
-              <span className={`text-xs cursor-pointer select-none ${settings.whisper_model === 'tiny' ? 'text-theme-text font-semibold' : 'text-theme-muted'}`} onClick={() => handleSave('whisper_model', 'tiny')}>Tiny</span>
-              <button
-                onClick={() => handleSave('whisper_model', settings.whisper_model === 'tiny' ? 'small' : 'tiny')}
+            <p className="text-xs text-theme-muted mt-1">Picks the Whisper model used for voice transcription. All sizes are multilingual. Larger models are more accurate but slower and use more RAM.</p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="block">
+              <span className="text-xs text-theme-muted">Model</span>
+              <select
+                value={settings.whisper_model}
                 disabled={saving}
-                className={`w-9 h-5 rounded-full transition-colors relative ${saving ? 'opacity-50' : ''} ${settings.whisper_model === 'small' ? 'bg-theme-blue' : 'bg-theme-switch-off'}`}
+                onChange={e => handleSave('whisper_model', e.target.value)}
+                className="mt-1 w-full bg-theme-bg-elevated rounded px-2 py-1.5 text-sm border border-theme-border-light/30"
               >
-                <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${settings.whisper_model === 'small' ? 'left-4' : 'left-0.5'}`} />
-              </button>
-              <span className={`text-xs cursor-pointer select-none ${settings.whisper_model === 'small' ? 'text-theme-text font-semibold' : 'text-theme-muted'}`} onClick={() => handleSave('whisper_model', 'small')}>Small</span>
-            </div>
+                <option value="tiny">tiny — fastest, ~75MB (real-time on CPU)</option>
+                <option value="base">base — fast, ~142MB</option>
+                <option value="small">small — accurate, ~466MB</option>
+                <option value="medium">medium — more accurate, ~1.5GB</option>
+                <option value="large-v3">large-v3 — most accurate, ~3.1GB</option>
+                <option value="distil-large-v3">distil-large-v3 — fast large, ~1.5GB</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-xs text-theme-muted">Beam size (1 = greedy, fastest)</span>
+              <input
+                type="number"
+                min={1}
+                max={10}
+                value={settings.whisper_beam_size}
+                disabled={saving}
+                onChange={e => handleSave('whisper_beam_size', Math.max(1, Math.min(10, parseInt(e.target.value || '1', 10))))}
+                className="mt-1 w-full bg-theme-bg-elevated rounded px-2 py-1.5 text-sm border border-theme-border-light/30"
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs text-theme-muted">Compute type</span>
+              <select
+                value={settings.whisper_compute_type}
+                disabled={saving}
+                onChange={e => handleSave('whisper_compute_type', e.target.value)}
+                className="mt-1 w-full bg-theme-bg-elevated rounded px-2 py-1.5 text-sm border border-theme-border-light/30"
+              >
+                <option value="int8">int8 — best on CPU (default)</option>
+                <option value="int8_float16">int8_float16 — mixed (CUDA)</option>
+                <option value="float16">float16 — GPU</option>
+                <option value="float32">float32 — max precision</option>
+                <option value="bfloat16">bfloat16 — newer GPU</option>
+                <option value="int16">int16 — CPU alt</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-xs text-theme-muted">Device</span>
+              <select
+                value={settings.whisper_device || 'auto'}
+                disabled={saving}
+                onChange={e => handleSave('whisper_device', e.target.value)}
+                className="mt-1 w-full bg-theme-bg-elevated rounded px-2 py-1.5 text-sm border border-theme-border-light/30"
+              >
+                <option value="auto">auto (cuda if available, else cpu)</option>
+                <option value="cpu">cpu</option>
+                <option value="cuda">cuda</option>
+              </select>
+            </label>
+            <label className="block sm:col-span-2">
+              <span className="text-xs text-theme-muted">Language (optional)</span>
+              <input
+                value={settings.whisper_language || ''}
+                disabled={saving}
+                onChange={e => handleSave('whisper_language', e.target.value || null)}
+                placeholder="auto-detect (en, de, fr, ...)"
+                className="mt-1 w-full bg-theme-bg-elevated rounded px-2 py-1.5 text-sm border border-theme-border-light/30"
+              />
+            </label>
           </div>
         </div>
 

@@ -204,4 +204,8 @@ export interface FileUploadSettings {
   ocr_enabled: boolean;
   ocr_strategy: string;
   whisper_model: string;
+  whisper_compute_type: string;
+  whisper_device: string;
+  whisper_language: string | null;
+  whisper_beam_size: number;
 }

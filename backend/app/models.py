@@ -179,7 +179,11 @@ class FileUploadSettings(BaseModel):
     file_upload_enabled: bool = True
     ocr_enabled: bool = True
     ocr_strategy: str = "ocr"
-    whisper_model: str = "tiny"
+    whisper_model: str = "small"
+    whisper_compute_type: str = "int8"
+    whisper_device: str = "auto"
+    whisper_language: Optional[str] = None
+    whisper_beam_size: int = 1
 
 
 class FileUploadSettingsUpdate(BaseModel):
@@ -187,6 +191,10 @@ class FileUploadSettingsUpdate(BaseModel):
     ocr_enabled: Optional[bool] = None
     ocr_strategy: Optional[str] = None
     whisper_model: Optional[str] = None
+    whisper_compute_type: Optional[str] = None
+    whisper_device: Optional[str] = None
+    whisper_language: Optional[str] = None
+    whisper_beam_size: Optional[int] = None
 
 
 class ImageGenerationRequest(BaseModel):

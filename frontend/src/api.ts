@@ -186,7 +186,16 @@ export const api = {
     status: () => request<import('./types').ConfigStatus>('/config/status'),
     uploads: {
       get: () => request<import('./types').FileUploadSettings>('/config/uploads'),
-      update: (data: { file_upload_enabled?: boolean; ocr_enabled?: boolean; ocr_strategy?: string; whisper_model?: string }) =>
+      update: (data: {
+        file_upload_enabled?: boolean;
+        ocr_enabled?: boolean;
+        ocr_strategy?: string;
+        whisper_model?: string;
+        whisper_compute_type?: string;
+        whisper_device?: string;
+        whisper_language?: string | null;
+        whisper_beam_size?: number;
+      }) =>
         request<import('./types').FileUploadSettings>('/config/uploads', {
           method: 'PUT',
           body: JSON.stringify(data),

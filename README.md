@@ -18,6 +18,7 @@ LLMDash is a self-hosted AI chat interface that connects to multiple LLM provide
 - **Multi-provider AI** — DeepSeek, Claude, MiniMax, OpenRouter, or any OpenAI-compatible API configured via UI
 - **Built-in tools** — AI models can search the web (SearXNG), create/edit .docx/.pdf/.odt documents, render HTML previews, and execute commands in isolated Alpine Docker containers
 - **Real-time streaming** — Server-Sent Events for token-by-token responses with tool call round-trips
+- **Voice input** — Multilingual speech-to-text powered by [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (CTranslate2, 4× faster than the original Whisper), with selectable model size, compute type, and device
 - **Conversation branching** — Fork conversations at any message to explore alternative responses
 - **User management** — JWT authentication, role-based access (owner/admin/user), IP-based registration limiting
 - **Subscription billing** — Lightning Network payments via LNBits with per-plan and per-model token limits
@@ -108,6 +109,10 @@ Create `backend/.env` (see `backend/.env.example` for a template):
 | `IP_ACCOUNT_LIMIT` | No | Max accounts per IP address |
 | `LNBITS_URL` | No | LNBits instance URL for Lightning payments |
 | `LNBITS_INVOICE_KEY` | No | LNBits invoice key |
+| `WHISPER_MODEL` | No | faster-whisper model size: `tiny`, `base`, `small`, `medium`, `large-v3`, `distil-large-v3` (default `small`) |
+| `WHISPER_COMPUTE_TYPE` | No | `int8`, `int8_float16`, `float16`, `float32`, `bfloat16`, `int16` (default `int8`) |
+| `WHISPER_DEVICE` | No | `auto`, `cpu`, or `cuda` (default `auto`) |
+| `WHISPER_LANGUAGE` | No | Force a language code (e.g. `en`, `de`); leave empty for auto-detect |
 
 ### Adding AI Models via Admin Panel
 
