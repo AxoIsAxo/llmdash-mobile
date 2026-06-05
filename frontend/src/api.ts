@@ -195,6 +195,8 @@ export const api = {
         whisper_device?: string;
         whisper_language?: string | null;
         whisper_beam_size?: number;
+        whisper_provider?: string;
+        whisper_openrouter_model?: string;
       }) =>
         request<import('./types').FileUploadSettings>('/config/uploads', {
           method: 'PUT',

@@ -2,6 +2,7 @@ import io
 import logging
 import os
 import tempfile
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,11 @@ VALID_COMPUTE_TYPES = (
     "bfloat16",
 )
 DEFAULT_COMPUTE_TYPE = "int8"
+
+VALID_PROVIDERS = ("local", "openrouter")
+DEFAULT_PROVIDER = "local"
+DEFAULT_OPENROUTER_MODEL = "openai/whisper-1"
+OPENROUTER_TRANSCRIPTIONS_URL = "https://openrouter.ai/api/v1/audio/transcriptions"
 
 
 def _get_settings():
@@ -172,3 +178,87 @@ def transcribe_audio(audio_bytes: bytes) -> str:
                 os.unlink(tmp_path)
             except OSError:
                 pass
+
+
+def _resolve_provider() -> str:
+    raw = getattr(_get_settings(), "whisper_provider", DEFAULT_PROVIDER) or DEFAULT_PROVIDER
+    raw = str(raw).strip().lower()
+    if raw not in VALID_PROVIDERS:
+        logger.warning(f"Unknown whisper provider '{raw}', falling back to '{DEFAULT_PROVIDER}'")
+        return DEFAULT_PROVIDER
+    return raw
+
+
+def _resolve_openrouter_model() -> str:
+    raw = getattr(_get_settings(), "whisper_openrouter_model", DEFAULT_OPENROUTER_MODEL) or DEFAULT_OPENROUTER_MODEL
+    return str(raw).strip() or DEFAULT_OPENROUTER_MODEL
+
+
+def _resolve_openrouter_language() -> Optional[str]:
+    raw = getattr(_get_settings(), "whisper_language", None)
+    if raw is None:
+        return None
+    raw = str(raw).strip()
+    return raw or None
+
+
+def transcribe_audio_openrouter(audio_bytes: bytes, filename: str = "audio.webm", content_type: str = "audio/webm") -> str:
+    """Transcribe audio using the OpenRouter /audio/transcriptions API.
+
+    The OpenRouter endpoint is OpenAI-compatible and accepts multipart form data
+    with `file` + `model`. Authentication uses the OPENROUTER_API_KEY env var
+    that the app already configures.
+    """
+    if not audio_bytes:
+        return ""
+    api_key = getattr(_get_settings(), "openrouter_api_key", None)
+    if not api_key:
+        raise RuntimeError("OPENROUTER_API_KEY is not configured")
+    model = _resolve_openrouter_model()
+    language = _resolve_openrouter_language()
+
+    import httpx
+
+    files = {"file": (filename, audio_bytes, content_type)}
+    data = {"model": model}
+    if language:
+        data["language"] = language
+
+    headers = {"Authorization": f"Bearer {api_key}"}
+    try:
+        with httpx.Client(timeout=60.0) as client:
+            resp = client.post(
+                OPENROUTER_TRANSCRIPTIONS_URL,
+                headers=headers,
+                files=files,
+                data=data,
+            )
+    except httpx.HTTPError as e:
+        logger.warning(f"OpenRouter transcription request failed: {e}")
+        raise RuntimeError(f"OpenRouter request failed: {e}") from e
+
+    if resp.status_code >= 400:
+        body_snippet = (resp.text or "")[:300]
+        logger.warning(
+            f"OpenRouter transcription HTTP {resp.status_code}: {body_snippet}"
+        )
+        raise RuntimeError(
+            f"OpenRouter returned HTTP {resp.status_code}: {body_snippet}"
+        )
+
+    try:
+        payload = resp.json()
+    except ValueError as e:
+        raise RuntimeError(f"OpenRouter returned non-JSON response: {e}") from e
+
+    text = ""
+    if isinstance(payload, dict):
+        text = payload.get("text", "") or ""
+        if not text and "segments" in payload:
+            segs = payload.get("segments") or []
+            text = " ".join(str(seg.get("text", "")) for seg in segs if isinstance(seg, dict)).strip()
+    text = str(text).strip()
+    logger.debug(
+        f"OpenRouter transcribed {len(audio_bytes)}B audio (model={model}, len={len(text)})"
+    )
+    return text

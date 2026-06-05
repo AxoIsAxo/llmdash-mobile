@@ -1290,6 +1290,32 @@ function UploadsTab() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="block">
+              <span className="text-xs text-theme-muted">Provider</span>
+              <select
+                value={settings.whisper_provider || 'local'}
+                disabled={saving}
+                onChange={e => handleSave('whisper_provider', e.target.value)}
+                className="mt-1 w-full bg-theme-bg-elevated rounded px-2 py-1.5 text-sm border border-theme-border-light/30"
+              >
+                <option value="local">local — faster-whisper (on-device, free)</option>
+                <option value="openrouter">openrouter — Whisper via OpenRouter API</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-xs text-theme-muted">OpenRouter model (used when provider = openrouter)</span>
+              <input
+                value={settings.whisper_openrouter_model || ''}
+                disabled={saving}
+                onChange={e => handleSave('whisper_openrouter_model', e.target.value || 'openai/whisper-1')}
+                placeholder="openai/whisper-1"
+                className="mt-1 w-full bg-theme-bg-elevated rounded px-2 py-1.5 text-sm border border-theme-border-light/30"
+              />
+            </label>
+            <p className="text-xs text-theme-muted sm:col-span-2">
+              The OpenRouter provider requires <code>OPENROUTER_API_KEY</code> in <code>data/.env</code>. Local whisper settings below are still saved and used when the provider is set to <code>local</code>.
+            </p>
+
+            <label className="block">
               <span className="text-xs text-theme-muted">Model</span>
               <select
                 value={settings.whisper_model}

@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     whisper_device: str = "auto"
     whisper_language: Optional[str] = None
     whisper_beam_size: int = 1
+    whisper_provider: str = "local"
+    whisper_openrouter_model: str = "openai/whisper-1"
 
     model_config = {"env_file": "data/.env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
@@ -47,6 +49,8 @@ ENV_VAR_MAP = {
     "WHISPER_DEVICE": "whisper_device",
     "WHISPER_LANGUAGE": "whisper_language",
     "WHISPER_BEAM_SIZE": "whisper_beam_size",
+    "WHISPER_PROVIDER": "whisper_provider",
+    "WHISPER_OPENROUTER_MODEL": "whisper_openrouter_model",
 }
 
 

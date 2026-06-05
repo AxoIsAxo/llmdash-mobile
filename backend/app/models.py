@@ -184,6 +184,8 @@ class FileUploadSettings(BaseModel):
     whisper_device: str = "auto"
     whisper_language: Optional[str] = None
     whisper_beam_size: int = 1
+    whisper_provider: str = "local"
+    whisper_openrouter_model: str = "openai/whisper-1"
 
 
 class FileUploadSettingsUpdate(BaseModel):
@@ -195,6 +197,8 @@ class FileUploadSettingsUpdate(BaseModel):
     whisper_device: Optional[str] = None
     whisper_language: Optional[str] = None
     whisper_beam_size: Optional[int] = None
+    whisper_provider: Optional[str] = None
+    whisper_openrouter_model: Optional[str] = None
 
 
 class ImageGenerationRequest(BaseModel):

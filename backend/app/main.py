@@ -32,7 +32,7 @@ from .ai import get_provider, ToolDef
 from .tools import get_tool_definitions, execute_tool
 from .sandbox import is_docker_available
 from .ocr import process_uploaded_file, is_allowed_file, is_image_file, ocr_image, IMAGE_EXTENSIONS, is_ocr_available
-from .whisper_stt import transcribe_audio
+from .whisper_stt import transcribe_audio, transcribe_audio_openrouter, VALID_PROVIDERS, DEFAULT_PROVIDER, DEFAULT_OPENROUTER_MODEL
 from .routers.auth import router as auth_router, get_current_user, require_role, load_provider_configs
 from .routers.subscriptions import router as subscriptions_router
 
@@ -592,6 +592,8 @@ async def get_upload_settings(current_user: dict = Depends(require_role("owner",
         whisper_device=app_config.settings.whisper_device,
         whisper_language=app_config.settings.whisper_language,
         whisper_beam_size=app_config.settings.whisper_beam_size,
+        whisper_provider=app_config.settings.whisper_provider,
+        whisper_openrouter_model=app_config.settings.whisper_openrouter_model,
     )
 
 
@@ -614,6 +616,16 @@ async def update_upload_settings(req: FileUploadSettingsUpdate, current_user: di
         updates["WHISPER_LANGUAGE"] = req.whisper_language
     if req.whisper_beam_size is not None:
         updates["WHISPER_BEAM_SIZE"] = str(int(req.whisper_beam_size))
+    if req.whisper_provider is not None:
+        provider_value = str(req.whisper_provider).strip().lower()
+        if provider_value not in VALID_PROVIDERS:
+            raise HTTPException(400, f"Invalid whisper provider '{req.whisper_provider}'. Must be one of: {', '.join(VALID_PROVIDERS)}")
+        updates["WHISPER_PROVIDER"] = provider_value
+    if req.whisper_openrouter_model is not None:
+        openrouter_model = str(req.whisper_openrouter_model).strip()
+        if not openrouter_model:
+            raise HTTPException(400, "whisper_openrouter_model cannot be empty")
+        updates["WHISPER_OPENROUTER_MODEL"] = openrouter_model
 
     if updates:
         env_path = "data/.env"
@@ -654,6 +666,8 @@ async def update_upload_settings(req: FileUploadSettingsUpdate, current_user: di
         whisper_device=app_config.settings.whisper_device,
         whisper_language=app_config.settings.whisper_language,
         whisper_beam_size=app_config.settings.whisper_beam_size,
+        whisper_provider=app_config.settings.whisper_provider,
+        whisper_openrouter_model=app_config.settings.whisper_openrouter_model,
     )
 
 
@@ -668,14 +682,21 @@ async def get_whisper_config(current_user: dict = Depends(get_current_user)):
         compute_type = "int8"
     beam = app_config.settings.whisper_beam_size or 1
     beam = max(1, min(int(beam), 10))
+    provider = app_config.settings.whisper_provider or DEFAULT_PROVIDER
+    if provider not in VALID_PROVIDERS:
+        provider = DEFAULT_PROVIDER
     return {
         "model": model,
         "compute_type": compute_type,
         "device": app_config.settings.whisper_device or "auto",
         "language": app_config.settings.whisper_language,
         "beam_size": beam,
+        "provider": provider,
+        "openrouter_model": app_config.settings.whisper_openrouter_model or DEFAULT_OPENROUTER_MODEL,
+        "openrouter_configured": bool(app_config.settings.openrouter_api_key),
         "available_models": list(VALID_MODEL_SIZES),
         "available_compute_types": list(VALID_COMPUTE_TYPES),
+        "available_providers": list(VALID_PROVIDERS),
     }
 
 
@@ -726,8 +747,16 @@ async def transcribe_voice(file: UploadFile = File(...), current_user: dict = De
     max_size = 10 * 1024 * 1024
     if len(content) > max_size:
         raise HTTPException(413, "Audio too large (max 10MB)")
+    provider = (getattr(app_config.settings, "whisper_provider", None) or DEFAULT_PROVIDER).strip().lower()
+    if provider not in VALID_PROVIDERS:
+        provider = DEFAULT_PROVIDER
     try:
-        text = transcribe_audio(content)
+        if provider == "openrouter":
+            filename = file.filename or "audio.webm"
+            content_type = file.content_type or "audio/webm"
+            text = transcribe_audio_openrouter(content, filename=filename, content_type=content_type)
+        else:
+            text = transcribe_audio(content)
         return {"text": text}
     except Exception as e:
         raise HTTPException(500, f"Transcription failed: {str(e)}")
