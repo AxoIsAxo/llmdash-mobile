@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import {
   Users, UserPlus, Trash2, Key, Wrench, Shield, Globe,
   Loader2, X, Check, Settings, RotateCcw, CreditCard, Plus, Edit3, Brain,
-  ArrowUp, ArrowDown, Upload, File, Eye, Mic
+  ArrowUp, ArrowDown, Upload, File, Eye, Mic, Sparkles
 } from 'lucide-react'
 import { api } from '../api'
 import type { User, ProviderConfig, ScannedProvider, ModelConfig, SubscriptionPlan, PlanModelLimit, UserSubscription as UserSub } from '../types'
@@ -412,6 +412,7 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
   const [loading, setLoading] = useState(true)
   const [toggling, setToggling] = useState<Set<string>>(new Set())
   const [renaming, setRenaming] = useState<number | null>(null)
+  const [autoEnableMsg, setAutoEnableMsg] = useState<string>('')
   const [renameVal, setRenameVal] = useState('')
   const [configuringId, setConfiguringId] = useState<number | null>(null)
   const [configForm, setConfigForm] = useState<{ temperature: number; max_tokens: number; thinking_enabled: boolean; thinking_budget_tokens: number; model_type: string; vision_enabled: boolean; audio_enabled: boolean; tools_enabled: boolean }>({
@@ -488,6 +489,24 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
     })
   }
 
+  const handleAutoEnable = async (id: number) => {
+    try {
+      const res = await api.models.autoEnable(id)
+      if (res.changed.length > 0) {
+        loadAll()
+        onRefresh()
+      }
+      const cap = res.capabilities || {}
+      setAutoEnableMsg(
+        res.changed.length > 0
+          ? `Enabled: ${res.changed.join(', ')} (audio=${cap.audio}, vision=${cap.vision}, source=${cap.source})`
+          : `Already up to date. audio=${cap.audio}, vision=${cap.vision}, source=${cap.source}`
+      )
+    } catch (e) {
+      setAutoEnableMsg(`Auto-detect failed: ${e}`)
+    }
+  }
+
   const handleConfigure = async (id: number) => {
     try {
       await api.models.update(id, {
@@ -560,6 +579,14 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
         </div>
       )}
 
+      {autoEnableMsg && (
+        <div className="text-xs text-theme-muted bg-theme-bg-elevated border border-theme-border rounded-lg px-3 py-2 mb-2 flex items-start gap-2">
+          <Sparkles className="w-3.5 h-3.5 mt-0.5 shrink-0 text-theme-purple" />
+          <span>{autoEnableMsg}</span>
+          <button onClick={() => setAutoEnableMsg('')} className="ml-auto shrink-0 text-theme-subtle hover:text-theme-text"><X className="w-3.5 h-3.5" /></button>
+        </div>
+      )}
+
       {!loading && scanned.length === 0 && (
         <div className="text-center text-theme-muted py-8">
           <Key className="w-12 h-12 mx-auto mb-3 text-theme-icon-muted" />
@@ -628,6 +655,13 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
                       title="Configure"
                     >
                       <Settings className="w-3.5 h-3.5 text-theme-subtle hover:text-theme-text" />
+                    </button>
+                    <button
+                      onClick={() => handleAutoEnable(model.id)}
+                      className="p-1.5 hover:bg-theme-bg-active rounded-lg transition-colors shrink-0"
+                      title="Auto-detect capabilities from provider"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-theme-subtle hover:text-theme-text" />
                     </button>
                     <button
                       onClick={async () => {

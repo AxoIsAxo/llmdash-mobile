@@ -146,6 +146,10 @@ export const api = {
       }),
     delete: (id: number) =>
       request<{ status: string }>(`/models/${id}`, { method: 'DELETE' }),
+    autoEnable: (id: number) =>
+      request<{ changed: string[]; capabilities: { audio: boolean; vision: boolean; source: string; input_modalities?: string[] } }>(`/models/${id}/auto-enable`, { method: 'POST' }),
+    detectCapabilities: (id: number) =>
+      request<{ audio: boolean; vision: boolean; source: string; input_modalities?: string[] }>(`/models/${id}/detect-capabilities`),
     reorder: (modelIds: number[]) =>
       request<{ status: string }>('/models/reorder', {
         method: 'PUT',

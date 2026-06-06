@@ -230,19 +230,9 @@ VISION_MODEL_PATTERNS = [
 ]
 VISION_MODEL_LOWERS = [p.lower() for p in VISION_MODEL_PATTERNS]
 
-AUDIO_MODEL_PATTERNS = [
-    "gpt-4o-audio", "gpt-4o-realtime", "gpt-4o-audio-preview",
-    "gpt-4o-mini-audio", "gpt-4o-mini-audio-preview",
-    "gemini-2.5", "gemini-2.0", "gemini-1.5",
-    "qwen2-audio", "qwen-audio", "qwen2.5-omni", "qwen-omni",
-    "minimax-omni", "minimax-audio",
-    "glm-4-voice", "chatglm-voice",
-    "llama-omni", "llama-4-omni",
-    "ultravox", "melo", "mimi",
-    "parler", "bark",
-    "audio",
-]
-AUDIO_MODEL_LOWERS = [p.lower() for p in AUDIO_MODEL_PATTERNS]
+AUDIO_MODEL_PATTERNS = []  # deprecated: audio capability is now autodetected
+AUDIO_MODEL_LOWERS = []  # deprecated: audio capability is now autodetected
+_RUNTIME_AUDIO_CACHE: dict[tuple[str, str], bool] = {}
 
 
 def _detect_model_type(model_id: str, raw_entry: dict | None = None) -> str:
@@ -278,16 +268,19 @@ def _detect_vision_capability(model_id: str, raw_entry: dict | None = None) -> b
 
 
 def _detect_audio_capability(model_id: str, raw_entry: dict | None = None) -> bool:
+    """Auto-detect audio input support from the provider's model metadata.
+
+    Reads `architecture.input_modalities` (OpenRouter-style) or
+    `architecture.modalities` (other providers) and returns True if "audio"
+    appears. No hardcoded pattern list — the provider is the source of truth.
+    Returns False if the metadata is missing or doesn't mention audio.
+    """
     if raw_entry:
         arch = raw_entry.get("architecture", {}) or {}
         in_mods = arch.get("input_modalities", []) or arch.get("modalities", []) or []
-        if "audio" in in_mods:
+        if any("audio" in str(m).lower() for m in in_mods):
             return True
-    lower = model_id.lower()
-    if "/" in lower:
-        lower = lower.split("/", 1)[1]
-    for pat in AUDIO_MODEL_LOWERS:
-        if pat in lower:
+        if raw_entry.get("input_audio") or raw_entry.get("supports_audio"):
             return True
     return False
 
@@ -415,6 +408,73 @@ async def get_model(model_id: int, current_user: dict = Depends(get_current_user
         created_at=model.created_at.isoformat() if model.created_at else "",
         updated_at=model.updated_at.isoformat() if model.updated_at else "",
     )
+
+
+@router.get("/models/{model_id}/detect-capabilities")
+async def detect_model_capabilities(model_id: int, current_user: dict = Depends(require_role("owner", "admin")), db: AsyncSession = Depends(get_db)):
+    """Probe the provider's /models endpoint for the saved model_name and
+    return autodetected vision + audio capabilities. No pattern matching —
+    the provider's architecture block is the source of truth.
+    """
+    result = await db.execute(select(ModelConfig).where(ModelConfig.id == model_id))
+    model = result.scalar_one_or_none()
+    if not model:
+        raise HTTPException(404, "Model not found")
+    if model.provider != "openai_compatible" or not model.base_url:
+        return {"audio": False, "vision": False, "source": "unsupported_provider"}
+    api_key = ""
+    if model.api_key_env:
+        api_key = getattr(app_config.settings, model.api_key_env.lower(), None) or ""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"{model.base_url.rstrip('/')}/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            if resp.status_code != 200:
+                return {"audio": False, "vision": False, "source": f"http_{resp.status_code}"}
+            data = resp.json()
+            raw_list = data.get("data", data.get("models", []))
+            entry = None
+            for m in raw_list:
+                mid = m.get("id", m.get("name", ""))
+                if mid == model.model_name or mid.endswith(f"/{model.model_name}"):
+                    entry = m
+                    break
+            if entry is None:
+                return {"audio": False, "vision": False, "source": "model_not_in_provider_list"}
+            arch = entry.get("architecture", {}) or {}
+            in_mods = [str(m).lower() for m in (arch.get("input_modalities", []) or arch.get("modalities", []) or [])]
+            return {
+                "audio": "audio" in in_mods or bool(entry.get("input_audio")) or bool(entry.get("supports_audio")),
+                "vision": "image" in in_mods or "vision" in in_mods or bool(entry.get("supports_vision")),
+                "input_modalities": list(arch.get("input_modalities", []) or []),
+                "source": "provider",
+            }
+    except Exception as e:
+        return {"audio": False, "vision": False, "source": f"error:{e}"}
+
+
+@router.post("/models/{model_id}/auto-enable")
+async def auto_enable_capabilities(model_id: int, current_user: dict = Depends(require_role("owner", "admin")), db: AsyncSession = Depends(get_db)):
+    """Probe the provider and flip audio_enabled / vision_enabled on the
+    stored model config based on the autodetected capabilities. Idempotent.
+    """
+    result = await db.execute(select(ModelConfig).where(ModelConfig.id == model_id))
+    model = result.scalar_one_or_none()
+    if not model:
+        raise HTTPException(404, "Model not found")
+    cap = await detect_model_capabilities(model_id, current_user, db)
+    changed = []
+    if cap.get("audio") and not bool(getattr(model, "audio_enabled", False)):
+        model.audio_enabled = True
+        changed.append("audio_enabled")
+    if cap.get("vision") and not bool(getattr(model, "vision_enabled", False)):
+        model.vision_enabled = True
+        changed.append("vision_enabled")
+    if changed:
+        await db.commit()
+    return {"changed": changed, "capabilities": cap}
 
 
 # --- Conversations (scoped to user) ---
@@ -981,6 +1041,46 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
     attachment_records = []
     vision_enabled = bool(getattr(model, "vision_enabled", False))
     audio_enabled = bool(getattr(model, "audio_enabled", False))
+    # Runtime autodetect: if the model is openai_compatible and the stored
+    # audio_enabled is False, ask the provider whether the model really does
+    # support audio. This is the "just works" path for existing models that
+    # were added before the audio column existed or before the admin toggled
+    # it on. The result is cached in-memory per base_url+model_name so each
+    # chat does at most one /models lookup per cold cache.
+    if (
+        not audio_enabled
+        and getattr(model, "provider", None) == "openai_compatible"
+        and getattr(model, "base_url", None)
+        and getattr(model, "api_key_env", None)
+    ):
+        try:
+            cache_key = (model.base_url.rstrip("/"), model.model_name)
+            cached = _RUNTIME_AUDIO_CACHE.get(cache_key)
+            if cached is None:
+                api_key = getattr(app_config.settings, model.api_key_env.lower(), None) or ""
+                async with httpx.AsyncClient(timeout=5) as client:
+                    resp = await client.get(
+                        f"{cache_key[0]}/models",
+                        headers={"Authorization": f"Bearer {api_key}"},
+                    )
+                detected = False
+                if resp.status_code == 200:
+                    data = resp.json()
+                    for m in data.get("data", data.get("models", [])):
+                        mid = m.get("id", m.get("name", ""))
+                        if mid == cache_key[1] or mid.endswith(f"/{cache_key[1]}"):
+                            arch = m.get("architecture", {}) or {}
+                            in_mods = [str(x).lower() for x in (arch.get("input_modalities", []) or arch.get("modalities", []) or [])]
+                            if "audio" in in_mods or bool(m.get("input_audio")) or bool(m.get("supports_audio")):
+                                detected = True
+                            break
+                _RUNTIME_AUDIO_CACHE[cache_key] = detected
+                cached = detected
+                logger.info(f"audio autodetect: model={model.model_name} detected={detected}")
+            if cached:
+                audio_enabled = True
+        except Exception as e:
+            logger.debug(f"audio runtime autodetect failed for {model.model_name}: {e}")
     ocr_strategy = app_config.settings.ocr_strategy
     whisper_provider_setting = (getattr(app_config.settings, "whisper_provider", None) or DEFAULT_PROVIDER).strip().lower()
     if whisper_provider_setting not in VALID_PROVIDERS:
