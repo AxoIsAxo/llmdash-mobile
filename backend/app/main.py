@@ -235,6 +235,86 @@ AUDIO_MODEL_LOWERS = []  # deprecated: audio capability is now autodetected
 _RUNTIME_AUDIO_CACHE: dict[tuple[str, str], bool] = {}
 
 
+def _probe_audio_support(base_url: str, api_key: str, model_name: str) -> bool:
+    """Last-resort autodetect: send a 1-frame wav to the chat completions
+    endpoint and inspect the error. Returns True if the model accepts audio
+    (error is about an invalid format/payload, not about an unsupported
+    modality). Returns False if the model rejects audio input entirely.
+    Cached at the caller. Network failures return False (safe default).
+    """
+    import base64 as _b64
+    import struct
+    # Minimal valid 16kHz mono 16-bit PCM wav with 1 frame (32 ms of silence)
+    sample_rate = 16000
+    pcm = b"\x00\x00"
+    byte_rate = sample_rate * 1 * 2
+    data_size = len(pcm)
+    fmt = struct.pack("<4sIHHIIHH", b"fmt ", 16, 1, 1, sample_rate, byte_rate, 2, 16)
+    data = struct.pack("<4sI", b"data", data_size) + pcm
+    riff = struct.pack("<4sI", b"RIFF", 4 + len(fmt) + len(data)) + b"WAVE"
+    wav = riff + fmt + data
+    b64 = _b64.b64encode(wav).decode("ascii")
+
+    async def _do_probe():
+        async with httpx.AsyncClient(timeout=8) as client:
+            return await client.post(
+                f"{base_url.rstrip('/')}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model_name,
+                    "messages": [{
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "ping"},
+                            {"type": "input_audio", "input_audio": {"data": b64, "format": "wav"}},
+                        ],
+                    }],
+                    "max_tokens": 1,
+                },
+            )
+
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                resp = ex.submit(lambda: asyncio.run(_do_probe())).result(timeout=10)
+        else:
+            resp = loop.run_until_complete(_do_probe())
+    except Exception as e:
+        logger.debug(f"audio probe network failure for {model_name}: {e}")
+        return False
+
+    if resp.status_code == 200:
+        return True
+    try:
+        body = resp.json()
+    except Exception:
+        body = {}
+    err_text = (resp.text or "").lower()
+    err_msg = ""
+    if isinstance(body, dict):
+        err = body.get("error", {}) or {}
+        if isinstance(err, dict):
+            err_msg = (err.get("message", "") or err.get("param", "") or "").lower()
+    full = err_msg + " " + err_text
+    # Provider rejected because the model doesn't support audio input at all
+    unsupported_markers = (
+        "doesn't support audio", "does not support audio",
+        "audio input is not supported", "no audio support",
+        "audio modality not supported", "unsupported modality",
+    )
+    if any(m in full for m in unsupported_markers):
+        return False
+    # Any other error → the model likely accepts audio (rejected our payload
+    # for some other reason like rate limit, bad token, etc.). Treat as
+    # supported so the real chat request can construct a proper payload.
+    return True
+
+
 def _detect_model_type(model_id: str, raw_entry: dict | None = None) -> str:
     if raw_entry:
         arch = raw_entry.get("architecture", {}) or {}
@@ -1058,25 +1138,43 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
             cached = _RUNTIME_AUDIO_CACHE.get(cache_key)
             if cached is None:
                 api_key = getattr(app_config.settings, model.api_key_env.lower(), None) or ""
+                detected = False
+                arch_summary = "no_response"
                 async with httpx.AsyncClient(timeout=5) as client:
                     resp = await client.get(
                         f"{cache_key[0]}/models",
                         headers={"Authorization": f"Bearer {api_key}"},
                     )
-                detected = False
                 if resp.status_code == 200:
                     data = resp.json()
-                    for m in data.get("data", data.get("models", [])):
+                    raw_list = data.get("data", data.get("models", []))
+                    for m in raw_list:
                         mid = m.get("id", m.get("name", ""))
                         if mid == cache_key[1] or mid.endswith(f"/{cache_key[1]}"):
                             arch = m.get("architecture", {}) or {}
                             in_mods = [str(x).lower() for x in (arch.get("input_modalities", []) or arch.get("modalities", []) or [])]
+                            arch_summary = f"input_modalities={in_mods}"
                             if "audio" in in_mods or bool(m.get("input_audio")) or bool(m.get("supports_audio")):
                                 detected = True
                             break
+                else:
+                    arch_summary = f"http_{resp.status_code}"
+                # Probe fallback: if the architecture block didn't expose
+                # audio, send a 1-frame wav to the model and look at the
+                # error. If the error mentions audio/format → the model
+                # accepts audio (just the wrong payload). If the error
+                # says unsupported → model doesn't support audio. This
+                # handles providers that don't expose the architecture
+                # block at all (or that omit audio from it).
+                if not detected and resp.status_code == 200 and api_key:
+                    probe = _probe_audio_support(cache_key[0], api_key, model.model_name)
+                    detected = probe
+                    arch_summary += f" probe={probe}"
                 _RUNTIME_AUDIO_CACHE[cache_key] = detected
                 cached = detected
-                logger.info(f"audio autodetect: model={model.model_name} detected={detected}")
+                logger.info(
+                    f"audio autodetect: model={model.model_name} detected={detected} ({arch_summary})"
+                )
             if cached:
                 audio_enabled = True
         except Exception as e:
