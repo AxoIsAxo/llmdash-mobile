@@ -92,6 +92,7 @@ class ModelConfigCreate(BaseModel):
     thinking_enabled: bool = False
     thinking_budget_tokens: Optional[int] = None
     vision_enabled: bool = False
+    audio_enabled: bool = False
     tools_enabled: bool = True
     enabled: bool = True
     sort_order: Optional[int] = None
@@ -109,6 +110,7 @@ class ModelConfigUpdate(BaseModel):
     thinking_enabled: Optional[bool] = None
     thinking_budget_tokens: Optional[int] = None
     vision_enabled: Optional[bool] = None
+    audio_enabled: Optional[bool] = None
     tools_enabled: Optional[bool] = None
     enabled: Optional[bool] = None
     sort_order: Optional[int] = None
@@ -127,6 +129,7 @@ class ModelConfigResponse(BaseModel):
     thinking_enabled: bool = False
     thinking_budget_tokens: Optional[int] = None
     vision_enabled: bool = False
+    audio_enabled: bool = False
     tools_enabled: bool = True
     enabled: bool
     sort_order: Optional[int] = None

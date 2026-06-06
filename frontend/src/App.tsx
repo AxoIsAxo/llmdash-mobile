@@ -13,7 +13,7 @@ import {
   Send, Plus, Key, MessageSquare, Trash2, ChevronLeft,
   ChevronRight, Wrench, Bot, Loader2, Terminal, Globe, FileText, Eye, Search,
   Copy, Check, RefreshCw, Square, ChevronUp, ChevronDown, Download,
-  Shield, LogOut, Settings, Minus, CreditCard, Brain, Image, Paperclip, X, File, Palette
+  Shield, LogOut, Settings, Minus, CreditCard, Brain, Image, Paperclip, X, File as FileIcon, Palette, Mic
 } from 'lucide-react'
 import MarkdownRenderer from './components/MarkdownRenderer'
 import SetupWizard from './components/SetupWizard'
@@ -700,7 +700,7 @@ function App() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
   }
 
-  const ALLOWED_FILE_EXTS = ['.png','.jpg','.jpeg','.gif','.webp','.bmp','.tiff','.tif','.txt','.csv','.json','.xml','.yaml','.yml','.toml','.ini','.cfg','.log','.md','.py','.js','.ts','.jsx','.tsx','.html','.css','.scss','.less','.sh','.bash','.zsh','.rs','.go','.java','.c','.cpp','.h','.hpp','.sql','.r','.rb','.php','.lua','.swift','.kt','.tf','.env','.gitignore','.dockerfile','.makefile','.conf','.cnf','.gradle','.properties','.lock','.pdf']
+  const ALLOWED_FILE_EXTS = ['.png','.jpg','.jpeg','.gif','.webp','.bmp','.tiff','.tif','.txt','.csv','.json','.xml','.yaml','.yml','.toml','.ini','.cfg','.log','.md','.py','.js','.ts','.jsx','.tsx','.html','.css','.scss','.less','.sh','.bash','.zsh','.rs','.go','.java','.c','.cpp','.h','.hpp','.sql','.r','.rb','.php','.lua','.swift','.kt','.tf','.env','.gitignore','.dockerfile','.makefile','.conf','.cnf','.gradle','.properties','.lock','.pdf','.wav','.mp3','.mpeg','.m4a','.mp4','.aac','.flac','.ogg','.oga','.webm']
 
   const handleFileUpload = async (files: FileList | null) => {
     if (!files || files.length === 0 || uploading) return
@@ -731,6 +731,37 @@ function App() {
 
   const removeAttachment = (index: number) => {
     setAttachments(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const handleAudioCaptured = async (audioBlob: Blob, mimeType: string) => {
+    const extMap: Record<string, string> = {
+      'audio/webm': 'webm',
+      'audio/webm;codecs=opus': 'webm',
+      'audio/ogg': 'ogg',
+      'audio/ogg;codecs=opus': 'ogg',
+      'audio/mp4': 'm4a',
+      'audio/mp4;codecs=mp4a.40.2': 'm4a',
+      'audio/mpeg': 'mp3',
+      'audio/wav': 'wav',
+      'audio/x-wav': 'wav',
+    }
+    const ext = extMap[mimeType.toLowerCase()] || 'webm'
+    const filename = `recording-${Date.now()}.${ext}`
+    const file = new File([audioBlob], filename, { type: mimeType })
+    setUploading(true)
+    try {
+      const result = await api.chat.upload(file)
+      setAttachments(prev => [...prev, {
+        filename: result.filename || filename,
+        file_type: result.file_type,
+        file_path: result.file_path,
+        audio_included: true,
+      }])
+    } catch (e: any) {
+      alert(`Audio upload failed: ${e.message}`)
+    } finally {
+      setUploading(false)
+    }
   }
 
   const handleCancel = async () => {
@@ -1134,22 +1165,29 @@ function App() {
           <div className="max-w-4xl mx-auto">
             {attachments.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-2">
-                {attachments.map((att, i) => (
-                  <div key={i} className="flex items-center gap-1.5 bg-theme-bg-elevated rounded-lg px-3 py-1.5 text-xs border border-theme-border-light">
-                    {['.png','.jpg','.jpeg','.gif','.webp','.bmp'].includes(att.file_type.toLowerCase()) ? (
-                      <Image className="w-3.5 h-3.5 text-theme-purple" />
-                    ) : (
-                      <File className="w-3.5 h-3.5 text-theme-accent-text" />
-                    )}
-                    <span className="text-theme-text-secondary truncate max-w-[150px]">{att.filename}</span>
-                    <button
-                      onClick={() => removeAttachment(i)}
-                      className="p-0.5 hover:bg-theme-danger/20 rounded text-theme-muted hover:text-theme-danger-text"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                ))}
+                {attachments.map((att, i) => {
+                  const ft = att.file_type.toLowerCase()
+                  const isImg = ['.png','.jpg','.jpeg','.gif','.webp','.bmp'].includes(ft)
+                  const isAudio = ['.wav','.mp3','.mpeg','.m4a','.mp4','.aac','.flac','.ogg','.oga','.webm'].includes(ft)
+                  return (
+                    <div key={i} className="flex items-center gap-1.5 bg-theme-bg-elevated rounded-lg px-3 py-1.5 text-xs border border-theme-border-light">
+                      {isImg ? (
+                        <Image className="w-3.5 h-3.5 text-theme-purple" />
+                      ) : isAudio ? (
+                        <Mic className="w-3.5 h-3.5 text-theme-purple" />
+                      ) : (
+                        <FileIcon className="w-3.5 h-3.5 text-theme-accent-text" />
+                      )}
+                      <span className="text-theme-text-secondary truncate max-w-[150px]">{att.filename}</span>
+                      <button
+                        onClick={() => removeAttachment(i)}
+                        className="p-0.5 hover:bg-theme-danger/20 rounded text-theme-muted hover:text-theme-danger-text"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )
+                })}
               </div>
             )}
             <div className="flex gap-2 items-end">
@@ -1157,14 +1195,14 @@ function App() {
                 ref={fileInputRef}
                 type="file"
                 multiple
-                accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.tiff,.tif,.txt,.csv,.json,.xml,.yaml,.yml,.toml,.ini,.cfg,.log,.md,.py,.js,.ts,.jsx,.tsx,.html,.css,.scss,.less,.sh,.bash,.zsh,.rs,.go,.java,.c,.cpp,.h,.hpp,.sql,.r,.rb,.php,.lua,.swift,.kt,.tf,.env,.gitignore,.dockerfile,.makefile,.conf,.cnf,.gradle,.properties,.lock,.pdf"
+                accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.tiff,.tif,.txt,.csv,.json,.xml,.yaml,.yml,.toml,.ini,.cfg,.log,.md,.py,.js,.ts,.jsx,.tsx,.html,.css,.scss,.less,.sh,.bash,.zsh,.rs,.go,.java,.c,.cpp,.h,.hpp,.sql,.r,.rb,.php,.lua,.swift,.kt,.tf,.env,.gitignore,.dockerfile,.makefile,.conf,.cnf,.gradle,.properties,.lock,.pdf,.wav,.mp3,.mpeg,.m4a,.mp4,.aac,.flac,.ogg,.oga,.webm"
                 onChange={e => handleFileUpload(e.target.files)}
                 className="hidden"
               />
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={streaming || uploading}
-                title="Upload files (images, documents, code)"
+                title="Upload files (images, documents, code, audio)"
                 className={`p-3 rounded-xl transition-colors ${
                   uploading ? 'bg-theme-purple/50' : 'bg-theme-bg-elevated hover:bg-theme-bg-hover'
                 } disabled:opacity-50 disabled:cursor-not-allowed`}
@@ -1189,6 +1227,8 @@ function App() {
               </div>
               <VoiceButton
                 onTranscribed={(text) => setInput(prev => prev + text)}
+                onAudioCaptured={handleAudioCaptured}
+                audioEnabled={!!models.find(m => m.id === selectedModelId)?.audio_enabled}
                 disabled={streaming || uploading}
               />
               <button
@@ -1726,12 +1766,12 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
                   ) : (
                     fileUrl ? (
                       <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 hover:opacity-80">
-                        <File className="w-3.5 h-3.5 text-theme-accent-text" />
+                        <FileIcon className="w-3.5 h-3.5 text-theme-accent-text" />
                         <span className="text-theme-text-secondary truncate max-w-[120px]">{att.filename}</span>
                       </a>
                     ) : (
                       <>
-                        <File className="w-3.5 h-3.5 text-theme-accent-text" />
+                        <FileIcon className="w-3.5 h-3.5 text-theme-accent-text" />
                         <span className="text-theme-text-secondary truncate max-w-[120px]">{att.filename}</span>
                       </>
                     )

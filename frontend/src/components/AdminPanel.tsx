@@ -414,8 +414,8 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
   const [renaming, setRenaming] = useState<number | null>(null)
   const [renameVal, setRenameVal] = useState('')
   const [configuringId, setConfiguringId] = useState<number | null>(null)
-  const [configForm, setConfigForm] = useState<{ temperature: number; max_tokens: number; thinking_enabled: boolean; thinking_budget_tokens: number; model_type: string; vision_enabled: boolean; tools_enabled: boolean }>({
-    temperature: 0.7, max_tokens: 4096, thinking_enabled: false, thinking_budget_tokens: 4000, model_type: 'chat', vision_enabled: false, tools_enabled: true,
+  const [configForm, setConfigForm] = useState<{ temperature: number; max_tokens: number; thinking_enabled: boolean; thinking_budget_tokens: number; model_type: string; vision_enabled: boolean; audio_enabled: boolean; tools_enabled: boolean }>({
+    temperature: 0.7, max_tokens: 4096, thinking_enabled: false, thinking_budget_tokens: 4000, model_type: 'chat', vision_enabled: false, audio_enabled: false, tools_enabled: true,
   })
   const [reordering, setReordering] = useState(false)
 
@@ -446,6 +446,7 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
           model_name: modelId,
           model_type: foundModel?.suggested_type || 'chat',
           vision_enabled: foundModel?.supports_vision || false,
+          audio_enabled: foundModel?.supports_audio || false,
           base_url: provider.base_url,
           api_key_env: provider.env_var,
           temperature: 0.7,
@@ -482,6 +483,7 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
       thinking_budget_tokens: model.thinking_budget_tokens || 4000,
       model_type: model.model_type || 'chat',
       vision_enabled: model.vision_enabled || false,
+      audio_enabled: model.audio_enabled || false,
       tools_enabled: model.tools_enabled ?? true,
     })
   }
@@ -495,6 +497,7 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
         thinking_budget_tokens: configForm.thinking_enabled ? configForm.thinking_budget_tokens : null,
         model_type: configForm.model_type,
         vision_enabled: configForm.vision_enabled,
+        audio_enabled: configForm.audio_enabled,
         tools_enabled: configForm.tools_enabled,
       })
       setConfiguringId(null)
@@ -704,6 +707,18 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
                           <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${configForm.vision_enabled ? 'left-4' : 'left-0.5'}`} />
                         </button>
                         <span className="text-xs text-theme-muted">{configForm.vision_enabled ? 'Enabled' : 'Disabled'}</span>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <label className="text-xs text-theme-subtle w-24 shrink-0 flex items-center gap-1">
+                          <Mic className="w-3 h-3" /> Audio
+                        </label>
+                        <button
+                          onClick={() => setConfigForm(f => ({ ...f, audio_enabled: !f.audio_enabled }))}
+                          className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${configForm.audio_enabled ? 'bg-theme-purple' : 'bg-theme-switch-off'}`}
+                        >
+                          <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${configForm.audio_enabled ? 'left-4' : 'left-0.5'}`} />
+                        </button>
+                        <span className="text-xs text-theme-muted">{configForm.audio_enabled ? 'Enabled' : 'Disabled'}</span>
                       </div>
                       <div className="flex items-center gap-4">
                         <label className="text-xs text-theme-subtle w-24 shrink-0 flex items-center gap-1">
@@ -1286,7 +1301,7 @@ function UploadsTab() {
               <Mic className="w-4 h-4 text-theme-blue-text" />
               Speech-to-Text (faster-whisper, multilingual)
             </div>
-            <p className="text-xs text-theme-muted mt-1">Picks the Whisper model used for voice transcription. All sizes are multilingual. Larger models are more accurate but slower and use more RAM.</p>
+            <p className="text-xs text-theme-muted mt-1">Picks the Whisper model used to transcribe voice messages sent to models that don't natively understand audio. Audio-capable models (set per-model in the <span className="text-theme-accent-text">Models</span> tab) skip Whisper entirely and receive the audio directly.</p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="block">
@@ -1448,6 +1463,12 @@ function UploadsTab() {
           <div className="text-xs text-theme-accent-text font-medium mb-1">What's a Vision Model?</div>
           <p className="text-xs text-theme-accent-text/70">Vision-capable models can "see" and understand images directly. Examples: GPT-4o, Claude 3.5 Sonnet, Gemini Pro Vision, Qwen-VL. These models bypass OCR entirely for more accurate image understanding.</p>
           <p className="text-xs text-theme-accent-text/70 mt-1">Set each model's Vision capability in the <span className="text-theme-accent-text">Models</span> tab.</p>
+        </div>
+
+        <div className="mt-2 p-4 bg-theme-purple/10 border border-theme-purple/20 rounded-lg">
+          <div className="text-xs text-theme-purple font-medium mb-1">What's an Audio Model?</div>
+          <p className="text-xs text-theme-purple/70">Audio-capable models can "hear" and understand voice recordings directly. Examples: gpt-4o-audio, Gemini 2.5, Qwen2-Audio. When a model has Audio enabled, voice recordings are sent to the model as audio instead of being transcribed with Whisper first — preserving tone, emotion, and other vocal cues that text-only transcription loses.</p>
+          <p className="text-xs text-theme-purple/70 mt-1">Set each model's Audio capability in the <span className="text-theme-purple">Models</span> tab. Models without Audio enabled will still use Whisper for voice messages (or the configured STT provider).</p>
         </div>
       </div>
     </div>

@@ -109,7 +109,8 @@ def extract_text_from_file(file_path: str) -> Optional[str]:
 
 
 IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tiff', '.tif'}
-ALLOWED_UPLOAD_EXTENSIONS = IMAGE_EXTENSIONS.union({
+AUDIO_EXTENSIONS = {'.wav', '.mp3', '.mpeg', '.m4a', '.mp4', '.aac', '.flac', '.ogg', '.oga', '.webm'}
+ALLOWED_UPLOAD_EXTENSIONS = IMAGE_EXTENSIONS.union(AUDIO_EXTENSIONS).union({
     '.txt', '.csv', '.json', '.xml', '.yaml', '.yml', '.toml', '.ini',
     '.cfg', '.log', '.md', '.py', '.js', '.ts', '.jsx', '.tsx',
     '.html', '.css', '.scss', '.less', '.sh', '.bash', '.zsh',
@@ -123,6 +124,10 @@ ALLOWED_UPLOAD_EXTENSIONS = IMAGE_EXTENSIONS.union({
 
 def is_image_file(filename: str) -> bool:
     return os.path.splitext(filename)[1].lower() in IMAGE_EXTENSIONS
+
+
+def is_audio_file(filename: str) -> bool:
+    return os.path.splitext(filename)[1].lower() in AUDIO_EXTENSIONS
 
 
 def is_allowed_file(filename: str) -> bool:
@@ -148,6 +153,9 @@ def process_uploaded_file(file_path: str, filename: str, force_ocr: bool = False
         text = extract_text_from_pdf(file_path)
         if text:
             result["ocr_text"] = text
+        return result
+
+    if ext in AUDIO_EXTENSIONS:
         return result
 
     text = extract_text_from_file(file_path)

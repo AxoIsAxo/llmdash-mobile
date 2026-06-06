@@ -680,6 +680,20 @@ class OpenAICompatibleProvider(AIProvider):
                                 "type": "image_url",
                                 "image_url": part["image_url"],
                             })
+                        elif part.get("type") == "input_audio":
+                            ia = part.get("input_audio") or {}
+                            parts.append({
+                                "type": "input_audio",
+                                "input_audio": {
+                                    "data": ia.get("data", ""),
+                                    "format": ia.get("format", "wav"),
+                                },
+                            })
+                        elif part.get("type") == "audio_url":
+                            parts.append({
+                                "type": "audio_url",
+                                "audio_url": part["audio_url"],
+                            })
                         elif part.get("type") == "text":
                             parts.append({"type": "text", "text": part["text"]})
                     entry["content"] = parts

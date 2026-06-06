@@ -64,6 +64,7 @@ class ModelConfig(Base):
     thinking_enabled = Column(Boolean, default=False)
     thinking_budget_tokens = Column(Integer, nullable=True)
     vision_enabled = Column(Boolean, default=False)
+    audio_enabled = Column(Boolean, default=False)
     tools_enabled = Column(Boolean, default=True)
     enabled = Column(Boolean, default=True)
     sort_order = Column(Integer, nullable=True)
@@ -214,6 +215,8 @@ def _migrate(conn):
         conn.exec_driver_sql("ALTER TABLE model_configs ADD COLUMN model_type VARCHAR(16) NOT NULL DEFAULT 'chat'")
     if "vision_enabled" not in model_cfg_cols:
         conn.exec_driver_sql("ALTER TABLE model_configs ADD COLUMN vision_enabled BOOLEAN DEFAULT 0")
+    if "audio_enabled" not in model_cfg_cols:
+        conn.exec_driver_sql("ALTER TABLE model_configs ADD COLUMN audio_enabled BOOLEAN DEFAULT 0")
     if "tools_enabled" not in model_cfg_cols:
         conn.exec_driver_sql("ALTER TABLE model_configs ADD COLUMN tools_enabled BOOLEAN DEFAULT 1")
 

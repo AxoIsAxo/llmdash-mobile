@@ -1,12 +1,15 @@
 import asyncio
 import base64
 import json
+import logging
 import os
 import sys
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI, Depends, HTTPException, Query, APIRouter, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,8 +34,9 @@ from .models import (
 from .ai import get_provider, ToolDef
 from .tools import get_tool_definitions, execute_tool
 from .sandbox import is_docker_available
-from .ocr import process_uploaded_file, is_allowed_file, is_image_file, ocr_image, IMAGE_EXTENSIONS, is_ocr_available
+from .ocr import process_uploaded_file, is_allowed_file, is_image_file, is_audio_file, ocr_image, IMAGE_EXTENSIONS, is_ocr_available
 from .whisper_stt import transcribe_audio, transcribe_audio_openrouter, VALID_PROVIDERS, DEFAULT_PROVIDER, DEFAULT_OPENROUTER_MODEL
+from .audio_convert import prepare_audio_for_provider
 from .routers.auth import router as auth_router, get_current_user, require_role, load_provider_configs
 from .routers.subscriptions import router as subscriptions_router
 
@@ -122,6 +126,7 @@ async def list_models(current_user: dict = Depends(get_current_user), db: AsyncS
             thinking_enabled=bool(getattr(m, "thinking_enabled", False)),
             thinking_budget_tokens=getattr(m, "thinking_budget_tokens", None),
             vision_enabled=bool(getattr(m, "vision_enabled", False)),
+            audio_enabled=bool(getattr(m, "audio_enabled", False)),
             tools_enabled=bool(getattr(m, "tools_enabled", True)),
             enabled=m.enabled,
             sort_order=getattr(m, "sort_order", None),
@@ -153,6 +158,7 @@ async def create_model(cfg: ModelConfigCreate, current_user: dict = Depends(requ
         thinking_enabled=getattr(cfg, "thinking_enabled", False),
         thinking_budget_tokens=getattr(cfg, "thinking_budget_tokens", None),
         vision_enabled=getattr(cfg, "vision_enabled", False),
+        audio_enabled=getattr(cfg, "audio_enabled", False),
         tools_enabled=getattr(cfg, "tools_enabled", True),
         enabled=cfg.enabled,
         sort_order=sort_order,
@@ -224,6 +230,20 @@ VISION_MODEL_PATTERNS = [
 ]
 VISION_MODEL_LOWERS = [p.lower() for p in VISION_MODEL_PATTERNS]
 
+AUDIO_MODEL_PATTERNS = [
+    "gpt-4o-audio", "gpt-4o-realtime", "gpt-4o-audio-preview",
+    "gpt-4o-mini-audio", "gpt-4o-mini-audio-preview",
+    "gemini-2.5", "gemini-2.0", "gemini-1.5",
+    "qwen2-audio", "qwen-audio", "qwen2.5-omni", "qwen-omni",
+    "minimax-omni", "minimax-audio",
+    "glm-4-voice", "chatglm-voice",
+    "llama-omni", "llama-4-omni",
+    "ultravox", "melo", "mimi",
+    "parler", "bark",
+    "audio",
+]
+AUDIO_MODEL_LOWERS = [p.lower() for p in AUDIO_MODEL_PATTERNS]
+
 
 def _detect_model_type(model_id: str, raw_entry: dict | None = None) -> str:
     if raw_entry:
@@ -257,6 +277,21 @@ def _detect_vision_capability(model_id: str, raw_entry: dict | None = None) -> b
     return False
 
 
+def _detect_audio_capability(model_id: str, raw_entry: dict | None = None) -> bool:
+    if raw_entry:
+        arch = raw_entry.get("architecture", {}) or {}
+        in_mods = arch.get("input_modalities", []) or arch.get("modalities", []) or []
+        if "audio" in in_mods:
+            return True
+    lower = model_id.lower()
+    if "/" in lower:
+        lower = lower.split("/", 1)[1]
+    for pat in AUDIO_MODEL_LOWERS:
+        if pat in lower:
+            return True
+    return False
+
+
 @router.get("/models/scan")
 async def scan_models(current_user: dict = Depends(require_role("owner", "admin"))):
     provider_configs = get_active_provider_configs()
@@ -284,6 +319,7 @@ async def scan_models(current_user: dict = Depends(require_role("owner", "admin"
                                 "name": m.get("id", m.get("name", "")),
                                 "suggested_type": _detect_model_type(mid, m),
                                 "supports_vision": _detect_vision_capability(mid, m),
+                                "supports_audio": _detect_audio_capability(mid, m),
                             })
                     else:
                         error = f"HTTP {resp.status_code}"
@@ -305,6 +341,7 @@ async def scan_models(current_user: dict = Depends(require_role("owner", "admin"
                                         "name": m.get("id", m.get("name", "")),
                                         "suggested_type": "image",
                                         "supports_vision": _detect_vision_capability(mid, m),
+                                        "supports_audio": _detect_audio_capability(mid, m),
                                     })
                     except Exception:
                         pass
@@ -326,6 +363,7 @@ async def scan_models(current_user: dict = Depends(require_role("owner", "admin"
                                 "name": m.get("display_name", m.get("id", "")),
                                 "suggested_type": _detect_model_type(mid),
                                 "supports_vision": _detect_vision_capability(mid),
+                                "supports_audio": _detect_audio_capability(mid),
                             })
                     else:
                         error = f"HTTP {resp.status_code}"
@@ -370,6 +408,7 @@ async def get_model(model_id: int, current_user: dict = Depends(get_current_user
         thinking_enabled=bool(getattr(model, "thinking_enabled", False)),
         thinking_budget_tokens=getattr(model, "thinking_budget_tokens", None),
         vision_enabled=bool(getattr(model, "vision_enabled", False)),
+        audio_enabled=bool(getattr(model, "audio_enabled", False)),
         tools_enabled=bool(getattr(model, "tools_enabled", True)),
         enabled=model.enabled,
         sort_order=getattr(model, "sort_order", None),
@@ -941,7 +980,11 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
     user_content = req.message or ""
     attachment_records = []
     vision_enabled = bool(getattr(model, "vision_enabled", False))
+    audio_enabled = bool(getattr(model, "audio_enabled", False))
     ocr_strategy = app_config.settings.ocr_strategy
+    whisper_provider_setting = (getattr(app_config.settings, "whisper_provider", None) or DEFAULT_PROVIDER).strip().lower()
+    if whisper_provider_setting not in VALID_PROVIDERS:
+        whisper_provider_setting = DEFAULT_PROVIDER
 
     if req.attachments:
         if not app_config.settings.file_upload_enabled:
@@ -971,6 +1014,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
             }
 
             is_img = is_image_file(att_filename)
+            is_audio = is_audio_file(att_filename)
 
             if is_img:
                 if vision_enabled:
@@ -996,6 +1040,67 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                         record["ocr_text"] = ocr_result[:500]
                     else:
                         extra_text_parts.append(f"\n[Image '{att_filename}' uploaded but no text could be extracted via OCR.]")
+            elif is_audio:
+                if audio_enabled and model.provider == "openai_compatible":
+                    with open(full_path, "rb") as f:
+                        audio_bytes = f.read()
+                    try:
+                        prepared_bytes, audio_format = prepare_audio_for_provider(
+                            audio_bytes, filename=att_filename
+                        )
+                        if prepared_bytes is None or audio_format is None:
+                            logger.error(
+                                f"Audio embed skipped for {att_filename}: "
+                                "transcoding to wav failed (tried PyAV + ffmpeg)."
+                            )
+                            extra_text_parts.append(
+                                f"\n[Audio file '{att_filename}' could not be transcoded for the model.]"
+                            )
+                        else:
+                            b64 = base64.b64encode(prepared_bytes).decode("ascii")
+                            logger.info(
+                                f"chat audio embed: model={model.model_name} "
+                                f"format={audio_format} b64_len={len(b64)}"
+                            )
+                            content_parts.append({
+                                "type": "input_audio",
+                                "input_audio": {
+                                    "data": b64,
+                                    "format": audio_format,
+                                },
+                            })
+                            record["audio_included"] = True
+                            record["audio_format"] = audio_format
+                    except Exception as e:
+                        logger.error(f"Failed to embed audio {att_filename}: {e}")
+                        extra_text_parts.append(
+                            f"\n[Audio file '{att_filename}' could not be embedded: {e}]"
+                        )
+                else:
+                    try:
+                        with open(full_path, "rb") as f:
+                            audio_bytes = f.read()
+                        if whisper_provider_setting == "openrouter":
+                            ct = att_type.lstrip(".") or "webm"
+                            mime = f"audio/{ct if ct else 'webm'}"
+                            whisper_text = transcribe_audio_openrouter(
+                                audio_bytes, filename=att_filename, content_type=mime
+                            )
+                        else:
+                            whisper_text = transcribe_audio(audio_bytes)
+                    except Exception as e:
+                        whisper_text = None
+                        logger.warning(f"Failed to transcribe audio {att_filename}: {e}")
+
+                    if whisper_text:
+                        record["transcription"] = whisper_text[:500]
+                        extra_text_parts.append(
+                            f"\n--- Transcription of audio '{att_filename}': ---\n{whisper_text}\n--- End transcription ---\n"
+                        )
+                    else:
+                        extra_text_parts.append(
+                            f"\n[Audio '{att_filename}' uploaded but no speech could be transcribed.]"
+                        )
             else:
                 result = process_uploaded_file(full_path, att_filename, force_ocr=False)
                 if result.get("ocr_text"):
@@ -1012,9 +1117,14 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
             combined_text = "\n".join(extra_text_parts)
             content_parts.append({"type": "text", "text": combined_text})
 
+        has_multimodal = any(
+            p.get("type") in ("image_url", "input_audio", "audio_url")
+            for p in content_parts
+        )
+
         if len(content_parts) == 1 and content_parts[0]["type"] == "text":
             final_content = content_parts[0]["text"]
-        elif vision_enabled:
+        elif has_multimodal:
             final_content = user_content
             if extra_text_parts:
                 for part in extra_text_parts:
@@ -1035,7 +1145,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
         db.add(user_msg)
         await db.commit()
 
-        if vision_enabled and any(p.get("type") == "image_url" for p in content_parts):
+        if has_multimodal:
             user_msg_entry = {"role": "user", "content": content_parts}
         else:
             user_msg_entry = {"role": "user", "content": final_content}
@@ -1055,6 +1165,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
     my_queue: asyncio.Queue = asyncio.Queue()
 
     async def run_ai_chat():
+        nonlocal messages
         async with async_session() as sess:
             streaming_msg_id = None
             try:
@@ -1089,7 +1200,28 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                         await sess.commit()
                         last_save_len = len(accumulated_content)
 
-                async for chunk in provider.stream_chat(messages, tools, model):
+                def _looks_like_audio_error(err: Exception) -> bool:
+                    msg = (str(err) or "").lower()
+                    keywords = (
+                        "audio", "input_audio", "audio_url", "audio format",
+                        "audio data", "audio input", "audio content",
+                        "invalid audio", "unsupported audio",
+                    )
+                    return any(k in msg for k in keywords)
+
+                chat_messages = messages
+                try:
+                    stream_iter = provider.stream_chat(chat_messages, tools, model)
+                except Exception as e:
+                    if audio_enabled and _looks_like_audio_error(e):
+                        logger.error(
+                            f"Audio embed rejected by model. The model advertises "
+                            f"audio support but the upstream rejected the payload. "
+                            f"Underlying error: {e}"
+                        )
+                    raise
+
+                async for chunk in stream_iter:
                     if chunk.content_delta and chunk.content_delta.strip():
                         accumulated_content += chunk.content_delta
                         await push_event("content_delta", content=chunk.content_delta)

@@ -9,11 +9,14 @@ RUN npm run build
 # Stage 2: Python backend
 FROM python:3.12-slim
 
-# Install system deps (Docker CLI for sandbox and Tesseract OCR; ffmpeg is bundled in faster-whisper)
+# Install system deps (Docker CLI for sandbox, Tesseract OCR, and ffmpeg for
+# audio transcoding to wav when a user sends a browser-recorded webm/opus voice
+# message to a multimodal model)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-dejavu \
     ca-certificates \
     curl \
+    ffmpeg \
     tesseract-ocr \
     tesseract-ocr-eng \
     tesseract-ocr-chi-sim \

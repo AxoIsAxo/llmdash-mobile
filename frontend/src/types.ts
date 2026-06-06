@@ -33,6 +33,7 @@ export interface ModelConfig {
   thinking_enabled: boolean;
   thinking_budget_tokens: number | null;
   vision_enabled: boolean;
+  audio_enabled: boolean;
   tools_enabled: boolean;
   enabled: boolean;
   sort_order: number | null;
@@ -109,6 +110,7 @@ export interface ScannedModel {
   name: string;
   suggested_type: string;
   supports_vision: boolean;
+  supports_audio?: boolean;
 }
 
 export interface ScannedProvider {
@@ -189,6 +191,9 @@ export interface AttachmentRecord {
   file_path: string;
   ocr_text?: string | null;
   image_included?: boolean;
+  audio_included?: boolean;
+  audio_format?: string;
+  transcription?: string;
 }
 
 export interface UploadResponse {

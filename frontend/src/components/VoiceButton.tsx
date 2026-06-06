@@ -3,10 +3,12 @@ import { Mic, MicOff, Loader2, AlertCircle } from 'lucide-react'
 
 interface VoiceButtonProps {
   onTranscribed: (text: string) => void
+  onAudioCaptured?: (audioBlob: Blob, mimeType: string) => void
+  audioEnabled?: boolean
   disabled?: boolean
 }
 
-type ButtonState = 'idle' | 'recording' | 'transcribing' | 'error'
+type ButtonState = 'idle' | 'recording' | 'processing' | 'error'
 
 function getAuthToken(): string | null {
   return localStorage.getItem('llmdash_token')
@@ -35,8 +37,25 @@ async function sendAudioForTranscription(audioBlob: Blob): Promise<string> {
   return data.text || ''
 }
 
+function extFromMime(mime: string): string {
+  const map: Record<string, string> = {
+    'audio/webm': 'webm',
+    'audio/webm;codecs=opus': 'webm',
+    'audio/ogg': 'ogg',
+    'audio/ogg;codecs=opus': 'ogg',
+    'audio/mp4': 'm4a',
+    'audio/mp4;codecs=mp4a.40.2': 'm4a',
+    'audio/mpeg': 'mp3',
+    'audio/wav': 'wav',
+    'audio/x-wav': 'wav',
+  }
+  return map[mime.toLowerCase()] || 'webm'
+}
+
 export default function VoiceButton({
   onTranscribed,
+  onAudioCaptured,
+  audioEnabled = false,
   disabled = false,
 }: VoiceButtonProps) {
   const [buttonState, setButtonState] = useState<ButtonState>('idle')
@@ -61,7 +80,7 @@ export default function VoiceButton({
   }, [cleanupStream])
 
   const handleClick = useCallback(async () => {
-    if (disabled || buttonState === 'transcribing') return
+    if (disabled || buttonState === 'processing') return
 
     if (buttonState === 'recording') {
       stopRecording()
@@ -77,10 +96,15 @@ export default function VoiceButton({
 
       const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
         ? 'audio/webm;codecs=opus'
-        : 'audio/webm'
+        : MediaRecorder.isTypeSupported('audio/webm')
+        ? 'audio/webm'
+        : ''
 
-      const mediaRecorder = new MediaRecorder(stream, { mimeType })
+      const mediaRecorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream)
       mediaRecorderRef.current = mediaRecorder
+      const usedMime = mediaRecorder.mimeType || 'audio/webm'
 
       mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data)
@@ -94,10 +118,17 @@ export default function VoiceButton({
           return
         }
 
-        setButtonState('transcribing')
+        setButtonState('processing')
 
         try {
-          const audioBlob = new Blob(chunksRef.current, { type: mimeType })
+          const audioBlob = new Blob(chunksRef.current, { type: usedMime })
+
+          if (audioEnabled && onAudioCaptured) {
+            onAudioCaptured(audioBlob, usedMime)
+            setButtonState('idle')
+            return
+          }
+
           const text = await sendAudioForTranscription(audioBlob)
           if (text.trim()) {
             onTranscribed(text.trim())
@@ -126,7 +157,7 @@ export default function VoiceButton({
       setButtonState('error')
       cleanupStream()
     }
-  }, [buttonState, disabled, onTranscribed, cleanupStream, stopRecording])
+  }, [buttonState, disabled, onTranscribed, onAudioCaptured, audioEnabled, cleanupStream, stopRecording])
 
   useEffect(() => {
     return () => {
@@ -135,39 +166,48 @@ export default function VoiceButton({
   }, [cleanupStream])
 
   const showError = buttonState === 'error'
+  const isProcessing = buttonState === 'processing'
+
+  const titleText = isProcessing
+    ? audioEnabled
+      ? 'Sending audio...'
+      : 'Transcribing...'
+    : buttonState === 'recording'
+    ? 'Recording... click to stop'
+    : showError
+    ? errorMsg || 'Error'
+    : audioEnabled
+    ? 'Click to record — audio will be sent directly to the model'
+    : 'Click to start recording'
 
   return (
     <button
       onClick={handleClick}
-      disabled={disabled || buttonState === 'transcribing'}
-      title={
-        buttonState === 'recording'
-          ? 'Recording... click to stop'
-          : buttonState === 'transcribing'
-          ? 'Transcribing...'
-          : showError
-          ? errorMsg || 'Error'
-          : 'Click to start recording'
-      }
+      disabled={disabled || isProcessing}
+      title={titleText}
       className={`p-3 rounded-xl transition-colors relative ${
         buttonState === 'recording'
           ? 'bg-theme-danger hover:bg-theme-danger-hover animate-pulse'
           : showError
           ? 'bg-theme-amber hover:bg-theme-amber'
-          : buttonState === 'transcribing'
+          : isProcessing
           ? 'bg-theme-purple'
+          : audioEnabled
+          ? 'bg-theme-bg-elevated hover:bg-theme-bg-active ring-1 ring-theme-purple/40'
           : 'bg-theme-bg-elevated hover:bg-theme-bg-active'
       } disabled:opacity-50 disabled:cursor-not-allowed`}
     >
-      {buttonState === 'transcribing' ? (
+      {isProcessing ? (
         <Loader2 className="w-5 h-5 animate-spin text-theme-purple" />
       ) : buttonState === 'recording' ? (
         <MicOff className="w-5 h-5 text-white" />
       ) : showError ? (
         <AlertCircle className="w-5 h-5 text-white" />
       ) : (
-        <Mic className="w-5 h-5 text-theme-subtle" />
+        <Mic className={`w-5 h-5 ${audioEnabled ? 'text-theme-purple' : 'text-theme-subtle'}`} />
       )}
     </button>
   )
 }
+
+export { extFromMime }
