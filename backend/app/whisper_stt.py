@@ -1,3 +1,4 @@
+import base64
 import io
 import logging
 import os
@@ -202,12 +203,56 @@ def _resolve_openrouter_language() -> Optional[str]:
     return raw or None
 
 
+_MIME_TO_FORMAT = {
+    "audio/wav": "wav",
+    "audio/wave": "wav",
+    "audio/x-wav": "wav",
+    "audio/webm": "webm",
+    "audio/ogg": "ogg",
+    "audio/flac": "flac",
+    "audio/x-flac": "flac",
+    "audio/mpeg": "mp3",
+    "audio/mp3": "mp3",
+    "audio/mp4": "m4a",
+    "audio/x-m4a": "m4a",
+    "audio/aac": "aac",
+    "audio/x-aac": "aac",
+    "audio/m4a": "m4a",
+}
+
+
+def _resolve_audio_format(filename: str, content_type: Optional[str]) -> str:
+    if content_type:
+        ct = str(content_type).split(";", 1)[0].strip().lower()
+        if ct in _MIME_TO_FORMAT:
+            return _MIME_TO_FORMAT[ct]
+    if filename:
+        ext = os.path.splitext(str(filename).strip().lower())[1].lstrip(".")
+        ext_map = {
+            "wav": "wav",
+            "wave": "wav",
+            "webm": "webm",
+            "ogg": "ogg",
+            "oga": "ogg",
+            "flac": "flac",
+            "mp3": "mp3",
+            "mpeg": "mp3",
+            "m4a": "m4a",
+            "mp4": "m4a",
+            "aac": "aac",
+        }
+        if ext in ext_map:
+            return ext_map[ext]
+    return "webm"
+
+
 def transcribe_audio_openrouter(audio_bytes: bytes, filename: str = "audio.webm", content_type: str = "audio/webm") -> str:
     """Transcribe audio using the OpenRouter /audio/transcriptions API.
 
-    The OpenRouter endpoint is OpenAI-compatible and accepts multipart form data
-    with `file` + `model`. Authentication uses the OPENROUTER_API_KEY env var
-    that the app already configures.
+    The OpenRouter STT endpoint expects an `application/json` body with the audio
+    base64-encoded inside `input_audio.data` and an `input_audio.format` string.
+    Authentication uses the OPENROUTER_API_KEY env var that the app already
+    configures.
     """
     if not audio_bytes:
         return ""
@@ -216,22 +261,30 @@ def transcribe_audio_openrouter(audio_bytes: bytes, filename: str = "audio.webm"
         raise RuntimeError("OPENROUTER_API_KEY is not configured")
     model = _resolve_openrouter_model()
     language = _resolve_openrouter_language()
+    audio_format = _resolve_audio_format(filename, content_type)
 
     import httpx
 
-    files = {"file": (filename, audio_bytes, content_type)}
-    data = {"model": model}
+    payload = {
+        "model": model,
+        "input_audio": {
+            "data": base64.b64encode(audio_bytes).decode("ascii"),
+            "format": audio_format,
+        },
+    }
     if language:
-        data["language"] = language
+        payload["language"] = language
 
-    headers = {"Authorization": f"Bearer {api_key}"}
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
     try:
         with httpx.Client(timeout=60.0) as client:
             resp = client.post(
                 OPENROUTER_TRANSCRIPTIONS_URL,
                 headers=headers,
-                files=files,
-                data=data,
+                json=payload,
             )
     except httpx.HTTPError as e:
         logger.warning(f"OpenRouter transcription request failed: {e}")
