@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useState } from 'react'
+import React, { memo, useCallback, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
@@ -6,13 +6,14 @@ import { Check, Copy, Download } from 'lucide-react'
 
 function CodeBlock({ language, children }: { language?: string; children: React.ReactNode }) {
   const [copied, setCopied] = useState(false)
+  const codeRef = useRef<HTMLElement>(null)
 
   const handleCopy = useCallback(async () => {
-    const text = String(children).replace(/\n$/, '')
+    const text = codeRef.current?.textContent?.replace(/\n$/, '') ?? ''
     await navigator.clipboard.writeText(text)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
-  }, [children])
+  }, [])
 
   return (
     <div className="my-3 rounded-lg overflow-hidden border border-theme-border-light/50">
@@ -36,7 +37,7 @@ function CodeBlock({ language, children }: { language?: string; children: React.
         </button>
       </div>
       <pre className="p-4 overflow-x-auto bg-theme-code-bg text-sm">
-        <code className={`hljs${language ? ` language-${language}` : ''}`}>{children}</code>
+        <code ref={codeRef} className={`hljs${language ? ` language-${language}` : ''}`}>{children}</code>
       </pre>
     </div>
   )
