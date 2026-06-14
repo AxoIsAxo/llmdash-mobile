@@ -30,6 +30,7 @@ function injectUserCss(css: string) {
   const el = document.getElementById(STYLE_ID) as HTMLStyleElement | null
   if (el) {
     el.textContent = css || DEFAULT_CSS
+    ;(window as any).__syncPwaTheme?.()
   }
 }
 

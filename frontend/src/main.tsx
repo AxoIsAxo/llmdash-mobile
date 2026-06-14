@@ -25,11 +25,13 @@ function syncThemeColor() {
     meta.setAttribute('name', 'theme-color')
     document.head.appendChild(meta)
   }
-  const [r, g, b] = bg.split(' ').map(Number)
-  if (!isNaN(r)) {
-    meta.setAttribute('content', `rgb(${r} ${g} ${b})`)
+  const parts = bg.split(/\s+/).map(Number)
+  if (parts.length === 3 && !isNaN(parts[0])) {
+    meta.setAttribute('content', `rgb(${parts[0]},${parts[1]},${parts[2]})`)
   }
 }
+
+;(window as any).__syncPwaTheme = syncThemeColor
 
 syncThemeColor()
 
