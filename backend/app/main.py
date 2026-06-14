@@ -1954,6 +1954,28 @@ static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
 if os.path.isdir(static_dir):
     app.mount("/assets", StaticFiles(directory=os.path.join(static_dir, "assets")), name="assets")
 
+    # Serve PWA files as static files (must be before SPA catch-all)
+    @app.get("/sw.js", include_in_schema=False)
+    async def serve_sw():
+        sw_path = os.path.join(static_dir, "sw.js")
+        if os.path.exists(sw_path):
+            return FileResponse(sw_path, media_type="application/javascript")
+        raise HTTPException(404)
+
+    @app.get("/manifest.json", include_in_schema=False)
+    async def serve_manifest():
+        manifest_path = os.path.join(static_dir, "manifest.json")
+        if os.path.exists(manifest_path):
+            return FileResponse(manifest_path, media_type="application/manifest+json")
+        raise HTTPException(404)
+
+    @app.get("/icons/{icon_path:path}", include_in_schema=False)
+    async def serve_icon(icon_path: str):
+        icon_full = os.path.join(static_dir, "icons", icon_path)
+        if os.path.exists(icon_full) and os.path.isfile(icon_full):
+            return FileResponse(icon_full)
+        raise HTTPException(404)
+
     @app.get("/{full_path:path}", response_class=HTMLResponse)
     async def serve_spa(full_path: str):
         if full_path.startswith("api/") or full_path.startswith("data/"):
