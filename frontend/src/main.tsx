@@ -29,6 +29,8 @@ async function syncPwaTheme() {
   const hex = hexFromBg(bg)
   if (!hex) return
 
+  localStorage.setItem('llmdash-pwa-theme', hex)
+
   const oldMeta = document.querySelector('meta[name="theme-color"]')
   if (oldMeta) oldMeta.remove()
   const meta = document.createElement('meta')
