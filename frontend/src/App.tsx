@@ -557,7 +557,7 @@ function App() {
               }]
             })
           } else if (event.type === 'content') {
-            assistantContent = event.content || ''
+            assistantContent = event.content || assistantContent
             assistantReasoning = event.reasoning_content || assistantReasoning
             setMessages(prev => {
               const idx = prev.findIndex(m => m.id === (conv?.id || 0) * -1)
@@ -845,7 +845,7 @@ function App() {
               }]
             })
           } else if (event.type === 'content') {
-            assistantContent = event.content || ''
+            assistantContent = event.content || assistantContent
             assistantReasoning = event.reasoning_content || assistantReasoning
             setMessages(prev => {
               const idx = prev.findIndex(m => m.id === branch.id * -1)

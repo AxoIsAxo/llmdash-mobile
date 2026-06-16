@@ -1124,7 +1124,11 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
         "2. Use patch_user_css for targeted changes — provide enough surrounding lines in old_str to make it unique.\n"
         "3. Use append_user_css to add new rules.\n"
         "4. Never use set_user_css unless asked to fully reset or rewrite all styles.\n"
-        "5. If patch_user_css returns an error, call get_user_css again, find the correct block, and retry with a corrected old_str."
+        "5. If patch_user_css returns an error, call get_user_css again, find the correct block, and retry with a corrected old_str.\n"
+        "\n"
+        "IMPORTANT: Only respond to the user's most recent message. Previous questions in this conversation "
+        "have already been answered. Do not re-address old questions, repeat previous answers, or discuss "
+        "earlier topics unless the user explicitly brings them up again."
     )
     messages.insert(0, {"role": "system", "content": system_prompt})
 
@@ -1431,7 +1435,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                     raise
 
                 async for chunk in stream_iter:
-                    if chunk.content_delta and chunk.content_delta.strip():
+                    if chunk.content_delta:
                         accumulated_content += chunk.content_delta
                         await push_event("content_delta", content=chunk.content_delta)
                         await save_draft_progress()
@@ -1461,7 +1465,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                         break
                     seen_tool_signatures.add(current_sig)
 
-                    draft.content = accumulated_content or ""
+                    draft.content = accumulated_content or draft.content
                     draft.tool_calls_json = json.dumps([
                         {"id": tc["id"], "name": tc["name"], "arguments": tc["arguments"]}
                         for tc in final_tool_calls
@@ -1501,7 +1505,6 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                         await sess.commit()
                         messages.append({"role": "tool", "tool_call_id": tr["tool_call_id"], "tool_name": tr["tool_name"], "content": tr["content"]})
 
-                    accumulated_content = ""
                     accumulated_reasoning = ""
                     final_tool_calls = []
                     last_save_len = 0
@@ -1511,7 +1514,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                     # caps the number of rounds, so there's no infinite-loop risk.
                     next_tools = tools
                     async for chunk in provider.stream_chat_with_results(messages, next_tools, model, tool_results):
-                        if chunk.content_delta and chunk.content_delta.strip():
+                        if chunk.content_delta:
                             accumulated_content += chunk.content_delta
                             await push_event("content_delta", content=chunk.content_delta)
                             await save_draft_progress()
@@ -1527,7 +1530,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                         total_reasoning_tokens += chunk.reasoning_tokens
 
                 if streaming_msg_id is not None:
-                    draft.content = accumulated_content or ""
+                    draft.content = accumulated_content or draft.content
                     draft.reasoning_content = accumulated_reasoning or None
                     draft.status = "done"
                     draft.created_at = datetime.now(timezone.utc)
@@ -1558,6 +1561,8 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                     await push_event("content", content=accumulated_content, reasoning_content=accumulated_reasoning or None)
                 elif not final_tool_calls:
                     await push_event("error", error="Received an empty response from the model. Please verify your API key and model configuration.")
+                else:
+                    await push_event("content", content=draft.content or accumulated_content or "", reasoning_content=accumulated_reasoning or None)
 
                 if not db_messages and accumulated_content:
                     try:

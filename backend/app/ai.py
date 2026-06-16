@@ -651,8 +651,15 @@ class OpenAICompatibleProvider(AIProvider):
             entry = {"role": m["role"]}
             if m["role"] == "assistant":
                 has_tools = bool(m.get("tool_calls_json"))
-                entry["content"] = (m.get("content") or None) if not has_tools else None
-                if m.get("reasoning_content"):
+                content = m.get("content") or ""
+
+                if content and has_tools:
+                    text_entry = {"role": "assistant", "content": content}
+                    if m.get("reasoning_content"):
+                        text_entry["reasoning_content"] = m["reasoning_content"]
+                    converted.append(text_entry)
+                entry["content"] = content if not has_tools else None
+                if not has_tools and m.get("reasoning_content"):
                     entry["reasoning_content"] = m["reasoning_content"]
                 if has_tools:
                     tcs = json.loads(m["tool_calls_json"]) if isinstance(m["tool_calls_json"], str) else m["tool_calls_json"]
