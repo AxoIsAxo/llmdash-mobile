@@ -151,6 +151,12 @@ function App() {
   const [showCustomCss, setShowCustomCss] = useState(false)
   const [cssUndoToast, setCssUndoToast] = useState<{ previousCss: string } | null>(null)
   const cssPreviousRef = useRef<string>(DEFAULT_CSS)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => {
+    if (!input && textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+    }
+  }, [input])
   const [showModelPickerFooter, setShowModelPickerFooter] = useState(false)
   const [showModelPickerEmpty, setShowModelPickerEmpty] = useState(false)
   const closeModelPickers = () => { setShowModelPickerFooter(false); setShowModelPickerEmpty(false) }
@@ -1212,6 +1218,7 @@ function App() {
               </button>
               <div className="flex-1 relative">
                 <textarea
+                  ref={textareaRef}
                   value={input}
                   onChange={e => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
