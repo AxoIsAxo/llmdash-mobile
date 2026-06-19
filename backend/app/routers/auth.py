@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import config as app_config
 from ..database import get_db, User, Conversation, UserModelUsage
+from ..config_file import ConfigFileManager
 from ..models import (
     AuthSetupRequest, AuthLoginRequest, AuthRegisterRequest,
     UserResponse, UserUpdateRequest, RegistrationToggleRequest,
@@ -123,6 +124,10 @@ async def login(req: AuthLoginRequest, db: AsyncSession = Depends(get_db)):
     user = result.scalar_one_or_none()
     if not user or not User.verify_password(req.password, user.password_hash):
         raise HTTPException(401, "Invalid username or password")
+
+    if User.is_legacy_hash(user.password_hash):
+        user.password_hash = User.hash_password(req.password)
+        await db.commit()
 
     token = create_token(user.id, user.username, user.role)
     usage_by_model = await _get_user_model_usage(db, user.id)
@@ -309,32 +314,7 @@ async def get_registration(current_user: dict = Depends(require_role("owner", "a
 
 @router.post("/registration")
 async def toggle_registration(req: RegistrationToggleRequest, current_user: dict = Depends(require_role("owner", "admin"))):
-    env_path = ".env"
-    existing = {}
-    if os.path.exists(env_path):
-        with open(env_path) as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    k, v = line.split("=", 1)
-                    existing[k.strip()] = v.strip()
-
-    existing["REGISTRATION_ENABLED"] = "true" if req.enabled else "false"
-
-    lines = []
-    for k, v in existing.items():
-        if v:
-            if " " in v or "#" in v:
-                lines.append(f'{k}="{v}"')
-            else:
-                lines.append(f"{k}={v}")
-        else:
-            lines.append(f"{k}=")
-    lines.append("")
-
-    with open(env_path, "w") as f:
-        f.write("\n".join(lines))
-
+    ConfigFileManager.update(".env", {"REGISTRATION_ENABLED": "true" if req.enabled else "false"})
     app_config.reload_settings()
     return {"enabled": app_config.settings.registration_enabled}
 
@@ -346,32 +326,7 @@ async def get_ip_limit(current_user: dict = Depends(require_role("owner", "admin
 
 @router.post("/ip-limit", response_model=IpLimitResponse)
 async def set_ip_limit(req: IpLimitUpdateRequest, current_user: dict = Depends(require_role("owner", "admin"))):
-    env_path = ".env"
-    existing = {}
-    if os.path.exists(env_path):
-        with open(env_path) as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    k, v = line.split("=", 1)
-                    existing[k.strip()] = v.strip()
-
-    existing["IP_ACCOUNT_LIMIT"] = str(req.limit)
-
-    lines = []
-    for k, v in existing.items():
-        if v:
-            if " " in v or "#" in v:
-                lines.append(f'{k}="{v}"')
-            else:
-                lines.append(f"{k}={v}")
-        else:
-            lines.append(f"{k}=")
-    lines.append("")
-
-    with open(env_path, "w") as f:
-        f.write("\n".join(lines))
-
+    ConfigFileManager.update(".env", {"IP_ACCOUNT_LIMIT": str(req.limit)})
     app_config.reload_settings()
     return {"limit": app_config.settings.ip_account_limit}
 

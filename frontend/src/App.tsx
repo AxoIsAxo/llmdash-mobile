@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { api } from './api'
 import type { ModelConfig, Conversation, Message, StreamEvent, ToolCall, User, AuthStatus, GenerateStatus, AttachmentRecord } from './types'
 
@@ -21,6 +21,7 @@ import LoginPage from './components/LoginPage'
 import AdminPanel from './components/AdminPanel'
 import SubscriptionPage from './components/SubscriptionPage'
 import CustomCssPanel from './components/CustomCssPanel'
+import DocumentManager from './components/DocumentManager'
 import VoiceButton from './components/VoiceButton'
 import { DEFAULT_CSS } from './css-preset'
 
@@ -149,6 +150,7 @@ function App() {
   const [showAdmin, setShowAdmin] = useState(false)
   const [showSubscription, setShowSubscription] = useState(false)
   const [showCustomCss, setShowCustomCss] = useState(false)
+  const [showDocuments, setShowDocuments] = useState(false)
   const [cssUndoToast, setCssUndoToast] = useState<{ previousCss: string } | null>(null)
   const cssPreviousRef = useRef<string>(DEFAULT_CSS)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -256,6 +258,22 @@ function App() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  useEffect(() => {
+    setExpandedToolCalls(prev => {
+      let updated = false
+      const next = new Set(prev)
+      for (const msg of messages) {
+        if (msg.role === 'tool' && msg.tool_call_id && !next.has(msg.tool_call_id)) {
+          if (msg.content?.startsWith('SVG_RENDER:') || msg.content?.startsWith('HTML_RENDER:')) {
+            next.add(msg.tool_call_id)
+            updated = true
+          }
+        }
+      }
+      return updated ? next : prev
+    })
   }, [messages])
 
   useEffect(() => {
@@ -409,9 +427,14 @@ function App() {
           }
         } else if (event.type === 'tool_start') {
           if (event.id) setExecutingTools(prev => new Set(prev).add(event.id!))
-        } else if (event.type === 'tool_result') {
-          if (event.id) setExecutingTools(prev => { const next = new Set(prev); next.delete(event.id!); return next })
-          if (event.name === 'set_user_css' || event.name === 'patch_user_css' || event.name === 'append_user_css') {
+          } else if (event.type === 'tool_result') {
+            if (event.id) {
+              setExecutingTools(prev => { const next = new Set(prev); next.delete(event.id!); return next })
+              if (event.name === 'render_svg' || event.name === 'render_html') {
+                setExpandedToolCalls(prev => new Set(prev).add(event.id!))
+              }
+            }
+            if (event.name === 'set_user_css' || event.name === 'patch_user_css' || event.name === 'append_user_css') {
             const authoritative = extractNewCssMarker(event.result)
             if (authoritative !== null) {
               const cur = (document.getElementById(STYLE_ID) as HTMLStyleElement)?.textContent || DEFAULT_CSS
@@ -897,7 +920,12 @@ function App() {
           } else if (event.type === 'tool_start') {
             if (event.id) setExecutingTools(prev => new Set(prev).add(event.id!))
           } else if (event.type === 'tool_result') {
-            if (event.id) setExecutingTools(prev => { const next = new Set(prev); next.delete(event.id!); return next })
+            if (event.id) {
+              setExecutingTools(prev => { const next = new Set(prev); next.delete(event.id!); return next })
+              if (event.name === 'render_svg' || event.name === 'render_html') {
+                setExpandedToolCalls(prev => new Set(prev).add(event.id!))
+              }
+            }
             if (event.name === 'set_user_css' || event.name === 'patch_user_css' || event.name === 'append_user_css') {
               const authoritative = extractNewCssMarker(event.result)
               if (authoritative !== null) {
@@ -1032,6 +1060,9 @@ function App() {
               <Shield className="w-4 h-4 text-theme-accent-text" /> Admin Panel
             </button>
           )}
+          <button onClick={() => setShowDocuments(true)} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-theme-bg-elevated rounded-lg text-sm">
+            <FileText className="w-4 h-4 text-theme-accent-text" /> Documents
+          </button>
           <button onClick={() => setShowSubscription(true)} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-theme-bg-elevated rounded-lg text-sm">
             <CreditCard className="w-4 h-4 text-theme-accent-text" /> Subscription
           </button>
@@ -1165,6 +1196,7 @@ function App() {
               <div ref={messagesEndRef} />
             </div>
           )}
+          {messages.length > 0 && <ToolExecutionBar executingTools={executingTools} messages={messages} />}
         </div>
 
         {/* Input */}
@@ -1349,6 +1381,14 @@ function App() {
         />
       )}
 
+      {/* Document Manager Modal */}
+      {showDocuments && (
+        <DocumentManager
+          currentUser={currentUser}
+          onClose={() => setShowDocuments(false)}
+        />
+      )}
+
       {/* AI CSS Undo Toast */}
       {cssUndoToast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-theme-bg-elevated border border-theme-border-light rounded-xl pl-4 pr-2 py-2 shadow-2xl">
@@ -1372,6 +1412,191 @@ function App() {
   )
 }
 
+// --- Tool Execution Indicator ---
+
+function ToolExecutionBar({ executingTools, messages }: {
+  executingTools: Set<string>
+  messages: Message[]
+}) {
+  const currentTools = useMemo(() => {
+    if (executingTools.size === 0) return []
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i]
+      if (msg.role === 'assistant' && msg.tool_calls_json) {
+        return msg.tool_calls_json.filter(tc => executingTools.has(tc.id)).map(tc => ({
+          id: tc.id,
+          name: tc.name,
+        }))
+      }
+    }
+    return []
+  }, [executingTools, messages])
+
+  if (currentTools.length === 0) return null
+
+  return (
+    <div className="sticky bottom-0 z-10 bg-theme-bg-secondary/90 backdrop-blur-sm border-t border-theme-focus-ring/15 px-4 py-2.5">
+      <div className="max-w-4xl mx-auto flex items-center gap-2 text-sm">
+        <span className="relative flex h-3 w-3">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-theme-accent-text opacity-75" />
+          <span className="relative inline-flex rounded-full h-3 w-3 bg-theme-accent-text" />
+        </span>
+        <span className="text-theme-text-secondary font-medium">AI is using tools</span>
+        <div className="flex gap-1.5">
+          {currentTools.map(t => (
+            <span
+              key={t.id}
+              className="font-mono text-xs bg-theme-bg-elevated border border-theme-border-light px-2 py-0.5 rounded text-theme-accent-text"
+            >
+              {t.name}
+            </span>
+          ))}
+        </div>
+        <span className="flex gap-0.5">
+          <span className="w-1 h-1 rounded-full bg-theme-muted animate-bounce" style={{ animationDelay: '0ms' }} />
+          <span className="w-1 h-1 rounded-full bg-theme-muted animate-bounce" style={{ animationDelay: '150ms' }} />
+          <span className="w-1 h-1 rounded-full bg-theme-muted animate-bounce" style={{ animationDelay: '300ms' }} />
+        </span>
+      </div>
+    </div>
+  )
+}
+
+// --- Tool Result Content ---
+
+function ToolResultContent({ content, toolCall, setSidePanel }: {
+  content: string
+  toolCall: ToolCall
+  setSidePanel: (panel: SidePanel | null) => void
+}) {
+  const downloadMatch = content.match(/Download:\s*(\/api\/files\/\S+)/)
+
+  async function handleDownload(url: string) {
+    try {
+      const token = localStorage.getItem('llmdash_token')
+      const headers: Record<string, string> = {}
+      if (token) headers['Authorization'] = `Bearer ${token}`
+      const res = await fetch(url, { headers })
+      if (!res.ok) throw new Error(`Download failed: ${res.status}`)
+      const blob = await res.blob()
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = url.split('/').pop() || 'download'
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+    } catch (e) {
+      console.error('Download error:', e)
+    }
+  }
+
+  if (content.startsWith('SVG_RENDER:')) {
+    const rest = content.slice(11)
+    const parenIdx = rest.indexOf(' (')
+    const b64 = parenIdx > 0 ? rest.slice(0, parenIdx) : rest
+    const svg = atob(b64)
+    return (
+      <div className="max-w-full rounded-xl border border-theme-border-light bg-theme-bg-secondary overflow-hidden">
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-theme-bg-elevated text-xs text-theme-subtle border-b border-theme-border-light">
+          <Image className="w-3.5 h-3.5 text-theme-accent-text" />
+          <span>Vector Graphic</span>
+        </div>
+        <div className="p-3 flex justify-center bg-white dark:bg-gray-800" dangerouslySetInnerHTML={{ __html: svg }} />
+      </div>
+    )
+  }
+
+  if (content.startsWith('HTML_RENDER:') && toolCall.name !== 'edit_document') {
+    const html = atob(content.slice(12))
+    return (
+      <div className="max-w-full rounded-xl overflow-hidden border border-theme-border-light bg-theme-bg-secondary">
+        <div className="flex items-center gap-2 px-3 py-2 bg-theme-bg-elevated text-xs text-theme-subtle border-b border-theme-border-light">
+          <Eye className="w-3.5 h-3.5" /> HTML Preview
+        </div>
+        <iframe srcDoc={html} sandbox="allow-scripts" className="w-full h-96 bg-theme-preview-bg" title="HTML Preview" />
+      </div>
+    )
+  }
+
+  if (toolCall.name === 'edit_document') {
+    const htmlRenderMatch = content.match(/HTML_RENDER:([A-Za-z0-9+/=]+)/)
+    const visualFormat = htmlRenderMatch !== null
+    const docFormat = (toolCall.arguments.format as string) || ''
+    const docFilename = (toolCall.arguments.filename as string) || ''
+    const docContent = (toolCall.arguments.content as string) || ''
+    const isCode = ['py','js','ts','html','css','json','xml','yaml','toml','sh','rs','go','java','c','cpp','sql','r','rb','php','lua','swift','kt','tf','ini','cfg','env','Dockerfile','Makefile'].includes(docFormat)
+    return (
+      <div className="max-w-3xl rounded-xl border border-theme-border-light bg-theme-bg-elevated overflow-hidden">
+        <div className="flex items-center gap-2 px-3 py-2 bg-theme-bg-elevated text-xs text-theme-subtle border-b border-theme-border-light">
+          <FileText className="w-3.5 h-3.5 text-theme-accent-text" />
+          <span className="font-mono text-theme-accent-dim">{docFilename}.{docFormat}</span>
+          <span className="text-theme-muted">({docFormat.toUpperCase()})</span>
+        </div>
+        {visualFormat ? (
+          <div className="p-3 bg-theme-bg-secondary flex flex-col items-center gap-2">
+            <p className="text-xs text-theme-subtle">Document preview available</p>
+            <button
+              onClick={() => setSidePanel({
+                html: atob(htmlRenderMatch![1]),
+                filename: docFilename,
+                format: docFormat,
+              })}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-theme-accent hover:bg-theme-accent-hover rounded-lg text-sm font-medium transition-colors cursor-pointer border-0"
+            >
+              <Eye className="w-4 h-4" />
+              Open Preview
+            </button>
+          </div>
+        ) : docContent ? (
+          <div className="p-3 bg-theme-bg-secondary">
+            {isCode ? (
+              <MarkdownRenderer content={'```' + docFormat + '\n' + docContent.slice(0, 8000) + (docContent.length > 8000 ? '\n\n... (truncated)' : '') + '\n```'} />
+            ) : (
+              <pre className="text-xs text-theme-text-secondary whitespace-pre-wrap font-mono max-h-96 overflow-y-auto">
+                {docContent.length > 8000 ? docContent.slice(0, 8000) + '\n\n... (truncated)' : docContent}
+              </pre>
+            )}
+          </div>
+        ) : null}
+        <div className="px-3 py-2 bg-theme-bg-elevated/50 text-xs text-theme-muted border-t border-theme-border-light/50 truncate">
+          {content.replace(/\n?HTML_RENDER:[A-Za-z0-9+/=]+/, '').trim()}
+        </div>
+        {downloadMatch && (
+          <div className="px-3 pb-2 bg-theme-bg-elevated/50">
+            <button
+              onClick={() => handleDownload(downloadMatch[1])}
+              className="inline-flex items-center gap-2 px-3 py-1.5 bg-theme-accent hover:bg-theme-accent-hover rounded-lg text-xs font-medium transition-colors cursor-pointer border-0"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Download {downloadMatch[1].split('/').pop()}
+            </button>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  const cleaned = stripNewCssLineForDisplay(content, toolCall.name)
+  return (
+    <div className="rounded-xl bg-theme-bg-elevated/50 border border-theme-border-light/50 px-4 py-2 max-h-96 overflow-y-auto">
+      <pre className="text-xs text-theme-text-secondary whitespace-pre-wrap font-mono">
+        {cleaned}
+      </pre>
+      {downloadMatch && (
+        <div className="mt-2">
+          <button
+            onClick={() => handleDownload(downloadMatch[1])}
+            className="inline-flex items-center gap-2 px-3 py-1.5 bg-theme-accent hover:bg-theme-accent-hover rounded-lg text-xs font-medium transition-colors cursor-pointer border-0"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Download {downloadMatch[1].split('/').pop()}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // --- Message Bubble ---
 
 function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCopy, copiedId, executingTools, expandedToolCalls, onToggleToolCall, setSidePanel }: {
@@ -1387,26 +1612,9 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
   onToggleToolCall: (id: string) => void
   setSidePanel: (panel: SidePanel | null) => void
 }) {
-  if (message.role === 'tool') {
-    const isWebTool = message.tool_name === 'web_search' || message.tool_name === 'web_scrape'
-    let matchedWebCall = false
-    if (!isWebTool && message.tool_call_id) {
-      for (let i = msgIndex - 1; i >= 0; i--) {
-        const prev = messages[i]
-        if (prev?.role === 'assistant' && prev.tool_calls_json) {
-          const tc = prev.tool_calls_json.find(t => t.id === message.tool_call_id)
-          if (tc) {
-            if (tc.name === 'web_search' || tc.name === 'web_scrape') matchedWebCall = true
-            break
-          }
-        }
-      }
-    }
-    if (isWebTool || matchedWebCall) return null
-  }
+  if (message.role === 'tool') return null
 
   const isUser = message.role === 'user'
-  const isTool = message.role === 'tool'
   const isAssistant = message.role === 'assistant'
   const toolCalls = message.tool_calls_json
   const [thinkingExpanded, setThinkingExpanded] = useState(false)
@@ -1418,167 +1626,6 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
       setThinkingExpanded(false)
     }
   }, [message.status, message.reasoning_content])
-
-  if (isTool && message.content) {
-    const isHtmlRender = message.content.startsWith('HTML_RENDER:')
-    const downloadMatch = message.content.match(/Download:\s*(\/api\/files\/\S+)/)
-    if (isHtmlRender) {
-      const html = atob(message.content.slice(12))
-      return (
-        <div>
-          <div className="flex justify-start">
-            <div className="max-w-full rounded-xl overflow-hidden border border-theme-border-light bg-theme-bg-secondary">
-              <div className="flex items-center gap-2 px-3 py-2 bg-theme-bg-elevated text-xs text-theme-subtle border-b border-theme-border-light">
-                <Eye className="w-3.5 h-3.5" /> HTML Preview
-              </div>
-              <iframe srcDoc={html} sandbox="allow-scripts" className="w-full h-96 bg-theme-preview-bg" title="HTML Preview" />
-            </div>
-          </div>
-        </div>
-      )
-    }
-    if (message.tool_name === 'edit_document') {
-      const htmlRenderMatch = message.content.match(/HTML_RENDER:([A-Za-z0-9+/=]+)/)
-      const visualFormat = htmlRenderMatch !== null
-
-      let docFormat = ''
-      let docFilename = ''
-      let docContent = ''
-      if (msgIndex > 0) {
-        const prevMsg = messages[msgIndex - 1]
-        if (prevMsg?.role === 'assistant' && prevMsg.tool_calls_json) {
-          const matchingCall = prevMsg.tool_calls_json.find(tc => tc.id === message.tool_call_id)
-          if (matchingCall) {
-            docFormat = (matchingCall.arguments.format as string) || ''
-            docFilename = (matchingCall.arguments.filename as string) || ''
-            docContent = (matchingCall.arguments.content as string) || ''
-          }
-        }
-      }
-      const isCode = ['py','js','ts','html','css','json','xml','yaml','toml','sh','rs','go','java','c','cpp','sql','r','rb','php','lua','swift','kt','tf','ini','cfg','env','Dockerfile','Makefile'].includes(docFormat)
-      return (
-        <div>
-          <div className="flex justify-start">
-            <div className="max-w-3xl rounded-xl border border-theme-border-light bg-theme-bg-elevated overflow-hidden">
-              <div className="flex items-center gap-2 px-3 py-2 bg-theme-bg-elevated text-xs text-theme-subtle border-b border-theme-border-light">
-                <FileText className="w-3.5 h-3.5 text-theme-accent-text" />
-                <span className="font-mono text-theme-accent-dim">{docFilename}.{docFormat}</span>
-                <span className="text-theme-muted">({docFormat.toUpperCase()})</span>
-              </div>
-              {visualFormat ? (
-                <div className="p-3 bg-theme-bg-secondary flex flex-col items-center gap-2">
-                  <p className="text-xs text-theme-subtle">Document preview available</p>
-                  <button
-                    onClick={() => setSidePanel({
-                      html: atob(htmlRenderMatch![1]),
-                      filename: docFilename,
-                      format: docFormat,
-                    })}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-theme-accent hover:bg-theme-accent-hover rounded-lg text-sm font-medium transition-colors cursor-pointer border-0"
-                  >
-                    <Eye className="w-4 h-4" />
-                    Open Preview
-                  </button>
-                </div>
-              ) : docContent ? (
-                <div className="p-3 bg-theme-bg-secondary">
-                  {isCode ? (
-                    <MarkdownRenderer content={'```' + docFormat + '\n' + docContent.slice(0, 8000) + (docContent.length > 8000 ? '\n\n... (truncated)' : '') + '\n```'} />
-                  ) : (
-                    <pre className="text-xs text-theme-text-secondary whitespace-pre-wrap font-mono max-h-96 overflow-y-auto">
-                      {docContent.length > 8000 ? docContent.slice(0, 8000) + '\n\n... (truncated)' : docContent}
-                    </pre>
-                  )}
-                </div>
-              ) : null}
-              <div className="px-3 py-2 bg-theme-bg-elevated/50 text-xs text-theme-muted border-t border-theme-border-light/50 truncate">
-                {message.content.replace(/\n?HTML_RENDER:[A-Za-z0-9+/=]+/, '').trim()}
-              </div>
-              {downloadMatch && (
-                <div className="px-3 pb-2 bg-theme-bg-elevated/50">
-                  <button
-                    onClick={async () => {
-                      try {
-                        const token = localStorage.getItem('llmdash_token');
-                        const headers: Record<string, string> = {};
-                        if (token) headers['Authorization'] = `Bearer ${token}`;
-                        const res = await fetch(downloadMatch![1], { headers });
-                        if (!res.ok) throw new Error(`Download failed: ${res.status}`);
-                        const blob = await res.blob();
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = downloadMatch![1].split('/').pop() || 'download';
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(url);
-                      } catch (e) {
-                        console.error('Download error:', e);
-                      }
-                    }}
-                    className="inline-flex items-center gap-2 px-3 py-1.5 bg-theme-accent hover:bg-theme-accent-hover rounded-lg text-xs font-medium transition-colors cursor-pointer border-0"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    Download {downloadMatch![1].split('/').pop()}
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )
-    }
-    return (
-      <div>
-        <div className="flex justify-start">
-          <div className="max-w-2xl rounded-xl bg-theme-bg-elevated/50 border border-theme-border-light/50 px-4 py-2">
-            <div className="flex items-center gap-2 text-xs text-theme-muted mb-1">
-              {message.tool_name === 'web_search' && <Globe className="w-3 h-3" />}
-              {message.tool_name === 'web_scrape' && <Search className="w-3 h-3" />}
-              {message.tool_name === 'run_command' && <Terminal className="w-3 h-3" />}
-              {message.tool_name === 'render_html' && <Eye className="w-3 h-3" />}
-              <span className="font-mono">{message.tool_name}</span>
-            </div>
-            <pre className="text-xs text-theme-text-secondary whitespace-pre-wrap font-mono">
-              {(() => {
-                const cleaned = stripNewCssLineForDisplay(message.content, message.tool_name)
-                return cleaned.length > 500 ? cleaned.slice(0, 500) + '...' : cleaned
-              })()}
-            </pre>
-            {downloadMatch && (
-              <button
-                onClick={async () => {
-                  try {
-                    const token = localStorage.getItem('llmdash_token');
-                    const headers: Record<string, string> = {};
-                    if (token) headers['Authorization'] = `Bearer ${token}`;
-                    const res = await fetch(downloadMatch[1], { headers });
-                    if (!res.ok) throw new Error(`Download failed: ${res.status}`);
-                    const blob = await res.blob();
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = downloadMatch[1].split('/').pop() || 'download';
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                  } catch (e) {
-                    console.error('Download error:', e);
-                  }
-                }}
-                className="mt-2 inline-flex items-center gap-2 px-3 py-1.5 bg-theme-accent hover:bg-theme-accent-hover rounded-lg text-xs font-medium transition-colors cursor-pointer border-0"
-              >
-                <Download className="w-3.5 h-3.5" />
-                Download {downloadMatch[1].split('/').pop()}
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    )
-  }
 
   if (toolCalls && Array.isArray(toolCalls) && toolCalls.length > 0) {
     return (
@@ -1617,41 +1664,55 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
               {toolCalls.map((tc, i) => {
                 const isExecuting = executingTools.has(tc.id)
                 const resultMsg = messages.find(m => m.role === 'tool' && m.tool_call_id === tc.id)
-                const isCollapsibleWebCall = !isExecuting && (tc.name === 'web_search' || tc.name === 'web_scrape') && !!resultMsg
-                const callExpanded = isCollapsibleWebCall && expandedToolCalls.has(tc.id)
+                const hasResult = !isExecuting && !!resultMsg
+                const callExpanded = hasResult && expandedToolCalls.has(tc.id)
                 const summary = isExecuting
                   ? 'executing...'
-                  : isCollapsibleWebCall
-                    ? (() => {
-                        const count = (resultMsg!.content!.match(/^\d+\.\s/gm) || []).length
-                        return count > 0 ? `${count} result${count === 1 ? '' : 's'}` : 'done'
-                      })()
+                  : hasResult
+                    ? (tc.name === 'web_search' || tc.name === 'web_scrape')
+                      ? (() => {
+                          const count = (resultMsg!.content!.match(/^\d+\.\s/gm) || []).length
+                          return count > 0 ? `${count} result${count === 1 ? '' : 's'}` : 'done'
+                        })()
+                      : 'done'
                     : 'done'
                 return (
                   <div key={i} className="flex flex-col">
                     <button
-                      onClick={() => { if (isCollapsibleWebCall) onToggleToolCall(tc.id) }}
-                      disabled={!isCollapsibleWebCall}
-                      className={`flex items-center gap-2 px-3 py-2 bg-theme-bg-elevated rounded-lg border text-xs ${isExecuting ? 'border-theme-focus-ring/40 animate-pulse' : 'border-theme-border-light'} ${isCollapsibleWebCall ? 'cursor-pointer hover:bg-theme-bg-hover' : 'cursor-default'}`}
+                      onClick={() => { if (hasResult) onToggleToolCall(tc.id) }}
+                      disabled={!hasResult}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-all ${
+                        isExecuting
+                          ? 'bg-theme-accent/10 border-theme-accent-text/40 text-theme-accent-text shadow-sm'
+                          : 'bg-theme-bg-elevated border-theme-border-light hover:bg-theme-bg-hover'
+                      } ${hasResult ? 'cursor-pointer' : 'cursor-default'}`}
                     >
                       {isExecuting ? (
-                        <Loader2 className="w-3.5 h-3.5 text-theme-accent-text animate-spin" />
+                        <span className="relative flex h-3 w-3">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-theme-accent-text opacity-75" />
+                          <span className="relative inline-flex rounded-full h-3 w-3 bg-theme-accent-text" />
+                        </span>
                       ) : (
                         <Bot className="w-3.5 h-3.5 text-theme-accent-text" />
                       )}
-                      <span className="font-mono text-theme-accent-dim">{tc.name}</span>
+                      <span className="font-mono">{tc.name}</span>
                       <span className={isExecuting ? 'text-theme-accent-text' : 'text-theme-muted'}>{summary}</span>
-                      {isCollapsibleWebCall && (
+                      {isExecuting && (
+                        <span className="flex gap-0.5 ml-1">
+                          <span className="w-0.5 h-0.5 rounded-full bg-theme-accent-text animate-bounce" style={{ animationDelay: '0ms' }} />
+                          <span className="w-0.5 h-0.5 rounded-full bg-theme-accent-text animate-bounce" style={{ animationDelay: '150ms' }} />
+                          <span className="w-0.5 h-0.5 rounded-full bg-theme-accent-text animate-bounce" style={{ animationDelay: '300ms' }} />
+                        </span>
+                      )}
+                      {hasResult && (
                         callExpanded
                           ? <ChevronDown className="w-3 h-3 ml-1 text-theme-muted" />
                           : <ChevronRight className="w-3 h-3 ml-1 text-theme-muted" />
                       )}
                     </button>
-                    {isCollapsibleWebCall && callExpanded && resultMsg && (
-                      <div className="mt-1 rounded-xl bg-theme-bg-elevated/50 border border-theme-border-light/50 px-4 py-2 max-h-96 overflow-y-auto">
-                        <pre className="text-xs text-theme-text-secondary whitespace-pre-wrap font-mono">
-                          {resultMsg.content}
-                        </pre>
+                    {callExpanded && resultMsg && (
+                      <div className="mt-1">
+                        <ToolResultContent content={resultMsg.content || ''} toolCall={tc} setSidePanel={setSidePanel} />
                       </div>
                     )}
                   </div>

@@ -15,13 +15,15 @@ from fastapi import FastAPI, Depends, HTTPException, Query, APIRouter, Request, 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
 from sqlalchemy import select, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import httpx
 
 from . import config as app_config
-from .database import init_db, get_db, async_session, ModelConfig, Conversation, Message, User, TokenUsageLog, UserModelUsage, SubscriptionPlan, PlanModelLimit, UserSubscription
+from .database import init_db, get_db, async_session, ModelConfig, Conversation, Message, User, TokenUsageLog, UserModelUsage, SubscriptionPlan, PlanModelLimit, UserSubscription, Document
 from .models import (
     ModelConfigCreate, ModelConfigUpdate, ModelConfigResponse,
     ConversationCreate, ConversationResponse,
@@ -33,6 +35,12 @@ from .models import (
 )
 from .ai import get_provider, ToolDef
 from .tools import get_tool_definitions, execute_tool
+from .skills import register_builtins
+from .skills.registry import skill_registry
+from .skills.integration import build_system_prompt
+from .config_file import ConfigFileManager
+from .sse import active_generations, push_to_queues, cleanup_generation
+from .model_capabilities import detect_audio_enabled
 from .sandbox import is_docker_available
 from .ocr import process_uploaded_file, is_allowed_file, is_image_file, is_audio_file, ocr_image, IMAGE_EXTENSIONS, is_ocr_available
 from .whisper_stt import transcribe_audio, transcribe_audio_openrouter, VALID_PROVIDERS, DEFAULT_PROVIDER, DEFAULT_OPENROUTER_MODEL
@@ -42,30 +50,6 @@ from .routers.subscriptions import router as subscriptions_router
 
 router = APIRouter(prefix="/api")
 
-active_generations: dict[int, dict] = {}
-"""Per-conversation active generation state.
-Schema: {conv_id: {"queues": set[asyncio.Queue], "task": asyncio.Task, "message_id": int}}"""
-
-
-def _push_to_queues(conv_id: int, event: str):
-    gen = active_generations.get(conv_id)
-    if gen:
-        for q in list(gen.get("queues", [])):
-            try:
-                q.put_nowait(event)
-            except asyncio.QueueFull:
-                pass
-
-
-def _cleanup_generation(conv_id: int):
-    gen = active_generations.pop(conv_id, None)
-    if gen:
-        for q in gen.get("queues", []):
-            try:
-                q.put_nowait("data: [DONE]\n\n")
-            except Exception:
-                pass
-
 
 def get_active_provider_configs():
     return load_provider_configs()
@@ -74,6 +58,7 @@ def get_active_provider_configs():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    register_builtins()
     async with async_session() as sess:
         result = await sess.execute(
             select(Message).where(Message.status == "generating")
@@ -87,6 +72,11 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="LLMDash", version="1.0.0", lifespan=lifespan)
+
+limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
+app.state.limiter = limiter
+app.add_exception_handler(429, _rate_limit_exceeded_handler)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -105,6 +95,8 @@ async def coi_middleware(request: Request, call_next):
 
 app.include_router(auth_router)
 app.include_router(subscriptions_router)
+from .skills.router import router as skills_router
+app.include_router(skills_router)
 
 
 # --- Model Config (admin only) ---
@@ -229,91 +221,6 @@ VISION_MODEL_PATTERNS = [
     "yi-vision", "yi-vl",
 ]
 VISION_MODEL_LOWERS = [p.lower() for p in VISION_MODEL_PATTERNS]
-
-AUDIO_MODEL_PATTERNS = []  # deprecated: audio capability is now autodetected
-AUDIO_MODEL_LOWERS = []  # deprecated: audio capability is now autodetected
-_RUNTIME_AUDIO_CACHE: dict[tuple[str, str], bool] = {}
-
-
-def _probe_audio_support(base_url: str, api_key: str, model_name: str) -> bool:
-    """Last-resort autodetect: send a 1-frame wav to the chat completions
-    endpoint and inspect the error. Returns True if the model accepts audio
-    (error is about an invalid format/payload, not about an unsupported
-    modality). Returns False if the model rejects audio input entirely.
-    Cached at the caller. Network failures return False (safe default).
-    """
-    import base64 as _b64
-    import struct
-    # Minimal valid 16kHz mono 16-bit PCM wav with 1 frame (32 ms of silence)
-    sample_rate = 16000
-    pcm = b"\x00\x00"
-    byte_rate = sample_rate * 1 * 2
-    data_size = len(pcm)
-    fmt = struct.pack("<4sIHHIIHH", b"fmt ", 16, 1, 1, sample_rate, byte_rate, 2, 16)
-    data = struct.pack("<4sI", b"data", data_size) + pcm
-    riff = struct.pack("<4sI", b"RIFF", 4 + len(fmt) + len(data)) + b"WAVE"
-    wav = riff + fmt + data
-    b64 = _b64.b64encode(wav).decode("ascii")
-
-    async def _do_probe():
-        async with httpx.AsyncClient(timeout=8) as client:
-            return await client.post(
-                f"{base_url.rstrip('/')}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": model_name,
-                    "messages": [{
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": "ping"},
-                            {"type": "input_audio", "input_audio": {"data": b64, "format": "wav"}},
-                        ],
-                    }],
-                    "max_tokens": 1,
-                },
-            )
-
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-                resp = ex.submit(lambda: asyncio.run(_do_probe())).result(timeout=10)
-        else:
-            resp = loop.run_until_complete(_do_probe())
-    except Exception as e:
-        logger.debug(f"audio probe network failure for {model_name}: {e}")
-        return False
-
-    if resp.status_code == 200:
-        return True
-    try:
-        body = resp.json()
-    except Exception:
-        body = {}
-    err_text = (resp.text or "").lower()
-    err_msg = ""
-    if isinstance(body, dict):
-        err = body.get("error", {}) or {}
-        if isinstance(err, dict):
-            err_msg = (err.get("message", "") or err.get("param", "") or "").lower()
-    full = err_msg + " " + err_text
-    # Provider rejected because the model doesn't support audio input at all
-    unsupported_markers = (
-        "doesn't support audio", "does not support audio",
-        "audio input is not supported", "no audio support",
-        "audio modality not supported", "unsupported modality",
-    )
-    if any(m in full for m in unsupported_markers):
-        return False
-    # Any other error → the model likely accepts audio (rejected our payload
-    # for some other reason like rate limit, bad token, etc.). Treat as
-    # supported so the real chat request can construct a proper payload.
-    return True
-
 
 def _detect_model_type(model_id: str, raw_entry: dict | None = None) -> str:
     if raw_entry:
@@ -696,40 +603,9 @@ async def list_env_vars(current_user: dict = Depends(require_role("owner", "admi
 
 @router.post("/config/env")
 async def update_env_vars(req: EnvUpdateRequest, current_user: dict = Depends(require_role("owner", "admin"))):
-    env_path = "data/.env"
-    os.makedirs("data", exist_ok=True)
-    existing = {}
-    if os.path.exists(env_path) and not os.path.isdir(env_path):
-        try:
-            with open(env_path) as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith("#") and "=" in line:
-                        k, v = line.split("=", 1)
-                        existing[k.strip()] = v.strip()
-        except (OSError, IOError):
-            existing = {}
-
-    for key, value in req.updates.items():
-        if key in app_config.ENV_VAR_MAP or key in existing:
-            existing[key] = value
-        else:
-            existing[key] = value
-
-    lines = []
-    for k, v in existing.items():
-        if v:
-            if " " in v or "#" in v:
-                lines.append(f'{k}="{v}"')
-            else:
-                lines.append(f"{k}={v}")
-        else:
-            lines.append(f"{k}=")
-    lines.append("")
-
-    with open(env_path, "w") as f:
-        f.write("\n".join(lines))
-
+    existing = ConfigFileManager.read("data/.env")
+    existing.update(req.updates)
+    ConfigFileManager.write("data/.env", existing)
     app_config.reload_settings()
     return {"status": "updated", "updated_keys": list(req.updates.keys())}
 
@@ -807,33 +683,7 @@ async def update_upload_settings(req: FileUploadSettingsUpdate, current_user: di
         updates["WHISPER_OPENROUTER_MODEL"] = openrouter_model
 
     if updates:
-        env_path = "data/.env"
-        os.makedirs("data", exist_ok=True)
-        existing = {}
-        if os.path.exists(env_path) and not os.path.isdir(env_path):
-            try:
-                with open(env_path) as f:
-                    for line in f:
-                        line = line.strip()
-                        if line and not line.startswith("#") and "=" in line:
-                            k, v = line.split("=", 1)
-                            existing[k.strip()] = v.strip()
-            except (OSError, IOError):
-                existing = {}
-        for key, value in updates.items():
-            existing[key] = value
-        lines = []
-        for k, v in existing.items():
-            if v:
-                if " " in v or "#" in v:
-                    lines.append(f'{k}="{v}"')
-                else:
-                    lines.append(f"{k}={v}")
-            else:
-                lines.append(f"{k}=")
-        lines.append("")
-        with open(env_path, "w") as f:
-            f.write("\n".join(lines))
+        ConfigFileManager.update("data/.env", updates)
         app_config.reload_settings()
 
     return FileUploadSettings(
@@ -1082,118 +932,13 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
             entry["reasoning_content"] = m.reasoning_content
         messages.append(entry)
 
-    now = datetime.now(timezone.utc)
-    system_prompt = (
-        f"You are {model.name}, a helpful AI assistant running on LLMDash.\n"
-        f"The current UTC date and time is {now.strftime('%Y-%m-%d %H:%M:%S')} UTC "
-        f"({now.strftime('%A, %B %d, %Y')}).\n"
-        "You have access to built-in tools including web_search which queries SearXNG for real-time "
-        "information from the internet. Use web_search when the user asks about current events, "
-        "recent news, live data, or any topic where your training data may be outdated.\n"
-        "When searching the web, use specific and concise queries. Cite sources when providing "
-        "information obtained from web searches.\n"
-        "You can also create and edit documents, render HTML, and execute code in a sandboxed "
-        "environment. Be thorough, accurate, and helpful.\n"
-        "\n"
-        "CODE AND SCRIPTS: Always display code blocks or full scripts directly inline in your "
-        "response using fenced code blocks with language identifiers (```python, ```bash, etc.). "
-        "Never write code to a separate file and offer a download link unless the user explicitly "
-        "asks for a download or a file artifact. When the user says \"write a script\", \"create a "
-        "program\", \"show me the code\", or similar, put the code directly in your reply — do not "
-        "create a document or file for it. The user can see and copy the code from your message.\n"
-        "Only use edit_document or render_html to produce a downloadable file when the user "
-        "explicitly requests it with words like \"save to file\", \"download\", \"export\", "
-        "\"create a file\", or when the artifact is a non-code format such as an HTML page, "
-        "a rendered chart, or a binary resource.\n"
-        "IMPORTANT: Always invoke tools through the platform's native tool-calling "
-        "interface (the tools you were given). Never output raw `<tool_call>...</tool_call>` "
-        "XML/JSON in your visible reply — the chat renderer does not interpret those "
-        "tags and they will appear as broken text to the user.\n"
-        "\n"
-        "The user can ask you to restyle the entire LLMDash UI. The CSS tools are NOT limited to "
-        "colors — the user stylesheet controls colors, backgrounds, borders, border-radius, shadows, "
-        "spacing, font family, font size, font weight, line-height, opacity, transitions, animations, "
-        "layout widths, and z-index. When the user asks to \"change the style\" / \"restyle\" / "
-        "\"make it look like X\" / \"change the font\" / \"round the corners\" / \"make the chat "
-        "wider\" / \"add shadows\" / etc., use the CSS tools to do it. The stylesheet is a normal "
-        "CSS string; you can override Tailwind utility classes, change :root custom properties, or "
-        "add new rules for any selector.\n"
-        "\n"
-        "When editing the user's CSS:\n"
-        "1. Always call get_user_css first to read the current state.\n"
-        "2. Use patch_user_css for targeted changes — provide enough surrounding lines in old_str to make it unique.\n"
-        "3. Use append_user_css to add new rules.\n"
-        "4. Never use set_user_css unless asked to fully reset or rewrite all styles.\n"
-        "5. If patch_user_css returns an error, call get_user_css again, find the correct block, and retry with a corrected old_str.\n"
-        "\n"
-        "IMPORTANT: Only respond to the user's most recent message. Previous questions in this conversation "
-        "have already been answered. Do not re-address old questions, repeat previous answers, or discuss "
-        "earlier topics unless the user explicitly brings them up again."
-    )
+    system_prompt = build_system_prompt(model.name)
     messages.insert(0, {"role": "system", "content": system_prompt})
 
     user_content = req.message or ""
     attachment_records = []
     vision_enabled = bool(getattr(model, "vision_enabled", False))
-    audio_enabled = bool(getattr(model, "audio_enabled", False))
-    # Runtime autodetect: if the model is openai_compatible and the stored
-    # audio_enabled is False, ask the provider whether the model really does
-    # support audio. This is the "just works" path for existing models that
-    # were added before the audio column existed or before the admin toggled
-    # it on. The result is cached in-memory per base_url+model_name so each
-    # chat does at most one /models lookup per cold cache.
-    if (
-        not audio_enabled
-        and getattr(model, "provider", None) == "openai_compatible"
-        and getattr(model, "base_url", None)
-        and getattr(model, "api_key_env", None)
-    ):
-        try:
-            cache_key = (model.base_url.rstrip("/"), model.model_name)
-            cached = _RUNTIME_AUDIO_CACHE.get(cache_key)
-            if cached is None:
-                api_key = getattr(app_config.settings, model.api_key_env.lower(), None) or ""
-                detected = False
-                arch_summary = "no_response"
-                async with httpx.AsyncClient(timeout=5) as client:
-                    resp = await client.get(
-                        f"{cache_key[0]}/models",
-                        headers={"Authorization": f"Bearer {api_key}"},
-                    )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    raw_list = data.get("data", data.get("models", []))
-                    for m in raw_list:
-                        mid = m.get("id", m.get("name", ""))
-                        if mid == cache_key[1] or mid.endswith(f"/{cache_key[1]}"):
-                            arch = m.get("architecture", {}) or {}
-                            in_mods = [str(x).lower() for x in (arch.get("input_modalities", []) or arch.get("modalities", []) or [])]
-                            arch_summary = f"input_modalities={in_mods}"
-                            if "audio" in in_mods or bool(m.get("input_audio")) or bool(m.get("supports_audio")):
-                                detected = True
-                            break
-                else:
-                    arch_summary = f"http_{resp.status_code}"
-                # Probe fallback: if the architecture block didn't expose
-                # audio, send a 1-frame wav to the model and look at the
-                # error. If the error mentions audio/format → the model
-                # accepts audio (just the wrong payload). If the error
-                # says unsupported → model doesn't support audio. This
-                # handles providers that don't expose the architecture
-                # block at all (or that omit audio from it).
-                if not detected and resp.status_code == 200 and api_key:
-                    probe = _probe_audio_support(cache_key[0], api_key, model.model_name)
-                    detected = probe
-                    arch_summary += f" probe={probe}"
-                _RUNTIME_AUDIO_CACHE[cache_key] = detected
-                cached = detected
-                logger.info(
-                    f"audio autodetect: model={model.model_name} detected={detected} ({arch_summary})"
-                )
-            if cached:
-                audio_enabled = True
-        except Exception as e:
-            logger.debug(f"audio runtime autodetect failed for {model.model_name}: {e}")
+    audio_enabled = await detect_audio_enabled(model, app_config)
     ocr_strategy = app_config.settings.ocr_strategy
     whisper_provider_setting = (getattr(app_config.settings, "whisper_provider", None) or DEFAULT_PROVIDER).strip().lower()
     if whisper_provider_setting not in VALID_PROVIDERS:
@@ -1370,7 +1115,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
         messages.append({"role": "user", "content": req.message})
 
     if getattr(model, "tools_enabled", True):
-        tool_defs = get_tool_definitions()
+        tool_defs = skill_registry.get_tool_definitions()
         tools = [ToolDef(**t) for t in tool_defs]
     else:
         tools = []
@@ -1404,7 +1149,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
 
                 async def push_event(event_type: str, **kwargs):
                     evt = {"type": event_type, **kwargs}
-                    _push_to_queues(req.conversation_id, f"data: {json.dumps(evt)}\n\n")
+                    push_to_queues(req.conversation_id, f"data: {json.dumps(evt)}\n\n")
 
                 async def save_draft_progress(force=False):
                     nonlocal last_save_len
@@ -1452,6 +1197,32 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
 
                 tool_round = 0
                 seen_tool_signatures: set[tuple] = set()
+                consecutive_search_failures = 0
+
+                def _looks_like_filler(text: str) -> bool:
+                    if not text or len(text) < 5:
+                        return False
+                    stripped = text.strip().lower()
+                    filler_patterns = (
+                        r"^(let me\s+(try|search|look|find|check|see|attempt|google|query))",
+                        r"^(i('ll| will)\s+(try|search|look|find|check|see|attempt|google|query|use))",
+                        r"^(searching|looking|trying|checking)",
+                        r"^(i can\s+(try|search|look|find|check))",
+                        r"^(perhaps\s+i\s+(should|can|could|need to))",
+                        r"^(maybe\s+i\s+(should|can|could|need to))",
+                        r"^(ok,?\s+)?(hold on|one moment|give me)",
+                    )
+                    import re as _re
+                    for pat in filler_patterns:
+                        if _re.match(pat, stripped):
+                            return True
+                    if len(stripped) <= 60 and not any(
+                        kw in stripped for kw in ("result", "found", "here", "page", "according", "showing")
+                    ):
+                        if any(kw in stripped for kw in ("search", "searching", "try", "trying", "find", "looking", "look", "scrape", "scraping", "fetch")):
+                            return True
+                    return False
+
                 while final_tool_calls and tool_round < 5:
                     tool_round += 1
 
@@ -1478,9 +1249,17 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                     tool_results = []
                     for tc in final_tool_calls:
                         await push_event("tool_start", name=tc["name"], id=tc["id"])
-                        result = await execute_tool(tc["name"], tc["arguments"], _current_user=current_user)
+                        result = await skill_registry.execute(tc["name"], tc["arguments"], _current_user=current_user)
                         tool_results.append({"tool_call_id": tc["id"], "tool_name": tc["name"], "content": result})
                         await push_event("tool_result", name=tc["name"], id=tc["id"], result=result)
+
+                    search_tool_names = frozenset(("web_search", "web_scrape"))
+                    for tr in tool_results:
+                        if tr["tool_name"] in search_tool_names and tr["content"].startswith("__TOOL_ERROR__:"):
+                            consecutive_search_failures += 1
+                            break
+                    else:
+                        consecutive_search_failures = 0
 
                     assistant_entry = {
                         "role": "assistant",
@@ -1508,6 +1287,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                     accumulated_reasoning = ""
                     final_tool_calls = []
                     last_save_len = 0
+                    content_len_before_round = len(accumulated_content)
 
                     # Always send tools so the model can retry after a failed
                     # tool call. The `while ... and tool_round < 5` loop already
@@ -1528,6 +1308,19 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                             total_completion_tokens += chunk.usage["completion_tokens"]
                             total_total_tokens += chunk.usage["total_tokens"]
                         total_reasoning_tokens += chunk.reasoning_tokens
+
+                    if final_tool_calls:
+                        new_content = accumulated_content[content_len_before_round:].strip()
+                        if _looks_like_filler(new_content):
+                            accumulated_content = accumulated_content[:content_len_before_round]
+
+                    if final_tool_calls and consecutive_search_failures >= 3:
+                        new_content = accumulated_content[content_len_before_round:].strip()
+                        if _looks_like_filler(new_content) or not new_content:
+                            accumulated_content = accumulated_content[:content_len_before_round]
+                        accumulated_content = (accumulated_content + "\n\n[Aborted: search and scraping tools failed 3 times in a row. Tell the user what happened and stop.]").strip()
+                        final_tool_calls = []
+                        break
 
                 if streaming_msg_id is not None:
                     draft.content = accumulated_content or draft.content
@@ -1634,7 +1427,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                 except Exception:
                     pass
             finally:
-                _cleanup_generation(req.conversation_id)
+                cleanup_generation(req.conversation_id)
 
     if req.conversation_id in active_generations:
         raise HTTPException(409, "A generation is already in progress for this conversation")
@@ -1738,7 +1531,7 @@ async def chat_cancel(conv_id: int, current_user: dict = Depends(get_current_use
     gen = active_generations.get(conv_id)
     if gen:
         gen["task"].cancel()
-        _push_to_queues(conv_id, "data: [DONE]\n\n")
+        push_to_queues(conv_id, "data: [DONE]\n\n")
         return {"status": "cancelled"}
 
     result = await db.execute(
@@ -1931,15 +1724,213 @@ async def generate_image(req: ImageGenerationRequest, current_user: dict = Depen
 
     return ImageGenerationResponse(images=result.images, revised_prompt=result.revised_prompt)
 
+# --- Document Management ---
+
+@router.get("/documents")
+async def list_documents(current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(Document)
+        .where(Document.user_id == current_user["user_id"])
+        .order_by(Document.updated_at.desc())
+    )
+    docs = result.scalars().all()
+    return [
+        {
+            "id": d.id,
+            "filename": d.filename,
+            "format": d.format,
+            "version": d.version,
+            "file_path": d.file_path,
+            "created_at": d.created_at.isoformat() if d.created_at else "",
+            "updated_at": d.updated_at.isoformat() if d.updated_at else "",
+        }
+        for d in docs
+    ]
+
+
+@router.get("/documents/{doc_id}")
+async def get_document(doc_id: int, current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(Document).where(Document.id == doc_id, Document.user_id == current_user["user_id"])
+    )
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(404, "Document not found")
+    return {
+        "id": doc.id,
+        "filename": doc.filename,
+        "format": doc.format,
+        "version": doc.version,
+        "file_path": doc.file_path,
+        "content_md": doc.content_md,
+        "created_at": doc.created_at.isoformat() if doc.created_at else "",
+        "updated_at": doc.updated_at.isoformat() if doc.updated_at else "",
+    }
+
+
+@router.get("/documents/{doc_id}/download")
+async def download_document(doc_id: int, current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(Document).where(Document.id == doc_id, Document.user_id == current_user["user_id"])
+    )
+    doc = result.scalar_one_or_none()
+    if not doc or not os.path.exists(doc.file_path):
+        raise HTTPException(404, "Document not found")
+    return FileResponse(doc.file_path, filename=os.path.basename(doc.file_path))
+
+
+@router.put("/documents/{doc_id}")
+async def update_document_meta(doc_id: int, body: dict, current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(Document).where(Document.id == doc_id, Document.user_id == current_user["user_id"])
+    )
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(404, "Document not found")
+    if "filename" in body:
+        doc.filename = body["filename"]
+    doc.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"status": "updated"}
+
+
+@router.delete("/documents/{doc_id}")
+async def delete_document(doc_id: int, current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(Document).where(Document.id == doc_id, Document.user_id == current_user["user_id"])
+    )
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(404, "Document not found")
+    if doc.file_path and os.path.exists(doc.file_path):
+        os.remove(doc.file_path)
+    await db.delete(doc)
+    await db.commit()
+    return {"status": "deleted"}
+
+
+@router.get("/documents/{doc_id}/versions")
+async def list_document_versions(doc_id: int, current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    doc_result = await db.execute(
+        select(Document).where(Document.id == doc_id, Document.user_id == current_user["user_id"])
+    )
+    doc = doc_result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(404, "Document not found")
+    result = await db.execute(
+        select(Document)
+        .where(
+            Document.user_id == current_user["user_id"],
+            Document.filename == doc.filename,
+            Document.format == doc.format,
+        )
+        .order_by(Document.version.desc())
+    )
+    versions = result.scalars().all()
+    return [
+        {
+            "id": d.id,
+            "version": d.version,
+            "file_path": d.file_path,
+            "created_at": d.created_at.isoformat() if d.created_at else "",
+        }
+        for d in versions
+    ]
+
+
+@router.post("/documents/upload")
+async def upload_document(file: UploadFile = File(...), current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    if not file.filename:
+        raise HTTPException(400, "No filename provided")
+    safe_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in file.filename)
+    uploads_dir = app_config.settings.uploads_dir
+    os.makedirs(uploads_dir, exist_ok=True)
+    file_id = uuid.uuid4().hex[:12]
+    stored_name = f"{file_id}_{safe_name}"
+    file_path = os.path.join(uploads_dir, stored_name)
+    content = await file.read()
+    if len(content) > 20 * 1024 * 1024:
+        raise HTTPException(400, "File too large (max 20MB)")
+    with open(file_path, "wb") as f:
+        f.write(content)
+    ext = safe_name.rsplit(".", 1)[-1].lower() if "." in safe_name else "txt"
+    base_name = safe_name.rsplit(".", 1)[0] if "." in safe_name else safe_name
+
+    extracted_md = ""
+    if ext == "docx":
+        try:
+            from docx import Document as DocxDoc
+            d = DocxDoc(file_path)
+            extracted_md = "\n\n".join(p.text for p in d.paragraphs if p.text.strip())
+        except Exception:
+            extracted_md = f"[Uploaded document: {safe_name}]"
+    elif ext == "pdf":
+        try:
+            import fitz
+            d = fitz.open(file_path)
+            extracted_md = "\n\n".join(page.get_text() for page in d)
+        except Exception:
+            extracted_md = f"[Uploaded PDF: {safe_name}]"
+    elif ext == "odt":
+        try:
+            from odf.opendocument import OpenDocumentText
+            from odf.text import P as OdfP
+            d = OpenDocumentText(file_path)
+            texts = []
+            for elem in d.text.childNodes:
+                if hasattr(elem, "childNodes"):
+                    for child in elem.childNodes:
+                        if hasattr(child, "data") and child.data:
+                            texts.append(child.data)
+            extracted_md = "\n\n".join(texts)
+        except Exception:
+            extracted_md = f"[Uploaded ODT: {safe_name}]"
+    elif ext == "tex":
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            extracted_md = f.read()
+    elif ext == "md":
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            extracted_md = f.read()
+    else:
+        extracted_md = f"[Uploaded file: {safe_name}]"
+
+    doc = Document(
+        user_id=current_user["user_id"],
+        filename=base_name,
+        format=ext,
+        version=1,
+        file_path=file_path,
+        content_md=extracted_md,
+    )
+    db.add(doc)
+    await db.commit()
+    await db.refresh(doc)
+
+    return {
+        "id": doc.id,
+        "filename": doc.filename,
+        "format": doc.format,
+        "version": doc.version,
+        "file_path": file_path,
+        "content_md": extracted_md,
+        "created_at": doc.created_at.isoformat() if doc.created_at else "",
+    }
+
+
 @router.get("/files/{filename}")
 async def serve_file(filename: str, current_user: dict = Depends(get_current_user)):
     safe_name = os.path.basename(filename)
-    filepath = os.path.join("data/documents", safe_name)
+    docs_dir = app_config.settings.documents_dir
+    uploads_dir_config = app_config.settings.uploads_dir
+    filepath = os.path.join(docs_dir, safe_name)
+    if not os.path.exists(filepath):
+        filepath = os.path.join(uploads_dir_config, safe_name)
     if not os.path.exists(filepath):
         raise HTTPException(404, "File not found")
     real = os.path.realpath(filepath)
-    docs_dir = os.path.realpath("data/documents")
-    if not real.startswith(docs_dir):
+    real_docs_dir = os.path.realpath(docs_dir)
+    real_uploads_dir = os.path.realpath(uploads_dir_config)
+    if not (real.startswith(real_docs_dir) or real.startswith(real_uploads_dir)):
         raise HTTPException(404, "File not found")
     return FileResponse(filepath, filename=safe_name)
 
@@ -1948,7 +1939,7 @@ async def serve_file(filename: str, current_user: dict = Depends(get_current_use
 
 @router.get("/tools")
 async def list_tools(current_user: dict = Depends(get_current_user)):
-    return get_tool_definitions()
+    return skill_registry.get_tool_definitions()
 
 
 app.include_router(router)

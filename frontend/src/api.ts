@@ -1,5 +1,11 @@
 const BASE = '/api';
 
+function reportError(context: string, err: unknown) {
+  if (import.meta.env.DEV) {
+    console.warn(`[${context}]`, err);
+  }
+}
+
 function getToken(): string | null {
   return localStorage.getItem('llmdash_token');
 }
@@ -27,7 +33,7 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   }
   if (!res.ok) {
     let text = '';
-    try { text = await res.text() } catch {}
+    try { text = await res.text() } catch (e) { reportError('request:readBody', e) }
     throw new Error(`${res.status}: ${text || 'Unknown error'}`);
   }
   return res.json();
@@ -36,6 +42,7 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
 export const api = {
   getToken,
   setToken,
+  request,
 
   auth: {
     status: () =>
@@ -284,7 +291,7 @@ export const api = {
       });
       if (!response.ok) {
         let detail = ''
-        try { const err = await response.json(); detail = err.detail ? `: ${err.detail}` : '' } catch {}
+        try { const err = await response.json(); detail = err.detail ? `: ${err.detail}` : '' } catch (e) { reportError('chat.send:errorBody', e) }
         throw new Error(`Chat error ${response.status}${detail}`)
       }
       const reader = response.body?.getReader();
@@ -303,7 +310,7 @@ export const api = {
             if (data === '[DONE]') return;
             try {
               yield JSON.parse(data) as import('./types').StreamEvent;
-            } catch { /* skip malformed */ }
+            } catch (e) { reportError('chat.send:parseEvent', e) }
           }
         }
       }
@@ -320,7 +327,7 @@ export const api = {
       });
       if (!response.ok) {
         let detail = ''
-        try { const err = await response.json(); detail = err.detail ? `: ${err.detail}` : '' } catch {}
+        try { const err = await response.json(); detail = err.detail ? `: ${err.detail}` : '' } catch (e) { reportError('chat.resume:errorBody', e) }
         throw new Error(`Resume error ${response.status}${detail}`)
       }
       const reader = response.body?.getReader();
@@ -339,7 +346,7 @@ export const api = {
             if (data === '[DONE]') return;
             try {
               yield JSON.parse(data) as import('./types').StreamEvent;
-            } catch { /* skip malformed */ }
+            } catch (e) { reportError('chat.resume:parseEvent', e) }
           }
         }
       }
@@ -359,7 +366,7 @@ export const api = {
       });
       if (!response.ok) {
         let detail = ''
-        try { const err = await response.json(); detail = err.detail ? `: ${err.detail}` : '' } catch {}
+        try { const err = await response.json(); detail = err.detail ? `: ${err.detail}` : '' } catch (e) { reportError('generateImage:errorBody', e) }
         throw new Error(`Image generation error ${response.status}${detail}`)
       }
       return response.json() as Promise<{ images: string[]; revised_prompt?: string }>;
@@ -378,7 +385,7 @@ export const api = {
       });
       if (!response.ok) {
         let detail = ''
-        try { const err = await response.json(); detail = err.detail ? `: ${err.detail}` : '' } catch {}
+        try { const err = await response.json(); detail = err.detail ? `: ${err.detail}` : '' } catch (e) { reportError('upload:errorBody', e) }
         throw new Error(`Upload error ${response.status}${detail}`)
       }
       return response.json() as Promise<import('./types').UploadResponse>;

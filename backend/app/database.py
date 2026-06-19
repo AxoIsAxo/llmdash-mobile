@@ -2,7 +2,7 @@ import hashlib
 import secrets
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy import Column, Integer, String, Text, Boolean, Float, DateTime, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, Text, Boolean, Float, DateTime, ForeignKey, JSON, UniqueConstraint
 from datetime import datetime, timezone
 import os
 
@@ -36,15 +36,28 @@ class User(Base):
 
     @staticmethod
     def hash_password(password: str) -> str:
-        salt = secrets.token_hex(16)
-        h = hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
-        return f"{salt}:{h}"
+        from passlib.hash import bcrypt
+        return bcrypt.hash(password)
 
     @staticmethod
     def verify_password(password: str, password_hash: str) -> bool:
+        from passlib.hash import bcrypt
+        try:
+            return bcrypt.verify(password, password_hash)
+        except (ValueError, AttributeError):
+            pass
         try:
             salt, h = password_hash.split(":", 1)
+            import hashlib
             return h == hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
+        except (ValueError, AttributeError):
+            return False
+
+    @staticmethod
+    def is_legacy_hash(password_hash: str) -> bool:
+        try:
+            parts = password_hash.split(":", 1)
+            return len(parts) == 2 and len(parts[0]) == 32 and len(parts[1]) == 64
         except (ValueError, AttributeError):
             return False
 
@@ -161,6 +174,21 @@ class UserSubscription(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class Document(Base):
+    __tablename__ = "documents"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    filename = Column(String(255), nullable=False)
+    format = Column(String(16), nullable=False)
+    version = Column(Integer, nullable=False, default=1)
+    file_path = Column(String(512), nullable=False)
+    content_md = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    __table_args__ = (UniqueConstraint("user_id", "filename", "format", "version", name="uq_doc_version"),)
+
+
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -232,6 +260,21 @@ def _migrate(conn):
 
     try:
         existing_tables = {row[0] for row in conn.exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        if "documents" not in existing_tables:
+            conn.exec_driver_sql("""
+                CREATE TABLE IF NOT EXISTS documents (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    filename VARCHAR(255) NOT NULL,
+                    format VARCHAR(16) NOT NULL,
+                    version INTEGER NOT NULL DEFAULT 1,
+                    file_path VARCHAR(512) NOT NULL,
+                    content_md TEXT,
+                    created_at DATETIME,
+                    updated_at DATETIME,
+                    UNIQUE(user_id, filename, format, version)
+                )
+            """)
         if "user_model_usage" not in existing_tables:
             conn.exec_driver_sql("""
                 CREATE TABLE IF NOT EXISTS user_model_usage (
@@ -291,6 +334,18 @@ def _migrate(conn):
         plan_limit_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(plan_model_limits)").fetchall()}
         if "image_limit" not in plan_limit_cols:
             conn.exec_driver_sql("ALTER TABLE plan_model_limits ADD COLUMN image_limit INTEGER")
+        if "skill_configs" not in existing_tables:
+            conn.exec_driver_sql("""
+                CREATE TABLE IF NOT EXISTS skill_configs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name VARCHAR(255) NOT NULL UNIQUE,
+                    description TEXT NOT NULL,
+                    input_schema_json TEXT NOT NULL,
+                    source VARCHAR(32) NOT NULL DEFAULT 'db',
+                    enabled BOOLEAN NOT NULL DEFAULT 1,
+                    user_id INTEGER
+                )
+            """)
     except Exception:
         pass
 

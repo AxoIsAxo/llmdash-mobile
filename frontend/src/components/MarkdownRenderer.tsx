@@ -2,7 +2,8 @@ import React, { memo, useCallback, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
-import { Check, Copy, Download } from 'lucide-react'
+import rehypeRaw from 'rehype-raw'
+import { Check, Copy, Download, Image } from 'lucide-react'
 
 function CodeBlock({ language, children }: { language?: string; children: React.ReactNode }) {
   const [copied, setCopied] = useState(false)
@@ -43,11 +44,18 @@ function CodeBlock({ language, children }: { language?: string; children: React.
   )
 }
 
+function preprocessSvgBlocks(markdown: string): string {
+  return markdown.replace(/```svg\+?xml?\n?([\s\S]*?)```/g, (_, code) => {
+    return code.trim()
+  })
+}
+
 const MarkdownRenderer = memo(function MarkdownRenderer({ content }: { content: string }) {
+  const processed = preprocessSvgBlocks(content)
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
-      rehypePlugins={[rehypeHighlight]}
+      rehypePlugins={[rehypeRaw, rehypeHighlight]}
       components={{
         code({ className, children, ...props }) {
           const match = /language-(\w+)/.exec(className || '')

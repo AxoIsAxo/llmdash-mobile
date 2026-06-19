@@ -216,3 +216,24 @@ export interface FileUploadSettings {
   whisper_provider: string;
   whisper_openrouter_model: string;
 }
+
+export interface Document {
+  id: number;
+  user_id: number;
+  filename: string;
+  content: string;
+  format: string;
+  version: number;
+  old_str: string | null;
+  new_str: string | null;
+  file_size: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DocumentVersion {
+  version: number;
+  content: string;
+  file_size: number;
+  created_at: string;
+}

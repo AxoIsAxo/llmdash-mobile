@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     lnbits_invoice_key: Optional[str] = None
     file_upload_enabled: bool = True
     uploads_dir: str = "data/uploads"
+    documents_dir: str = "data/documents"
     ocr_enabled: bool = True
     ocr_strategy: str = "ocr"
     whisper_model: str = "small"

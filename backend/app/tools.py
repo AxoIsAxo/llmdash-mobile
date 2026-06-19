@@ -13,13 +13,16 @@ from urllib.parse import quote, urlparse
 from sqlalchemy import select
 
 import httpx
-from docx import Document
-from fpdf import FPDF
-from odf.opendocument import OpenDocumentText
-from odf.text import P
 
 from . import config as app_config
 from .sandbox import run_in_alpine
+from .document_engine.markdown_parser import parse_markdown
+from .document_engine.html_builder import build_html
+from .document_engine.docx_builder import build_docx
+from .document_engine.pdf_builder import build_pdf
+from .document_engine.odt_builder import build_odt
+from .document_engine.latex_builder import build_latex, compile_latex_to_pdf
+from .document_engine.chart_generator import generate_chart_png
 
 
 def _normalize_ws_collapse(s: str) -> str:
@@ -97,67 +100,12 @@ def _encode_new_css_marker(new_css: str) -> str:
 available_tools: dict[str, dict] = {}
 
 
-def _escape_and_format(text: str) -> str:
-    text = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-    text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
-    text = re.sub(r'\*(.+?)\*', r'<em>\1</em>', text)
-    text = re.sub(r'`(.+?)`', r'<code>\1</code>', text)
-    return text
-
-
-def _content_to_html(content: str) -> str:
-    lines = content.split('\n')
-    result = []
-    in_list = False
-    for line in lines:
-        stripped = line.rstrip()
-        if not stripped:
-            if in_list:
-                result.append('</ul>')
-                in_list = False
-            result.append('')
-            continue
-        if stripped.startswith('### '):
-            if in_list: result.append('</ul>'); in_list = False
-            result.append(f'<h3>{_escape_and_format(stripped[4:])}</h3>')
-        elif stripped.startswith('## '):
-            if in_list: result.append('</ul>'); in_list = False
-            result.append(f'<h2>{_escape_and_format(stripped[3:])}</h2>')
-        elif stripped.startswith('# '):
-            if in_list: result.append('</ul>'); in_list = False
-            result.append(f'<h1>{_escape_and_format(stripped[2:])}</h1>')
-        elif stripped.startswith('- ') or stripped.startswith('* '):
-            if not in_list: result.append('<ul>'); in_list = True
-            result.append(f'<li>{_escape_and_format(stripped[2:])}</li>')
-        else:
-            if in_list: result.append('</ul>'); in_list = False
-            result.append(f'<p>{_escape_and_format(stripped)}</p>')
-    if in_list:
-        result.append('</ul>')
-    return '\n'.join(result)
-
-
-def _preview_html(format: str, filename: str, content: str) -> str:
-    body = _content_to_html(content)
-    return f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><style>
-  * {{ margin:0; padding:0; box-sizing:border-box; }}
-  body {{ font-family:Georgia,'Times New Roman',serif; background:#f0f0f0; padding:20px; }}
-  .page {{ max-width:800px; margin:0 auto; background:#fff; padding:50px 60px; box-shadow:0 1px 3px rgba(0,0,0,.12),0 1px 2px rgba(0,0,0,.24); min-height:90vh; }}
-  h1 {{ font-size:24px; margin:0 0 12px 0; border-bottom:1px solid #ddd; padding-bottom:8px; }}
-  h2 {{ font-size:20px; margin:18px 0 8px 0; }}
-  h3 {{ font-size:16px; margin:14px 0 6px 0; }}
-  p {{ margin:0 0 10px 0; line-height:1.7; }}
-  ul {{ margin:0 0 10px 20px; }}
-  li {{ line-height:1.6; }}
-  strong {{ font-weight:bold; }}
-  em {{ font-style:italic; }}
-  code {{ background:#f5f5f5; padding:1px 4px; border-radius:3px; font-family:monospace; font-size:0.9em; }}
-  .file-label {{ color:#888; font-size:12px; margin-bottom:24px; }}
-</style></head><body><div class="page">
-  <div class="file-label">{filename}.{format}</div>
-  {body}
-</div></body></html>"""
+def _generate_preview(content: str, filename: str, format: str) -> str:
+    try:
+        nodes = parse_markdown(content)
+        return build_html(nodes, title=f"{filename}.{format}")
+    except Exception:
+        return f"<html><body><p>Preview unavailable for {filename}.{format}</p></body></html>"
 
 
 def tool(name: str, description: str, input_schema: dict):
@@ -371,87 +319,144 @@ async def web_scrape(url: str, max_length: int = 10000) -> str:
 
 @tool(
     name="edit_document",
-    description="Create or edit a text or document file. Supports rich document formats (docx, pdf, odt) and any text-based file type (py, js, ts, html, css, json, xml, yaml, toml, md, txt, csv, sh, rs, go, java, c, cpp, sql, r, rb, php, lua, swift, kt, tf, ini, cfg, env, gitignore, Dockerfile, Makefile, etc.). Returns file path and download link.",
+    description="Create a downloadable file artifact. Supports rich document formats (docx, pdf, odt, tex) and any text-based file type (py, js, ts, html, css, json, xml, yaml, toml, txt, csv, sh, rs, go, java, etc.). Returns a file path and download link. Only use when the user explicitly asks to save, download, or export a file.",
     input_schema={
         "type": "object",
         "properties": {
-            "format": {"type": "string", "description": "File extension (e.g. py, js, html, txt, md, json, docx, pdf, odt). For rich documents use docx/pdf/odt; everything else is saved as a plain text file."},
+            "format": {"type": "string", "description": "File extension (e.g. docx, pdf, odt, tex, md, py, js, html). For rich documents use docx/pdf/odt/tex; everything else is saved as plain text."},
             "filename": {"type": "string", "description": "Desired filename (without extension)"},
-            "content": {"type": "string", "description": "Full file content. For docx/odt: use markdown-like formatting with # headings, **bold**, bullet lists. For pdf: plain text."},
+            "content": {"type": "string", "description": "Full file content in markdown format. Supports full markdown: headings, bold, italic, strikethrough, inline code, fenced code blocks, tables, lists (ordered and unordered), blockquotes, images, links, horizontal rules, LaTeX math ($...$ and $$...$$), and :::chart directives."},
+            "existing_doc_id": {"type": "integer", "description": "Optional. ID of an existing document to edit. If provided, creates a new version preserving the old file."},
+            "old_str": {"type": "string", "description": "Optional. When editing an existing document, find this text in the content and replace it with new_str (patch mode). Requires existing_doc_id."},
+            "new_str": {"type": "string", "description": "Optional. Replacement text for patch mode. Requires old_str."},
+            "font_family": {"type": "string", "description": "Base font family: serif, sans, or mono (default: serif)"},
+            "heading_font": {"type": "string", "description": "Heading font family: serif, sans, or mono (default: sans)"},
+            "font_size": {"type": "integer", "description": "Base font size in pt (default: 11)"},
         },
         "required": ["format", "filename", "content"],
     },
 )
-async def edit_document(format: str, filename: str, content: str) -> str:
-    docs_dir = "data/documents"
+async def edit_document(
+    format: str,
+    filename: str,
+    content: str,
+    existing_doc_id: Optional[int] = None,
+    old_str: Optional[str] = None,
+    new_str: Optional[str] = None,
+    font_family: Optional[str] = None,
+    heading_font: Optional[str] = None,
+    font_size: Optional[int] = None,
+    _current_user: dict = None,
+) -> str:
+    docs_dir = app_config.settings.documents_dir
+    charts_dir = os.path.join(docs_dir, "charts")
     os.makedirs(docs_dir, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    os.makedirs(charts_dir, exist_ok=True)
+
     safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in filename)
     ext = format.lower()
+    ff = font_family or "serif"
+    hf = heading_font or "sans"
+    fs = font_size or 11
 
-    filepath = os.path.join(docs_dir, f"{safe_name}_{timestamp}.{ext}")
+    from .database import async_session, Document as DocModel
+
+    existing_version = 0
+    existing_file_path = None
+    existing_content_md = None
+
+    # If editing an existing document, look it up
+    if existing_doc_id is not None and _current_user:
+        async with async_session() as sess:
+            result = await sess.execute(
+                select(DocModel).where(
+                    DocModel.id == existing_doc_id,
+                    DocModel.user_id == _current_user["user_id"],
+                )
+            )
+            doc = result.scalar_one_or_none()
+            if doc:
+                existing_version = doc.version
+                existing_file_path = doc.file_path
+                existing_content_md = doc.content_md or ""
+
+                # Patch mode: apply old_str→new_str replacement to existing content
+                if old_str is not None and new_str is not None and existing_content_md:
+                    success, err, patched = _apply_patch(existing_content_md, old_str, new_str)
+                    if not success:
+                        return f"Error: {err}. The existing content has {len(existing_content_md)} characters."
+                    content = patched
+            else:
+                return f"Error: Document with id {existing_doc_id} not found."
+
+    new_version = existing_version + 1
+    version_suffix = f"_v{new_version}"
+    filepath = os.path.join(docs_dir, f"{safe_name}{version_suffix}.{ext}")
 
     try:
+        if ext in ("docx", "pdf", "odt", "tex"):
+            nodes = parse_markdown(content)
+
         if ext == "docx":
-            doc = Document()
-            for line in content.split("\n"):
-                line = line.strip()
-                if not line:
-                    continue
-                if line.startswith("# "):
-                    doc.add_heading(line[2:], level=1)
-                elif line.startswith("## "):
-                    doc.add_heading(line[3:], level=2)
-                elif line.startswith("### "):
-                    doc.add_heading(line[4:], level=3)
-                elif line.startswith("- ") or line.startswith("* "):
-                    doc.add_paragraph(line[2:], style="List Bullet")
-                else:
-                    doc.add_paragraph(line)
-            doc.save(filepath)
-
+            build_docx(nodes, filepath, font_family=ff, heading_font=hf, font_size=fs, charts_dir=charts_dir)
         elif ext == "pdf":
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.set_auto_page_break(auto=True, margin=15)
-            pdf.add_font("DejaVu", "", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", uni=True)
-            pdf.add_font("DejaVu", "B", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", uni=True)
-            for line in content.split("\n"):
-                line = line.strip()
-                if not line:
-                    continue
-                if line.startswith("# "):
-                    pdf.set_font("DejaVu", "B", 16)
-                    pdf.cell(0, 10, line[2:], new_x="LMARGIN", new_y="NEXT")
-                elif line.startswith("## "):
-                    pdf.set_font("DejaVu", "B", 14)
-                    pdf.cell(0, 8, line[3:], new_x="LMARGIN", new_y="NEXT")
-                else:
-                    pdf.set_font("DejaVu", "", 11)
-                    pdf.multi_cell(0, 6, line)
-            pdf.output(filepath)
-
+            build_pdf(nodes, filepath, font_family=ff, heading_font=hf, font_size=fs, charts_dir=charts_dir)
         elif ext == "odt":
-            doc = OpenDocumentText()
-            for line in content.split("\n"):
-                line = line.strip()
-                if not line:
-                    continue
-                p = P(text=line)
-                doc.text.addElement(p)
-            doc.save(filepath)
-
+            build_odt(nodes, filepath, font_family=ff, heading_font=hf, font_size=fs, charts_dir=charts_dir)
+        elif ext == "tex":
+            build_latex(nodes, filepath, title=safe_name, charts_dir=charts_dir)
+            pdf_path = compile_latex_to_pdf(filepath)
         else:
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(content)
 
-        if ext in ('docx', 'pdf', 'odt'):
-            preview_html = _preview_html(ext, safe_name, content)
-            encoded = base64.b64encode(preview_html.encode()).decode()
-            return f"Document created: {filepath}\nDownload: /api/files/{os.path.basename(filepath)}\nHTML_RENDER:{encoded}"
-        return f"Document created: {filepath}\nDownload: /api/files/{os.path.basename(filepath)}"
+        # Save to database
+        db_filename = safe_name
+        db_format = ext
+        db_version = new_version
+        db_file_path = filepath
+
+        if _current_user:
+            async with async_session() as sess:
+                doc = DocModel(
+                    user_id=_current_user["user_id"],
+                    filename=db_filename,
+                    format=db_format,
+                    version=db_version,
+                    file_path=db_file_path,
+                    content_md=content,
+                )
+                sess.add(doc)
+                await sess.commit()
+                await sess.refresh(doc)
+                doc_id = doc.id
+        else:
+            doc_id = 0
+
+        preview_html_str = ""
+        if ext in ("docx", "pdf", "odt", "tex"):
+            try:
+                preview_html_str = _generate_preview(content, safe_name, ext)
+            except Exception:
+                preview_html_str = ""
+
+        action = "updated" if existing_doc_id else "created"
+        result_lines = [
+            f"Document {action}: {filepath}",
+            f"Download: /api/files/{os.path.basename(filepath)}",
+        ]
+        if doc_id:
+            result_lines.append(f"Document ID: {doc_id}")
+        if preview_html_str:
+            encoded = base64.b64encode(preview_html_str.encode()).decode()
+            result_lines.append(f"HTML_RENDER:{encoded}")
+        if ext == "tex" and pdf_path:
+            pdf_basename = os.path.basename(pdf_path)
+            result_lines.append(f"PDF compiled: /api/files/{pdf_basename}")
+
+        return "\n".join(result_lines)
     except Exception as e:
-        return f"Document creation error: {str(e)}"
+        return f"Document creation error: {type(e).__name__}: {str(e)}"
 
 
 @tool(
@@ -611,6 +616,32 @@ async def set_user_css(css: str, _current_user: dict = None) -> str:
         return f"CSS saved successfully ({len(css)} characters)\n{_encode_new_css_marker(css or '')}"
 
 
+@tool(
+    name="render_svg",
+    description="Create an SVG vector graphic and display it in the chat. Use this for diagrams, charts, icons, illustrations, flowcharts, network graphs, architectural diagrams, or any vector graphics that should render inline as proper SVG (scalable, interactive, stylable). Pass the complete <svg>…</svg> markup including XML namespace. The SVG will be rendered inline in the conversation.",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "svg": {
+                "type": "string",
+                "description": "The complete SVG markup including <svg> tag with xmlns attribute.",
+            },
+            "title": {
+                "type": "string",
+                "description": "Optional title/description for the SVG graphic.",
+            },
+        },
+        "required": ["svg"],
+    },
+)
+async def render_svg(svg: str, title: str = "") -> str:
+    if "<svg" not in svg:
+        svg = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">{svg}</svg>'
+    encoded = base64.b64encode(svg.encode()).decode()
+    label = f" ({title})" if title else ""
+    return f"SVG_RENDER:{encoded}{label}"
+
+
 def get_tool_definitions():
     return [
         {
@@ -625,7 +656,7 @@ def get_tool_definitions():
 async def execute_tool(name: str, arguments: dict, **context) -> str:
     tool_def = available_tools.get(name)
     if not tool_def:
-        return f"Error: Unknown tool '{name}'"
+        return f"__TOOL_ERROR__: Unknown tool '{name}'"
     fn = tool_def["fn"]
     try:
         sig = inspect.signature(fn)
@@ -634,7 +665,10 @@ async def execute_tool(name: str, arguments: dict, **context) -> str:
             result = await fn(**arguments, **filtered_context)
         else:
             result = fn(**arguments, **filtered_context)
-        return str(result)
+        result_str = str(result)
+        if result_str.startswith("Error:") or result_str.startswith("Search error:") or result_str.startswith("Scrape error:") or result_str.startswith("Failed to fetch"):
+            result_str = "__TOOL_ERROR__: " + result_str
+        return result_str
     except TypeError as e:
         try:
             type_hints = {k: v for k, v in fn.__annotations__.items() if not k.startswith("_")}
@@ -647,7 +681,7 @@ async def execute_tool(name: str, arguments: dict, **context) -> str:
         )
         provided = ", ".join(arguments.keys()) or "(none)"
         return (
-            f"Tool execution error: {e}\n"
+            f"__TOOL_ERROR__: Tool execution error: {e}\n"
             f"Function signature: {name}({params})\n"
             f"You provided arguments: {{{provided}}}\n"
             f"If the argument you intended to send is large or contains special "
@@ -655,7 +689,7 @@ async def execute_tool(name: str, arguments: dict, **context) -> str:
             f"Please retry with the correct arguments matching the signature above."
         )
     except Exception as e:
-        return f"Tool execution error: {e}"
+        return f"__TOOL_ERROR__: Tool execution error: {e}"
 
 
 def _format_type(annotation) -> str:
