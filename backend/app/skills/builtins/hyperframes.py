@@ -66,6 +66,8 @@ class RenderVideoSkill(Skill):
         "required": ["html"],
     }
 
+    _hyperframes_available = None
+
     async def execute(self, arguments: dict, _current_user: dict = None) -> str:
         html = arguments.get("html", "")
         filename = arguments.get("filename", "hyperframes_video")
@@ -177,26 +179,19 @@ class RenderVideoSkill(Skill):
         return html + script
 
     async def _check_hyperframes(self) -> bool:
+        if RenderVideoSkill._hyperframes_available is not None:
+            return RenderVideoSkill._hyperframes_available
         try:
             proc = await asyncio.create_subprocess_exec(
                 "hyperframes", "--version",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
-            return proc.returncode == 0 and bool(stdout)
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+            RenderVideoSkill._hyperframes_available = proc.returncode == 0
         except (FileNotFoundError, asyncio.TimeoutError):
-            pass
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "npx", "--yes", "hyperframes", "--version",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
-            return proc.returncode == 0 and bool(stdout)
-        except (FileNotFoundError, asyncio.TimeoutError):
-            return False
+            RenderVideoSkill._hyperframes_available = False
+        return RenderVideoSkill._hyperframes_available
 
     async def _render(self, project_dir: str, safe_name: str, docs_dir: str, duration: float) -> dict:
         output_path = os.path.join(docs_dir, f"{safe_name}.mp4")
@@ -209,18 +204,9 @@ class RenderVideoSkill(Skill):
             )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
         except FileNotFoundError:
-            cmd = ["npx", "--yes", "hyperframes", "render", project_dir, "--output", output_path]
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
-            except FileNotFoundError:
-                return {"success": False, "error": "hyperframes CLI not found"}
-            except asyncio.TimeoutError:
-                return {"success": False, "error": "render timed out after 300s"}
+            return {"success": False, "error": "hyperframes CLI not found"}
+        except asyncio.TimeoutError:
+            return {"success": False, "error": "render timed out after 300s"}
 
         if proc.returncode != 0:
             err_text = stderr.decode("utf-8", errors="replace")[:1000] if stderr else "unknown error"
