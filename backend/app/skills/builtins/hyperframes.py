@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 import tempfile
 
@@ -78,6 +79,7 @@ class RenderVideoSkill(Skill):
         duration = arguments.get("duration", 5)
 
         html = self._ensure_full_document(html)
+        html = self._inject_timeline_script(html)
 
         project_dir = tempfile.mkdtemp(prefix="hyperframes_")
         try:
@@ -158,6 +160,21 @@ class RenderVideoSkill(Skill):
             f"{html}\n"
             "</body></html>"
         )
+
+    def _inject_timeline_script(self, html: str) -> str:
+        m = re.search(r'data-composition-id\s*=\s*["\']([^"\']+)["\']', html, re.IGNORECASE)
+        comp_id = m.group(1) if m else "main"
+        script = (
+            f"<script>window.__timelines=window.__timelines||{{}};"
+            f"window.__timelines[\"{comp_id}\"]=window.__timelines[\"{comp_id}\"]||"
+            f"{{pause:function(){{}},play:function(){{}},progress:function(){{return 1;}},"
+            f"totalDuration:function(){{return 0;}},time:function(){{return 0;}},"
+            f"duration:function(){{return 0;}},paused:!0}};"
+            f"</script>"
+        )
+        if "</body>" in html:
+            return html.replace("</body>", script + "</body>", 1)
+        return html + script
 
     async def _check_hyperframes(self) -> bool:
         try:

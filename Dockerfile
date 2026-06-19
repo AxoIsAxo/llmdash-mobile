@@ -63,6 +63,10 @@ RUN npm install -g hyperframes && rm -rf ~/.npm
 # Create a compat symlink so the runtime manifest is found at build time.
 RUN ln -sf /usr/lib/node_modules/hyperframes /usr/lib/core
 
+# puppeteer-core 24.x moved its entry point from index.js to lib/cjs/...
+# but the bundled hyperframes CLI still requires puppeteer-core/index.js.
+RUN ln -sf lib/cjs/puppeteer/puppeteer-core.js /usr/lib/node_modules/hyperframes/node_modules/puppeteer-core/index.js
+
 WORKDIR /app
 
 # Copy backend
