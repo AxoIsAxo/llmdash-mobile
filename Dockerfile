@@ -56,7 +56,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install HyperFrames CLI globally (includes Chromium via Puppeteer)
-RUN npm install -g hyperframes && rm -rf ~/.npm
+RUN npm install -g hyperframes && rm -rf ~/.npm && \
+    rm -rf /usr/lib/node_modules/hyperframes/node_modules/onnxruntime-node && \
+    rm -rf /usr/lib/node_modules/hyperframes/node_modules/onnxruntime-common
 
 # The hyperframes CLI resolves its core runtime from /usr/lib/core/dist
 # but npm installs it to /usr/lib/node_modules/hyperframes/dist.
