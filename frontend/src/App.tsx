@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { api } from './api'
 import type { ModelConfig, Conversation, Message, StreamEvent, ToolCall, User, AuthStatus, GenerateStatus, AttachmentRecord } from './types'
 
@@ -1208,7 +1208,6 @@ function App() {
               <div ref={messagesEndRef} />
             </div>
           )}
-          {messages.length > 0 && <ToolExecutionBar executingTools={executingTools} messages={messages} />}
         </div>
 
         {/* Input */}
@@ -1425,54 +1424,6 @@ function App() {
 }
 
 // --- Tool Execution Indicator ---
-
-function ToolExecutionBar({ executingTools, messages }: {
-  executingTools: Set<string>
-  messages: Message[]
-}) {
-  const currentTools = useMemo(() => {
-    if (executingTools.size === 0) return []
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i]
-      if (msg.role === 'assistant' && msg.tool_calls_json) {
-        return msg.tool_calls_json.filter(tc => executingTools.has(tc.id)).map(tc => ({
-          id: tc.id,
-          name: tc.name,
-        }))
-      }
-    }
-    return []
-  }, [executingTools, messages])
-
-  if (currentTools.length === 0) return null
-
-  return (
-    <div className="sticky bottom-0 z-10 bg-theme-bg-secondary/90 backdrop-blur-sm border-t border-theme-focus-ring/15 px-4 py-2.5">
-      <div className="max-w-4xl mx-auto flex items-center gap-2 text-sm">
-        <span className="relative flex h-3 w-3">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-theme-accent-text opacity-75" />
-          <span className="relative inline-flex rounded-full h-3 w-3 bg-theme-accent-text" />
-        </span>
-        <span className="text-theme-text-secondary font-medium">AI is using tools</span>
-        <div className="flex gap-1.5">
-          {currentTools.map(t => (
-            <span
-              key={t.id}
-              className="font-mono text-xs bg-theme-bg-elevated border border-theme-border-light px-2 py-0.5 rounded text-theme-accent-text"
-            >
-              {t.name}
-            </span>
-          ))}
-        </div>
-        <span className="flex gap-0.5">
-          <span className="w-1 h-1 rounded-full bg-theme-muted animate-bounce" style={{ animationDelay: '0ms' }} />
-          <span className="w-1 h-1 rounded-full bg-theme-muted animate-bounce" style={{ animationDelay: '150ms' }} />
-          <span className="w-1 h-1 rounded-full bg-theme-muted animate-bounce" style={{ animationDelay: '300ms' }} />
-        </span>
-      </div>
-    </div>
-  )
-}
 
 // --- Tool Result Content ---
 
