@@ -413,6 +413,10 @@ function App() {
               created_at: new Date().toISOString()
             }]
           })
+          const tcs = (event as any).tool_calls
+          if (tcs && Array.isArray(tcs)) {
+            setExecutingTools(prev => { const next = new Set(prev); tcs.forEach((tc: any) => next.add(tc.id)); return next })
+          }
           const cssTool = (event as any).tool_calls?.find((tc: any) =>
             tc.name === 'set_user_css' || tc.name === 'patch_user_css' || tc.name === 'append_user_css'
           )
@@ -617,6 +621,10 @@ function App() {
                 tool_call_id: null, tool_name: null, status: 'generating', created_at: new Date().toISOString()
               }]
             })
+            const tcs2 = event.tool_calls
+            if (tcs2 && Array.isArray(tcs2)) {
+              setExecutingTools(prev => { const next = new Set(prev); tcs2.forEach((tc: any) => next.add(tc.id)); return next })
+            }
             const cssTool2 = event.tool_calls?.find((tc: any) =>
               tc.name === 'set_user_css' || tc.name === 'patch_user_css' || tc.name === 'append_user_css'
             )
@@ -905,6 +913,10 @@ function App() {
                 tool_call_id: null, tool_name: null, status: 'generating', created_at: new Date().toISOString()
               }]
             })
+            const tcs3 = event.tool_calls
+            if (tcs3 && Array.isArray(tcs3)) {
+              setExecutingTools(prev => { const next = new Set(prev); tcs3.forEach((tc: any) => next.add(tc.id)); return next })
+            }
             const cssTool3 = event.tool_calls?.find((tc: any) =>
               tc.name === 'set_user_css' || tc.name === 'patch_user_css' || tc.name === 'append_user_css'
             )
