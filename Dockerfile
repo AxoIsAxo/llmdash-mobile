@@ -60,6 +60,13 @@ RUN npm install -g hyperframes && rm -rf ~/.npm && \
     rm -rf /usr/lib/node_modules/hyperframes/node_modules/onnxruntime-node && \
     rm -rf /usr/lib/node_modules/hyperframes/node_modules/onnxruntime-common
 
+# Pre-download Chrome so the first user render skips the 107MB download
+RUN mkdir -p /tmp/_hf_warmup && \
+    echo '<!DOCTYPE html><html data-composition-id="w" data-start="0" data-width="320" data-height="240" data-duration="0.1"><body></body></html>' > /tmp/_hf_warmup/index.html && \
+    echo '{"width":320,"height":240,"fps":24,"duration":0.1}' > /tmp/_hf_warmup/composition.json && \
+    hyperframes render /tmp/_hf_warmup --output /tmp/_hf_warmup/out.mp4 2>/dev/null; \
+    rm -rf /tmp/_hf_warmup
+
 # The hyperframes CLI resolves its core runtime from /usr/lib/core/dist
 # but npm installs it to /usr/lib/node_modules/hyperframes/dist.
 # Create a compat symlink so the runtime manifest is found at build time.

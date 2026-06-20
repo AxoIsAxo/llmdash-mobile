@@ -44,18 +44,18 @@ class RenderVideoSkill(Skill):
             },
             "width": {
                 "type": "integer",
-                "description": "Composition width in pixels. Default: 1920",
-                "default": 1920,
+                "description": "Composition width in pixels. Default: 1280 (720p). Pass 1920 for 1080p.",
+                "default": 1280,
             },
             "height": {
                 "type": "integer",
-                "description": "Composition height in pixels. Default: 1080",
-                "default": 1080,
+                "description": "Composition height in pixels. Default: 720. Pass 1080 for 1080p.",
+                "default": 720,
             },
             "fps": {
                 "type": "integer",
-                "description": "Frame rate. Default: 30",
-                "default": 30,
+                "description": "Frame rate. Default: 24. Pass 30 for smoother motion.",
+                "default": 24,
             },
             "duration": {
                 "type": "number",
@@ -75,9 +75,9 @@ class RenderVideoSkill(Skill):
         docs_dir = app_config.settings.documents_dir
         os.makedirs(docs_dir, exist_ok=True)
 
-        width = arguments.get("width", 1920)
-        height = arguments.get("height", 1080)
-        fps = arguments.get("fps", 30)
+        width = arguments.get("width", 1280)
+        height = arguments.get("height", 720)
+        fps = arguments.get("fps", 24)
         duration = arguments.get("duration", 5)
 
         html = self._ensure_full_document(html)
@@ -195,18 +195,21 @@ class RenderVideoSkill(Skill):
 
     async def _render(self, project_dir: str, safe_name: str, docs_dir: str, duration: float) -> dict:
         output_path = os.path.join(docs_dir, f"{safe_name}.mp4")
-        cmd = ["hyperframes", "render", project_dir, "--output", output_path]
+        cmd = [
+            "hyperframes", "render", project_dir, "--output", output_path,
+            "--workers", "1", "--low-memory-mode",
+        ]
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=900)
         except FileNotFoundError:
             return {"success": False, "error": "hyperframes CLI not found"}
         except asyncio.TimeoutError:
-            return {"success": False, "error": "render timed out after 300s"}
+            return {"success": False, "error": "render timed out after 900s"}
 
         if proc.returncode != 0:
             err_text = stderr.decode("utf-8", errors="replace")[:1000] if stderr else "unknown error"
