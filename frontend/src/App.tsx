@@ -1639,6 +1639,8 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
     }
   }, [message.status, message.reasoning_content])
 
+  const isGenerating = message.status === 'generating'
+
   if (toolCalls && Array.isArray(toolCalls) && toolCalls.length > 0) {
     return (
       <div>
@@ -1748,6 +1750,53 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
                 <MarkdownRenderer content={message.content} />
               </div>
             )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (isGenerating && isAssistant && !toolCalls?.length) {
+    return (
+      <div>
+        {message.reasoning_content && (
+          <div className="flex justify-start mb-1">
+            <div className="w-8 shrink-0" />
+            <div className="max-w-[75%] min-w-0">
+              <button
+                onClick={() => setThinkingExpanded(!thinkingExpanded)}
+                className="flex items-center gap-1.5 text-xs text-theme-muted hover:text-theme-text transition-colors py-0.5 w-full"
+              >
+                <><Loader2 className="w-3 h-3 animate-spin text-theme-purple" /><span className="text-theme-purple">Thinking...</span></>
+                {thinkingExpanded ? <ChevronUp className="w-3 h-3 ml-auto" /> : <ChevronDown className="w-3 h-3 ml-auto" />}
+              </button>
+              {thinkingExpanded && (
+                <div className="mt-1 rounded-xl bg-theme-bg-elevated/50 border border-theme-border-light/50 px-3 py-2 text-sm text-theme-subtle italic">
+                  <MarkdownRenderer content={message.reasoning_content || ''} />
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        <div className="flex justify-start">
+          <div className="w-8 h-8 rounded-full bg-theme-accent flex items-center justify-center mr-2 mt-0.5 shrink-0">
+            <Bot className="w-4 h-4" />
+          </div>
+          <div className="max-w-[75%] min-w-0 space-y-2">
+            {message.content && (
+              <div className="bg-theme-bg-elevated rounded-xl px-4 py-2.5">
+                <MarkdownRenderer content={message.content} />
+              </div>
+            )}
+            <div className="flex items-center gap-2 text-xs text-theme-purple ml-1">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <span>Working on it...</span>
+              <span className="flex gap-0.5">
+                <span className="w-1 h-1 rounded-full bg-theme-purple animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="w-1 h-1 rounded-full bg-theme-purple animate-bounce" style={{ animationDelay: '150ms' }} />
+                <span className="w-1 h-1 rounded-full bg-theme-purple animate-bounce" style={{ animationDelay: '300ms' }} />
+              </span>
+            </div>
           </div>
         </div>
       </div>
