@@ -6,7 +6,7 @@ from ...sandbox import run_in_alpine
 
 class RunCommandSkill(Skill):
     name = "run_command"
-    description = "Execute Linux commands in a secure Alpine Linux sandbox via Docker. Has network access and common tools (curl, wget, python3, node, git)."
+    description = "Execute Linux commands in a secure ephemeral Alpine Linux sandbox via Docker. Root access, network enabled. Pre-installed: python3, pip, node, npm, git, curl, wget, gcc, build-base. You can apk add or pip install or npm install any additional packages you need."
     input_schema = {
         "type": "object",
         "properties": {
