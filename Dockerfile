@@ -23,11 +23,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     texlive-latex-base \
     texlive-latex-recommended \
     texlive-latex-extra \
-    libasound2t64 \
-    libatk-bridge2.0-0t64 \
-    libatk1.0-0t64 \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
     libcairo2 \
-    libcups2t64 \
+    libcups2 \
     libdrm2 \
     libgbm1 \
     libnspr4 \
