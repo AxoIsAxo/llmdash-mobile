@@ -852,6 +852,37 @@ async def serve_upload(filename: str, current_user: dict = Depends(get_current_u
 
 # --- Chat ---
 
+_DELIBERATION_PATTERNS = (
+    r"^(let me\s+(try|search|look|find|check|see|attempt|google|query|fetch|analyze|inspect|review|examine|verify|confirm|start|begin|first|take))",
+    r"^(i('ll| will| am going to| need to| should| can| want to| intend to)\s+(try|search|look|find|check|see|attempt|google|query|fetch|analyze|inspect|review|examine|verify|confirm|start|begin|use|take))",
+    r"^(searching|looking|trying|checking|fetching|analyzing|inspecting|examining)",
+    r"^(to (do|achieve|complete|answer) this[,]?\s+(i|we|first|let me))",
+    r"^(let's|lets)\s+(try|start|begin|check|look|see)",
+    r"^(ok[,]?|alright|sure|okay|fine)[,]?\s+(let me|i('ll| will| need to| am going to))",
+    r"^(first[,]?\s+(i|we|let me|i'll|i will))",
+    r"^(before (i|we|that)[,]?\s+(let me|i('ll| will)))",
+    r"^(here's? (what|how|my plan|what i'll|the plan))",
+    r"^(i('ll| will) (start|begin|go ahead|take a look))",
+)
+
+_DELIBERATION_ANSWER_KEYWORDS = ("result", "found", "here is", "here are", "answer is",
+                                 "answered", "done", "completed", "finished", "finally")
+
+
+def _looks_like_deliberation(text: str) -> bool:
+    """True if the reply is only a plan/deliberation with no action taken and no
+    actual answer (e.g. "Let me fetch the actual site to analyze its design...")."""
+    if not text:
+        return False
+    stripped = text.strip().lower()
+    if not stripped or len(stripped) > 160:
+        return False
+    if any(kw in stripped for kw in _DELIBERATION_ANSWER_KEYWORDS):
+        return False
+    import re as _re
+    return any(_re.match(p, stripped) for p in _DELIBERATION_PATTERNS)
+
+
 def _repair_tool_history(messages: list[dict]) -> list[dict]:
     """Defensive repair of stored chat history before sending it to a provider.
 
@@ -1308,6 +1339,48 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                         total_completion_tokens += chunk.usage["completion_tokens"]
                         total_total_tokens += chunk.usage["total_tokens"]
                     total_reasoning_tokens += chunk.reasoning_tokens
+
+                # --- Deliberation guard ---
+                # Some models reply with only a plan ("Let me fetch the actual
+                # site...", "I'll check...") and never call a tool. That is not
+                # an answer. Give the model ONE more chance to actually act.
+                if not final_tool_calls and _looks_like_deliberation(accumulated_content):
+                    logger.info(
+                        f"deliberation-only reply detected for conv {req.conversation_id}; "
+                        f"retrying with an action nudge"
+                    )
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "[Your previous reply only described what you planned to do. "
+                            "Do NOT plan out loud — take action NOW: call the appropriate "
+                            "tool immediately if the task needs one, otherwise give the "
+                            "final answer directly.]"
+                        ),
+                    })
+                    accumulated_content = ""
+                    accumulated_reasoning = ""
+                    last_save_len = 0
+                    try:
+                        retry_iter = provider.stream_chat(messages, tools, model)
+                    except Exception:
+                        retry_iter = None
+                    if retry_iter is not None:
+                        async for chunk in retry_iter:
+                            if chunk.content_delta:
+                                accumulated_content += chunk.content_delta
+                                await push_event("content_delta", content=chunk.content_delta)
+                                await save_draft_progress()
+                            if chunk.reasoning_content_delta:
+                                accumulated_reasoning += chunk.reasoning_content_delta
+                                await push_event("reasoning_delta", content=chunk.reasoning_content_delta)
+                            if chunk.tool_calls is not None:
+                                final_tool_calls = chunk.tool_calls
+                            if chunk.usage:
+                                total_prompt_tokens += chunk.usage["prompt_tokens"]
+                                total_completion_tokens += chunk.usage["completion_tokens"]
+                                total_total_tokens += chunk.usage["total_tokens"]
+                            total_reasoning_tokens += chunk.reasoning_tokens
 
                 tool_round = 0
                 seen_tool_signatures: set[tuple] = set()

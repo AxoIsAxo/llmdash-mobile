@@ -14,7 +14,19 @@ os.environ["JWT_SECRET"] = "test-secret-for-smoke-tests"
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app.main import _repair_tool_history, app  # noqa: E402
+from app.main import _looks_like_deliberation, _repair_tool_history, app  # noqa: E402
+
+
+def test_looks_like_deliberation():
+    assert _looks_like_deliberation(
+        "Let me fetch the actual site to analyze its design (colors, fonts, layout) so I can replicate it faithfully."
+    ) is True
+    assert _looks_like_deliberation("I'll check the current theme and then update it.") is True
+    assert _looks_like_deliberation("First, I need to look at the page.") is True
+    assert _looks_like_deliberation("The answer is 42.") is False
+    assert _looks_like_deliberation("Sure! Here's the result: the theme is dark.") is False
+    assert _looks_like_deliberation("") is False
+    assert _looks_like_deliberation("Hello! How can I help you today?") is False
 
 
 def test_repair_tool_history_drops_orphan_tool_messages():
