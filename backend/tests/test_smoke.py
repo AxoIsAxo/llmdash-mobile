@@ -14,7 +14,46 @@ os.environ["JWT_SECRET"] = "test-secret-for-smoke-tests"
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app.main import app  # noqa: E402
+from app.main import _repair_tool_history, app  # noqa: E402
+
+
+def test_repair_tool_history_drops_orphan_tool_messages():
+    # Corrupted history: assistant only lists round-2 calls, but tool
+    # results for both rounds were stored.
+    history = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "let me search", "tool_calls_json": '[{"id":"c2","name":"web_search","arguments":{}}]'},
+        {"role": "tool", "tool_call_id": "c1", "tool_name": "web_search", "content": "old result"},
+        {"role": "tool", "tool_call_id": "c2", "tool_name": "web_search", "content": "new result"},
+    ]
+    repaired = _repair_tool_history(history)
+    assert len(repaired) == 3  # orphan c1 dropped
+    assert repaired[1]["tool_calls_json"] == '[{"id": "c2", "name": "web_search", "arguments": {}}]'
+    assert [m["tool_call_id"] for m in repaired if m["role"] == "tool"] == ["c2"]
+
+
+def test_repair_tool_history_strips_unanswered_calls():
+    # Assistant called a tool but the run was cancelled before results saved.
+    history = [
+        {"role": "user", "content": "go"},
+        {"role": "assistant", "content": "calling", "tool_calls_json": '[{"id":"c1","name":"run_command","arguments":{}}]'},
+    ]
+    repaired = _repair_tool_history(history)
+    assert repaired[-1]["tool_calls_json"] is None
+    assert repaired[-1]["content"] == "calling"
+
+
+def test_repair_tool_history_keeps_valid_sequence():
+    history = [
+        {"role": "user", "content": "go"},
+        {"role": "assistant", "content": "", "tool_calls_json": '[{"id":"c1","name":"render_html","arguments":{}}]'},
+        {"role": "tool", "tool_call_id": "c1", "tool_name": "render_html", "content": "HTML_RENDER:abc"},
+        {"role": "assistant", "content": "done"},
+    ]
+    repaired = _repair_tool_history(history)
+    assert len(repaired) == 4
+    assert repaired[1]["tool_calls_json"] is not None
+    assert repaired[2]["role"] == "tool"
 
 
 def test_full_flow():

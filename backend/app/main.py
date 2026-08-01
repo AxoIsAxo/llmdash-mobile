@@ -850,6 +850,61 @@ async def serve_upload(filename: str, current_user: dict = Depends(get_current_u
 
 # --- Chat ---
 
+def _repair_tool_history(messages: list[dict]) -> list[dict]:
+    """Defensive repair of stored chat history before sending it to a provider.
+
+    Older generations could persist histories where the assistant message's
+    tool_calls_json only lists the LAST tool round while tool result messages
+    for ALL rounds were stored, or where tool calls were never answered
+    (cancelled/aborted runs). Providers reject such histories with errors like
+    "Messages with role 'tool' must be a response to a preceding message with
+    'tool_calls'". This pass:
+      - keeps only tool messages whose id matches the preceding assistant's calls,
+      - filters each assistant's tool_calls down to the ones with a response,
+      - strips unanswered tool_calls from assistant messages,
+      - drops orphaned tool messages.
+    """
+    repaired: list[dict] = []
+    i = 0
+    n = len(messages)
+    while i < n:
+        m = messages[i]
+        if m["role"] == "assistant" and m.get("tool_calls_json"):
+            try:
+                calls = json.loads(m["tool_calls_json"]) if isinstance(m["tool_calls_json"], str) else m["tool_calls_json"]
+            except (json.JSONDecodeError, TypeError):
+                calls = None
+            calls = [c for c in (calls or []) if isinstance(c, dict) and c.get("id")]
+            if calls:
+                call_ids = {c["id"] for c in calls}
+                j = i + 1
+                tool_msgs = []
+                while j < n and messages[j]["role"] == "tool":
+                    tool_msgs.append(messages[j])
+                    j += 1
+                responded = {t.get("tool_call_id") for t in tool_msgs if t.get("tool_call_id") in call_ids}
+                kept_calls = [c for c in calls if c["id"] in responded]
+                if kept_calls:
+                    entry = dict(m)
+                    entry["tool_calls_json"] = json.dumps(kept_calls)
+                    repaired.append(entry)
+                    repaired.extend(t for t in tool_msgs if t.get("tool_call_id") in responded)
+                    i = j
+                    continue
+            # No valid tool responses: keep the text, drop the tool calls.
+            entry = dict(m)
+            entry["tool_calls_json"] = None
+            repaired.append(entry)
+            i += 1
+        elif m["role"] == "tool":
+            # Orphaned tool message with no preceding assistant tool_calls.
+            i += 1
+        else:
+            repaired.append(m)
+            i += 1
+    return repaired
+
+
 @router.post("/chat/stream")
 async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     conv_result = await db.execute(
@@ -982,6 +1037,8 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
         if m.reasoning_content:
             entry["reasoning_content"] = m.reasoning_content
         messages.append(entry)
+
+    messages = _repair_tool_history(messages)
 
     system_prompt = build_system_prompt(model.name)
     messages.insert(0, {"role": "system", "content": system_prompt})
@@ -1253,6 +1310,10 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                 tool_round = 0
                 seen_tool_signatures: set[tuple] = set()
                 consecutive_search_failures = 0
+                # Every tool call that is actually EXECUTED, across all rounds.
+                # The DB assistant message must list ALL of them so every stored
+                # 'tool' result message has a matching tool_call_id.
+                all_tool_calls: list[dict] = []
 
                 def _looks_like_filler(text: str) -> bool:
                     if not text or len(text) < 5:
@@ -1291,11 +1352,12 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                         break
                     seen_tool_signatures.add(current_sig)
 
+                    for tc in final_tool_calls:
+                        if not any(c["id"] == tc["id"] for c in all_tool_calls):
+                            all_tool_calls.append({"id": tc["id"], "name": tc["name"], "arguments": tc["arguments"]})
+
                     draft.content = accumulated_content or draft.content
-                    draft.tool_calls_json = json.dumps([
-                        {"id": tc["id"], "name": tc["name"], "arguments": tc["arguments"]}
-                        for tc in final_tool_calls
-                    ])
+                    draft.tool_calls_json = json.dumps(all_tool_calls) if all_tool_calls else None
                     draft.reasoning_content = accumulated_reasoning or None
                     await sess.commit()
 
@@ -1382,19 +1444,11 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                     draft.reasoning_content = accumulated_reasoning or None
                     draft.status = "done"
                     draft.created_at = datetime.now(timezone.utc)
-                    if final_tool_calls:
-                        existing_tcs = []
-                        if draft.tool_calls_json:
-                            try:
-                                existing_tcs = json.loads(draft.tool_calls_json)
-                            except Exception:
-                                existing_tcs = []
-                        seen_ids = {tc.get("id") for tc in existing_tcs}
-                        merged = list(existing_tcs)
-                        for tc in final_tool_calls:
-                            if tc["id"] not in seen_ids:
-                                merged.append({"id": tc["id"], "name": tc["name"], "arguments": tc["arguments"]})
-                        draft.tool_calls_json = json.dumps(merged) if merged else None
+                    # Persist ALL executed tool calls (not just the last round).
+                    # final_tool_calls at this point may contain calls the model
+                    # requested but which were NOT executed (loop cap/abort) —
+                    # those must not be stored, hence all_tool_calls only.
+                    draft.tool_calls_json = json.dumps(all_tool_calls) if all_tool_calls else None
                     await sess.commit()
                 else:
                     sess.add(Message(
