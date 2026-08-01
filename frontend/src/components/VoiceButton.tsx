@@ -37,21 +37,6 @@ async function sendAudioForTranscription(audioBlob: Blob): Promise<string> {
   return data.text || ''
 }
 
-function extFromMime(mime: string): string {
-  const map: Record<string, string> = {
-    'audio/webm': 'webm',
-    'audio/webm;codecs=opus': 'webm',
-    'audio/ogg': 'ogg',
-    'audio/ogg;codecs=opus': 'ogg',
-    'audio/mp4': 'm4a',
-    'audio/mp4;codecs=mp4a.40.2': 'm4a',
-    'audio/mpeg': 'mp3',
-    'audio/wav': 'wav',
-    'audio/x-wav': 'wav',
-  }
-  return map[mime.toLowerCase()] || 'webm'
-}
-
 export default function VoiceButton({
   onTranscribed,
   onAudioCaptured,
@@ -209,5 +194,3 @@ export default function VoiceButton({
     </button>
   )
 }
-
-export { extFromMime }

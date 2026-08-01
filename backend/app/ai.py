@@ -1,11 +1,9 @@
-import base64
 import json
 import re
 from typing import Optional, AsyncGenerator
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-import httpx
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
 
@@ -77,21 +75,21 @@ def _xml_tag_value(m: "re.Match[str]") -> str:
     return ""
 
 
-def _parse_tool_arguments(raw: str, tool_name: str) -> tuple[dict, bool]:
+def _parse_tool_arguments(raw: str, tool_name: str) -> tuple[dict, str]:
     """Parse the concatenated JSON arguments string for a streamed tool call.
 
-    Returns (arguments, recovered). If the first json.loads fails, try a
-    few common recovery strategies for truncated/malformed streaming output
-    before giving up. When recovery succeeds the recovered flag is True so
-    callers can log/observe that something was off.
+    Returns (arguments, status) where status is one of:
+      "clean"     - parsed successfully with json.loads on the first try
+      "recovered" - parsed via a recovery strategy (truncated/malformed input)
+      "failed"    - could not be parsed at all (arguments is {})
     """
     if not raw or not raw.strip():
-        return {}, True
+        return {}, "failed"
     try:
         parsed = json.loads(raw)
         if isinstance(parsed, dict):
-            return parsed, True
-        return {"value": parsed}, True
+            return parsed, "clean"
+        return {"value": parsed}, "clean"
     except (json.JSONDecodeError, TypeError):
         pass
 
@@ -136,7 +134,7 @@ def _parse_tool_arguments(raw: str, tool_name: str) -> tuple[dict, bool]:
             try:
                 parsed = json.loads(raw[:head] + '"}')
                 if isinstance(parsed, dict):
-                    return parsed, False
+                    return parsed, "recovered"
             except (json.JSONDecodeError, TypeError):
                 pass
 
@@ -176,7 +174,7 @@ def _parse_tool_arguments(raw: str, tool_name: str) -> tuple[dict, bool]:
                     try:
                         parsed = json.loads(candidate)
                         if isinstance(parsed, dict) and parsed:
-                            return parsed, False
+                            return parsed, "recovered"
                     except (json.JSONDecodeError, TypeError):
                         continue
                     break
@@ -193,7 +191,7 @@ def _parse_tool_arguments(raw: str, tool_name: str) -> tuple[dict, bool]:
     try:
         parsed = json.loads(candidate)
         if isinstance(parsed, dict) and parsed:
-            return parsed, False
+            return parsed, "recovered"
     except (json.JSONDecodeError, TypeError):
         pass
 
@@ -222,13 +220,13 @@ def _parse_tool_arguments(raw: str, tool_name: str) -> tuple[dict, bool]:
                         try:
                             parsed = json.loads(candidate)
                             if isinstance(parsed, dict) and parsed:
-                                return parsed, False
+                                return parsed, "recovered"
                         except (json.JSONDecodeError, TypeError):
                             pass
                         break
                     i += 1
 
-    return {}, False
+    return {}, "failed"
 
 
 def _parse_inline_tool_call(json_str: str, fallback_id: str) -> Optional[dict]:
@@ -890,6 +888,17 @@ class OpenAICompatibleProvider(AIProvider):
         reasoning_tokens = 0
 
         async for chunk in stream:
+            # Process usage first: OpenAI sends the usage summary on a final
+            # chunk with an EMPTY choices list. Skipping it (as before) meant
+            # streamed token usage was never captured.
+            if chunk.usage:
+                usage = {
+                    "prompt_tokens": chunk.usage.prompt_tokens,
+                    "completion_tokens": chunk.usage.completion_tokens,
+                    "total_tokens": chunk.usage.total_tokens,
+                }
+                details = getattr(chunk.usage, "completion_tokens_details", None)
+                reasoning_tokens = getattr(details, "reasoning_tokens", 0) or 0
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
@@ -922,16 +931,6 @@ class OpenAICompatibleProvider(AIProvider):
                         if tc.function.arguments:
                             tool_call_accumulator[idx]["arguments_str"] += tc.function.arguments
 
-            if chunk.usage:
-                usage = {
-                    "prompt_tokens": chunk.usage.prompt_tokens,
-                    "completion_tokens": chunk.usage.completion_tokens,
-                    "total_tokens": chunk.usage.total_tokens,
-                }
-                reasoning_tokens = getattr(chunk.usage, "completion_tokens_details", None)
-                if reasoning_tokens:
-                    reasoning_tokens = getattr(reasoning_tokens, "reasoning_tokens", 0) or 0
-
         flushed = inline_tool_call_filter.flush()
         if flushed:
             yield StreamChunk(content_delta=flushed)
@@ -939,25 +938,32 @@ class OpenAICompatibleProvider(AIProvider):
         accumulated_tool_calls = []
         for tc_data in tool_call_accumulator.values():
             raw_args = tc_data["arguments_str"]
-            args, recovered = _parse_tool_arguments(raw_args, tc_data["name"])
-            if not raw_args:
+            args, status = _parse_tool_arguments(raw_args, tc_data["name"])
+            if status == "failed":
+                if not raw_args:
+                    print(
+                        f"[tool-call] {tc_data['name']!r} emitted with NO arguments "
+                        f"(id={tc_data['id']!r}) — model did not stream any argument chunks",
+                        flush=True,
+                    )
+                else:
+                    try:
+                        json.loads(raw_args)
+                        err = "(unknown parse error)"
+                    except json.JSONDecodeError as e:
+                        err = f"{e.msg} at pos {e.pos}"
+                    except Exception as e:
+                        err = str(e)
+                    print(
+                        f"[tool-call] malformed JSON arguments for {tc_data['name']!r} "
+                        f"(len={len(raw_args)}): {err}\n"
+                        f"  raw tail: ...{raw_args[-200:]!r}",
+                        flush=True,
+                    )
+            elif status == "recovered":
                 print(
-                    f"[tool-call] {tc_data['name']!r} emitted with NO arguments "
-                    f"(id={tc_data['id']!r}) — model did not stream any argument chunks",
-                    flush=True,
-                )
-            elif not recovered:
-                try:
-                    json.loads(raw_args)
-                    err = "(unknown parse error)"
-                except json.JSONDecodeError as e:
-                    err = f"{e.msg} at pos {e.pos}"
-                except Exception as e:
-                    err = str(e)
-                print(
-                    f"[tool-call] malformed JSON arguments for {tc_data['name']!r} "
-                    f"(len={len(raw_args)}): {err}\n"
-                    f"  raw tail: ...{raw_args[-200:]!r}",
+                    f"[tool-call] recovered truncated JSON arguments for {tc_data['name']!r} "
+                    f"(len={len(raw_args)})",
                     flush=True,
                 )
             accumulated_tool_calls.append({
@@ -1015,7 +1021,18 @@ class OpenAICompatibleProvider(AIProvider):
                 n=n,
             )
         if hasattr(response, "data"):
-            images = [img.url or img.b64_json or "" for img in response.data]
+            images = []
+            for img in response.data:
+                if img.url:
+                    images.append(img.url)
+                elif img.b64_json:
+                    b64 = img.b64_json
+                    if b64.startswith("data:"):
+                        images.append(b64)
+                    else:
+                        images.append(f"data:image/png;base64,{b64}")
+                else:
+                    images.append("")
             revised = getattr(response, "revised_prompt", None) or None
             return ImageGenerationResult(images=images, revised_prompt=revised)
         msg = response.choices[0].message
@@ -1128,6 +1145,8 @@ class AnthropicProvider(AIProvider):
             max_tok = model_config.max_tokens or 4096
             if budget >= max_tok:
                 raise ValueError(f"thinking_budget_tokens ({budget}) must be less than max_tokens ({max_tok})")
+            # Anthropic requires temperature == 1 with extended thinking.
+            kwargs["temperature"] = 1
             kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
 
         response = await client.messages.create(**kwargs)
@@ -1175,6 +1194,8 @@ class AnthropicProvider(AIProvider):
             max_tok = model_config.max_tokens or 4096
             if budget >= max_tok:
                 raise ValueError(f"thinking_budget_tokens ({budget}) must be less than max_tokens ({max_tok})")
+            # Anthropic requires temperature == 1 with extended thinking.
+            kwargs["temperature"] = 1
             kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
 
         accumulated_thinking = ""

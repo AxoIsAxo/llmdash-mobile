@@ -1,8 +1,6 @@
 from __future__ import annotations
-from typing import Optional
 from fpdf import FPDF
 import os
-from html import escape
 
 from .ast_types import (
     BlockNode, InlineNode, Text, Bold, Italic, Strikethrough, Underline,
@@ -17,10 +15,12 @@ _DEJAVU_DIRS = [
     "/usr/share/fonts/truetype/dejavu",
     "/usr/share/fonts/TTF",
     "/usr/share/fonts/dejavu",
+    "/Library/Fonts",
+    os.path.expanduser("~/Library/Fonts"),
 ]
 _DEJAVU_DIR: str = "/usr/share/fonts/TTF"
 for _d in _DEJAVU_DIRS:
-    if os.path.isfile(f"{_d}/DejaVuSans.ttf"):
+    if os.path.isfile(os.path.join(_d, "DejaVuSans.ttf")):
         _DEJAVU_DIR = _d
         break
 
@@ -38,6 +38,13 @@ class DocFPDF(FPDF):
 
     def _register_fonts(self):
         dv = _DEJAVU_DIR
+        missing = [f for f in ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf", "DejaVuSans-Oblique.ttf", "DejaVuSans-BoldOblique.ttf", "DejaVuSerif.ttf", "DejaVuSansMono.ttf") if not os.path.isfile(os.path.join(dv, f))]
+        if missing:
+            raise RuntimeError(
+                f"DejaVu fonts not found in {dv} (missing: {', '.join(missing)}). "
+                "Install the 'fonts-dejavu' package (Debian/Ubuntu) or the "
+                "'dejavu' Homebrew package (macOS)."
+            )
         self.add_font("DejaVu", "", f"{dv}/DejaVuSans.ttf", uni=True)
         self.add_font("DejaVu", "B", f"{dv}/DejaVuSans-Bold.ttf", uni=True)
         self.add_font("DejaVu", "I", f"{dv}/DejaVuSans-Oblique.ttf", uni=True)

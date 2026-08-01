@@ -1,24 +1,16 @@
 from __future__ import annotations
-from typing import Optional
 from odf.opendocument import OpenDocumentText
-from odf.style import (
-    Style, ParagraphProperties, TextProperties, TableProperties,
-    TableColumnProperties, TableRowProperties, TableCellProperties,
-    GraphicProperties, DrawingPageProperties,
-)
-from odf.text import H, P, Span, A, List, ListItem as OdfListItem, ListStyle, ListLevelStyleBullet, ListLevelStyleNumber, NoteCitation, NoteBody
-from odf.table import Table as OdfTable, TableRow, TableColumn, TableCell
+from odf.style import Style, ParagraphProperties, TextProperties
+from odf.text import H, P, Span, A, List, ListItem as OdfListItem
+from odf.table import Table as OdfTable, TableRow, TableCell
 from odf.draw import Frame, Image as OdfImage
-from odf import draw, text as odftext
-from odf.namespaces import TEXTNS, STYLENS, TABLENS, DRAWNS
-from odf.office import AutomaticStyles
 import os
 import base64
 
 from .ast_types import (
     BlockNode, InlineNode, Text, Bold, Italic, Strikethrough, Underline,
     InlineCode, Link, Image, MathInline, Subscript, Superscript,
-    Heading, Paragraph, BulletList, ListItem as ListItemNode, Table as TableNode, CodeBlock,
+    Heading, Paragraph, BulletList, Table as TableNode, CodeBlock,
     BlockQuote, HorizontalRule, ChartDirective, MathBlock,
 )
 from .chart_generator import generate_chart_png

@@ -46,7 +46,7 @@ class PatchUserCssSkill(Skill):
     }
 
     async def execute(self, arguments: dict, _current_user: dict = None) -> str:
-        from ...tools import _apply_patch
+        from ...patch_utils import apply_patch
 
         old_str = arguments.get("old_str", "")
         new_str = arguments.get("new_str", "")
@@ -59,7 +59,7 @@ class PatchUserCssSkill(Skill):
                 return "Error: User not found"
 
             current = user.custom_css or ""
-            success, err, new_css = _apply_patch(current, old_str, new_str)
+            success, err, new_css = apply_patch(current, old_str, new_str)
             if not success:
                 return f"Error: {err}"
 

@@ -219,21 +219,19 @@ export interface FileUploadSettings {
 
 export interface Document {
   id: number;
-  user_id: number;
   filename: string;
-  content: string;
   format: string;
   version: number;
-  old_str: string | null;
-  new_str: string | null;
+  file_path: string;
   file_size: number;
+  content: string | null;
   created_at: string;
   updated_at: string;
 }
 
 export interface DocumentVersion {
   version: number;
-  content: string;
   file_size: number;
+  content: string | null;
   created_at: string;
 }

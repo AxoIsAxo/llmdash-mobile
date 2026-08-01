@@ -72,8 +72,10 @@ git clone https://codeberg.org/axoisaxo/LLMDash.git
 cd llmdash
 
 # Copy and edit environment configuration
-cp backend/.env.example backend/.env
-# Add your API keys to backend/.env
+# NOTE: the backend reads ./data/.env (created automatically on first run —
+# API keys can also be set from the Admin Panel → API Keys tab).
+cp backend/.env.example data/.env
+# Add your API keys to data/.env (or use the Admin Panel)
 
 # Start the application
 docker compose up -d
@@ -94,7 +96,7 @@ The application will be available at `http://localhost:8000`.
 
 ### Environment Variables
 
-Create `backend/.env` (see `backend/.env.example` for a template):
+The app reads `data/.env` (next to the SQLite database). See `backend/.env.example` for a template. Keys can also be set from **Admin Panel → API Keys**:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
@@ -102,9 +104,9 @@ Create `backend/.env` (see `backend/.env.example` for a template):
 | `ANTHROPIC_API_KEY` | No | Anthropic Claude API key |
 | `MINIMAX_API_KEY` | No | MiniMax API key |
 | `OPENROUTER_API_KEY` | No | OpenRouter API key |
-| `SEARXNG_URL` | No | SearXNG instance URL (default: `http://searxng:8080`) |
+| `SEARXNG_URL` | No | SearXNG instance URL (default: `http://localhost:8080`; `http://searxng:8080` inside Docker) |
 | `DATABASE_PATH` | No | SQLite database path (default: `data/llmdash.db`) |
-| `JWT_SECRET` | No | JWT signing secret (auto-generated if omitted) |
+| `JWT_SECRET` | No | JWT signing secret (auto-generated and persisted to `data/jwt_secret` if omitted) |
 | `REGISTRATION_ENABLED` | No | Allow self-registration (`true`/`false`) |
 | `IP_ACCOUNT_LIMIT` | No | Max accounts per IP address |
 | `LNBITS_URL` | No | LNBits instance URL for Lightning payments |
@@ -140,6 +142,17 @@ cd backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+### Tests
+
+```bash
+cd backend
+pip install -r requirements-dev.txt
+pytest
+
+cd ../frontend
+npm test
 ```
 
 ### Frontend

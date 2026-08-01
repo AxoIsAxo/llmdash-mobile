@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 
@@ -24,6 +24,7 @@ class Skill(ABC):
     name: str
     description: str
     input_schema: dict
+    enabled: bool = True
 
     @abstractmethod
     async def execute(self, arguments: dict, **context) -> str:

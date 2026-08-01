@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 import os
-from typing import Optional
 
 from sqlalchemy import select
 
@@ -15,7 +14,7 @@ from ...document_engine.docx_builder import build_docx
 from ...document_engine.pdf_builder import build_pdf
 from ...document_engine.odt_builder import build_odt
 from ...document_engine.latex_builder import build_latex, compile_latex_to_pdf
-from ...tools import _apply_patch
+from ...patch_utils import apply_patch
 
 
 def _generate_preview(content: str, filename: str, fmt: str) -> str:
@@ -68,7 +67,6 @@ class EditDocumentSkill(Skill):
         fs = font_size or 11
 
         existing_version = 0
-        existing_file_path = None
         existing_content_md = None
 
         if existing_doc_id is not None and _current_user:
@@ -82,11 +80,10 @@ class EditDocumentSkill(Skill):
                 doc = result.scalar_one_or_none()
                 if doc:
                     existing_version = doc.version
-                    existing_file_path = doc.file_path
                     existing_content_md = doc.content_md or ""
 
                     if old_str is not None and new_str is not None and existing_content_md:
-                        success, err, patched = _apply_patch(existing_content_md, old_str, new_str)
+                        success, err, patched = apply_patch(existing_content_md, old_str, new_str)
                         if not success:
                             return f"Error: {err}. The existing content has {len(existing_content_md)} characters."
                         content = patched

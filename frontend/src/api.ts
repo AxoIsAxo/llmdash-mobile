@@ -268,11 +268,6 @@ export const api = {
   },
 
   chat: {
-    stream(convId: number, message: string, modelId?: number): EventSource {
-      const params = new URLSearchParams({ conversation_id: String(convId), message });
-      if (modelId) params.set('model_id', String(modelId));
-      return new EventSource(`${BASE}/chat/stream?${params}`);
-    },
     send: async function* (convId: number, message: string, modelId?: number, signal?: AbortSignal, attachments?: import('./types').AttachmentRecord[]) {
       const token = getToken();
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };

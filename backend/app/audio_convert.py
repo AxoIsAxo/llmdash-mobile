@@ -1,4 +1,3 @@
-import base64
 import io
 import logging
 import os
@@ -39,7 +38,7 @@ def detect_audio_format(filename: str, content_type: Optional[str] = None) -> st
         ext = os.path.splitext(str(filename).strip().lower())[1].lstrip(".")
         if ext in name_map:
             return name_map[ext]
-    return "wav"
+    return ""
 
 
 def _convert_to_wav_with_pyav(audio_bytes: bytes, src_format: str) -> Optional[bytes]:
@@ -210,21 +209,3 @@ def prepare_audio_for_provider(
         "(tried PyAV and ffmpeg). Returning None."
     )
     return None, None
-
-
-def audio_to_data_url(
-    audio_bytes: bytes,
-    filename: str = "",
-    content_type: Optional[str] = None,
-) -> str:
-    """Convert audio bytes to a base64 data URL string."""
-    b64 = base64.b64encode(audio_bytes).decode("ascii")
-    ct = (content_type or "").split(";", 1)[0].strip().lower()
-    if not ct:
-        ext = os.path.splitext(filename or "")[1].lstrip(".").lower()
-        ct = {
-            "wav": "audio/wav", "mp3": "audio/mpeg", "mpeg": "audio/mpeg",
-            "m4a": "audio/m4a", "mp4": "audio/mp4", "aac": "audio/aac",
-            "flac": "audio/flac", "ogg": "audio/ogg", "webm": "audio/webm",
-        }.get(ext, "audio/wav")
-    return f"data:{ct};base64,{b64}"

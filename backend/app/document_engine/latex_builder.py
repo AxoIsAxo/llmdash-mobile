@@ -2,7 +2,6 @@ from __future__ import annotations
 from typing import Optional
 from jinja2 import Template
 import os
-import re
 import shutil
 import subprocess
 import tempfile
@@ -24,6 +23,7 @@ _LATEX_TEMPLATE = Template(r"""\documentclass[{{ font_size }}pt]{article}
 \usepackage{booktabs}
 \usepackage{xcolor}
 \usepackage{listings}
+\usepackage[normalem]{ulem}
 \usepackage{hyperref}
 \usepackage{amsmath}
 \usepackage{amssymb}
@@ -47,7 +47,7 @@ _LATEX_TEMPLATE = Template(r"""\documentclass[{{ font_size }}pt]{article}
   urlcolor=linkcolor,
 }
 
-\title{{title|e}}
+\title{{ title }}
 \author{LLMDash}
 \date{\today}
 
@@ -226,7 +226,7 @@ def build_latex(
             body_parts.append(part)
     body = "\n".join(body_parts)
 
-    result = _LATEX_TEMPLATE.render(title=title, body=body, font_size=11)
+    result = _LATEX_TEMPLATE.render(title=_escape_latex(title), body=body, font_size=11)
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(result)
     return filepath
@@ -241,7 +241,7 @@ def compile_latex_to_pdf(tex_path: str, output_dir: Optional[str] = None) -> Opt
 
     with tempfile.TemporaryDirectory() as tmpdir:
         try:
-            result = subprocess.run(
+            subprocess.run(
                 ["pdflatex", "-interaction=nonstopmode", "-output-directory", tmpdir, tex_path],
                 capture_output=True,
                 text=True,

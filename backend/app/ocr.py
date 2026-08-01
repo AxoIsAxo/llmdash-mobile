@@ -1,11 +1,10 @@
-import base64
 import os
-import io
 from typing import Optional
 
 _pytesseract_available = False
 _pil_available = False
 _pymupdf_available = False
+_ocr_available: Optional[bool] = None
 
 try:
     import pytesseract
@@ -27,12 +26,18 @@ except ImportError:
 
 
 def is_ocr_available() -> bool:
+    global _ocr_available
+    if _ocr_available is not None:
+        return _ocr_available
     if not (_pytesseract_available and _pil_available):
+        _ocr_available = False
         return False
     try:
-        version = pytesseract.get_tesseract_version()
+        pytesseract.get_tesseract_version()
+        _ocr_available = True
         return True
     except Exception:
+        _ocr_available = False
         return False
 
 
@@ -42,19 +47,6 @@ def ocr_image(file_path: str) -> Optional[str]:
 
     try:
         img = Image.open(file_path)
-        text = pytesseract.image_to_string(img)
-        return text.strip() if text.strip() else None
-    except Exception:
-        return None
-
-
-def ocr_image_base64(base64_data: str) -> Optional[str]:
-    if not is_ocr_available():
-        return None
-
-    try:
-        img_bytes = base64.b64decode(base64_data)
-        img = Image.open(io.BytesIO(img_bytes))
         text = pytesseract.image_to_string(img)
         return text.strip() if text.strip() else None
     except Exception:
@@ -116,8 +108,7 @@ ALLOWED_UPLOAD_EXTENSIONS = IMAGE_EXTENSIONS.union(AUDIO_EXTENSIONS).union({
     '.html', '.css', '.scss', '.less', '.sh', '.bash', '.zsh',
     '.rs', '.go', '.java', '.c', '.cpp', '.h', '.hpp',
     '.sql', '.r', '.rb', '.php', '.lua', '.swift', '.kt',
-    '.tf', '.env', '.gitignore', '.dockerfile', '.makefile',
-    '.conf', '.cnf', '.gradle', '.properties', '.lock',
+    '.tf', '.conf', '.cnf', '.gradle', '.properties', '.lock',
     '.pdf',
 })
 

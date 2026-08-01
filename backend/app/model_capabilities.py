@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import asyncio
 import logging
-from typing import Optional
 
 import httpx
 
@@ -13,7 +11,12 @@ AUDIO_MODEL_LOWERS = []
 _RUNTIME_AUDIO_CACHE: dict[tuple[str, str], bool] = {}
 
 
-def _probe_audio_support(base_url: str, api_key: str, model_name: str) -> bool:
+async def _probe_audio_support(base_url: str, api_key: str, model_name: str) -> bool:
+    """Probe the provider's /chat/completions endpoint with a tiny WAV
+    input_audio part. Some providers advertise audio in their metadata but
+    reject it at inference time, and vice versa. Fully async — never blocks
+    the event loop.
+    """
     import base64 as _b64
     import struct
     sample_rate = 16000
@@ -26,9 +29,9 @@ def _probe_audio_support(base_url: str, api_key: str, model_name: str) -> bool:
     wav = riff + fmt + data
     b64 = _b64.b64encode(wav).decode("ascii")
 
-    async def _do_probe():
+    try:
         async with httpx.AsyncClient(timeout=8) as client:
-            return await client.post(
+            resp = await client.post(
                 f"{base_url.rstrip('/')}/chat/completions",
                 headers={
                     "Authorization": f"Bearer {api_key}",
@@ -46,16 +49,6 @@ def _probe_audio_support(base_url: str, api_key: str, model_name: str) -> bool:
                     "max_tokens": 1,
                 },
             )
-
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                fut = pool.submit(asyncio.run, _do_probe())
-                resp = fut.result(timeout=10)
-        else:
-            resp = asyncio.run(_do_probe())
     except Exception:
         return False
 
@@ -85,7 +78,6 @@ async def detect_audio_enabled(model, app_config) -> bool:
         and getattr(model, "api_key_env", None)
     ):
         try:
-            from . import config as _app_config
             cache_key = (model.base_url.rstrip("/"), model.model_name)
             cached = _RUNTIME_AUDIO_CACHE.get(cache_key)
             if cached is None:
@@ -112,7 +104,7 @@ async def detect_audio_enabled(model, app_config) -> bool:
                 else:
                     arch_summary = f"http_{resp.status_code}"
                 if not detected and resp.status_code == 200 and api_key:
-                    probe = _probe_audio_support(cache_key[0], api_key, model.model_name)
+                    probe = await _probe_audio_support(cache_key[0], api_key, model.model_name)
                     detected = probe
                     arch_summary += f" probe={probe}"
                 _RUNTIME_AUDIO_CACHE[cache_key] = detected

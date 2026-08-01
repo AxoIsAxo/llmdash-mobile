@@ -7,3 +7,6 @@ data
 *.md
 .idea
 .vscode
+**/.env
+**/.env.*
+jwt_secret

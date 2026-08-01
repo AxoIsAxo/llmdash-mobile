@@ -533,14 +533,12 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
   })
 
   const handleMoveUp = async (idx: number) => {
-    console.log('handleMoveUp called, idx:', idx, 'reordering:', reordering)
     if (idx <= 0 || reordering) return
     setReordering(true)
     try {
       const reordered = [...enabledModels]
       ;[reordered[idx - 1], reordered[idx]] = [reordered[idx], reordered[idx - 1]]
       const ids = reordered.map(m => m.id)
-      console.log('Reordering model IDs:', ids)
       await api.models.reorder(ids)
       await loadAll()
       onRefresh()
@@ -549,14 +547,12 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
   }
 
   const handleMoveDown = async (idx: number) => {
-    console.log('handleMoveDown called, idx:', idx, 'reordering:', reordering)
     if (idx >= enabledModels.length - 1 || reordering) return
     setReordering(true)
     try {
       const reordered = [...enabledModels]
       ;[reordered[idx], reordered[idx + 1]] = [reordered[idx + 1], reordered[idx]]
       const ids = reordered.map(m => m.id)
-      console.log('Reordering model IDs:', ids)
       await api.models.reorder(ids)
       await loadAll()
       onRefresh()

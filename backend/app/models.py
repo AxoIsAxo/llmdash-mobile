@@ -162,14 +162,6 @@ class ChatRequest(BaseModel):
     attachments: Optional[list[dict]] = None
 
 
-class ChatAttachment(BaseModel):
-    filename: str
-    file_type: str
-    file_path: str
-    file_size: int
-    ocr_text: Optional[str] = None
-
-
 class UploadResponse(BaseModel):
     filename: str
     file_path: str
@@ -216,18 +208,6 @@ class BranchRequest(BaseModel):
     message_index: int = Field(..., ge=0)
 
 
-class ToolCallSchema(BaseModel):
-    id: str
-    name: str
-    arguments: dict
-
-
-class ToolResultMessage(BaseModel):
-    role: str = "tool"
-    tool_call_id: str
-    content: str
-
-
 class MessageResponse(BaseModel):
     id: int
     role: str
@@ -261,11 +241,6 @@ class EnvUpdateRequest(BaseModel):
 class EnvStatusResponse(BaseModel):
     configured: list[str]
     available: list[str]
-
-
-class ChatStreamEvent(BaseModel):
-    type: str
-    data: Any
 
 
 class CssUpdateRequest(BaseModel):

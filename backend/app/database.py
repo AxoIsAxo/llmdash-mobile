@@ -1,8 +1,6 @@
-import hashlib
-import secrets
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy import Column, Integer, String, Text, Boolean, Float, DateTime, ForeignKey, JSON, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Text, Boolean, Float, DateTime, ForeignKey, UniqueConstraint
 from datetime import datetime, timezone
 import os
 
@@ -157,6 +155,7 @@ class UserModelUsage(Base):
     model_id = Column(Integer, ForeignKey("model_configs.id", ondelete="CASCADE"), nullable=False)
     token_usage = Column(Integer, nullable=False, default=0)
     image_usage = Column(Integer, nullable=False, default=0)
+    __table_args__ = (UniqueConstraint("user_id", "model_id", name="uq_user_model_usage"),)
 
 
 class UserSubscription(Base):
@@ -286,6 +285,19 @@ def _migrate(conn):
                     UNIQUE(user_id, model_id)
                 )
             """)
+        else:
+            # Fresh installs get the table from create_all() WITHOUT the unique
+            # constraint (see UserModelUsage.__table_args__ is only applied on
+            # new tables). Existing DBs may lack it too, which breaks the
+            # ON CONFLICT upsert in main.py. Dedupe + enforce it here for all DBs.
+            conn.exec_driver_sql(
+                "DELETE FROM user_model_usage WHERE id NOT IN "
+                "(SELECT MIN(id) FROM user_model_usage GROUP BY user_id, model_id)"
+            )
+            conn.exec_driver_sql(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_user_model_usage "
+                "ON user_model_usage (user_id, model_id)"
+            )
         if "subscription_plans" not in existing_tables:
             conn.exec_driver_sql("""
                 CREATE TABLE IF NOT EXISTS subscription_plans (

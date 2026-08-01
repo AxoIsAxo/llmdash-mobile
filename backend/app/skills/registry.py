@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import inspect
 from typing import Optional
 
@@ -21,12 +20,23 @@ class SkillRegistry:
         return self._skills.get(name)
 
     def get_tool_definitions(self) -> list[dict]:
-        return [skill.to_tool_def() for skill in self._skills.values()]
+        return [
+            skill.to_tool_def()
+            for skill in self._skills.values()
+            if getattr(skill, "enabled", True)
+        ]
 
     async def execute(self, name: str, arguments: dict, **context) -> str:
         skill = self._skills.get(name)
         if not skill:
-            return f"Error: Unknown tool '{name}'"
+            return (
+                f"Error: Unknown tool '{name}'. If this skill was created in the "
+                f"admin panel, note that database skills have no execution backend "
+                f"yet and cannot be invoked."
+            )
+
+        if not getattr(skill, "enabled", True):
+            return f"Error: Tool '{name}' is disabled."
 
         sig = inspect.signature(skill.execute)
         filtered_context = {k: v for k, v in context.items() if k in sig.parameters}
@@ -34,7 +44,7 @@ class SkillRegistry:
         try:
             result = await skill.execute(arguments, **filtered_context)
             result_str = str(result)
-            if result_str.startswith("Error:") or result_str.startswith("Search error:") or result_str.startswith("Scrape error:") or result_str.startswith("Failed to fetch"):
+            if result_str.startswith(("Error:", "Search failed:", "Request timed out:", "Could not connect:", "Scrape error:", "Failed to fetch")):
                 result_str = "__TOOL_ERROR__: " + result_str
             return result_str
         except TypeError as e:

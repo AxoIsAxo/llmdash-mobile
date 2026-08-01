@@ -1,17 +1,17 @@
 # Stage 1: Build frontend
 FROM node:22-alpine AS frontend-builder
 WORKDIR /app
-COPY frontend/package.json frontend/ ./
-RUN npm ci
 COPY frontend/ ./
+RUN npm ci
 RUN npm run build
 
 # Stage 2: Python backend
-FROM python:3.12-slim
+FROM python:3.12-slim-bookworm
 
 # Install system deps (Docker CLI for sandbox, Tesseract OCR, ffmpeg for
-# audio transcoding, Node.js 22+, and Chromium shared libraries for
-# HyperFrames headless video rendering via Puppeteer)
+# audio transcoding, texlive for .tex -> PDF compilation, Node.js 22+, and
+# Chromium shared libraries for HyperFrames headless video rendering via
+# Puppeteer)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
@@ -20,6 +20,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-noto \
     ffmpeg \
     tesseract-ocr \
+    texlive-latex-base \
+    texlive-latex-recommended \
+    texlive-latex-extra \
     libasound2t64 \
     libatk-bridge2.0-0t64 \
     libatk1.0-0t64 \

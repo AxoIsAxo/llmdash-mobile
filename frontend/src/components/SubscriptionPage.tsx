@@ -259,7 +259,7 @@ function SubscriptionPage({ currentUser, onClose }: Props) {
                         </div>
                         <p className="text-sm text-theme-subtle mt-1">
                           {plan.duration_days > 0 ? `${plan.duration_days} days` : 'Unlimited'}
-                          {plan.token_limit ? ` · ${plan.token_limit.toLocaleString()} tokens/month` : ' · No token limit'}
+                          {plan.token_limit ? ` · ${plan.token_limit.toLocaleString()} tokens` : ' · No token limit'}
                         </p>
                       </div>
                       <div className="text-right">
@@ -274,10 +274,10 @@ function SubscriptionPage({ currentUser, onClose }: Props) {
                     {!isCurrent && (
                       <button
                         onClick={() => handleSubscribe(plan)}
-                        disabled={subscribing || plan.name === 'Free'}
+                        disabled={subscribing}
                         className={`mt-3 w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                           plan.name === 'Free'
-                            ? 'bg-theme-bg-hover text-theme-subtle cursor-not-allowed'
+                            ? 'bg-theme-bg-hover text-theme-subtle hover:bg-theme-bg-active'
                             : 'bg-theme-accent hover:bg-theme-accent-hover disabled:opacity-50'
                         }`}
                       >
@@ -286,7 +286,7 @@ function SubscriptionPage({ currentUser, onClose }: Props) {
                         ) : (
                           <Zap className="w-4 h-4" />
                         )}
-                        {plan.price_sats === 0 ? 'Default Plan' : 'Subscribe'}
+                        {plan.price_sats === 0 ? 'Switch to Free' : 'Subscribe'}
                       </button>
                     )}
                   </div>

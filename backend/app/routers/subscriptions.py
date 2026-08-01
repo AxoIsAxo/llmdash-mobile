@@ -276,6 +276,16 @@ async def subscribe(
     if not plan:
         raise HTTPException(404, "Plan not found or disabled")
 
+    existing_active = await db.execute(
+        select(UserSubscription).where(
+            UserSubscription.user_id == current_user["user_id"],
+            UserSubscription.plan_id == plan.id,
+            UserSubscription.status.in_(("active", "pending")),
+        )
+    )
+    if existing_active.scalar_one_or_none():
+        raise HTTPException(409, f"You already have an active or pending subscription to the {plan.name} plan")
+
     if plan.name == "Free" or plan.price_sats == 0:
         now = datetime.now(timezone.utc)
         sub = UserSubscription(
@@ -307,16 +317,12 @@ async def subscribe(
 
     try:
         url = lnbits_url("/api/v1/payments")
-        print(f"[LLMDash] LNBits request URL: {url}", flush=True)
-        print(f"[LLMDash] LNBits payload: {payload}", flush=True)
         async with httpx.AsyncClient(timeout=LNBITS_TIMEOUT) as client:
             resp = await client.post(
                 url,
                 json=payload,
                 headers=lnbits_headers(),
             )
-            print(f"[LLMDash] LNBits response status: {resp.status_code}", flush=True)
-            print(f"[LLMDash] LNBits response body: {resp.text}", flush=True)
             if resp.status_code not in (200, 201):
                 raise HTTPException(502, f"LNBits error ({resp.status_code}): {resp.text}")
             data = resp.json()
@@ -401,6 +407,14 @@ async def check_payment(
 
 @router.post("/webhook")
 async def payment_webhook(request: dict, db: AsyncSession = Depends(get_db)):
+    """Payment notification endpoint.
+
+    This endpoint is intentionally NOT trusted as a payment proof: the
+    checking_id is client-visible (it is returned by /subscribe), so anyone
+    could POST it here. Before activating a subscription we ALWAYS re-verify
+    the payment state with LNBits itself (paid == true). A payment can never
+    be activated by this webhook alone.
+    """
     payment_checking_id = request.get("checking_id") or request.get("payment_hash")
     if not payment_checking_id:
         raise HTTPException(400, "Missing payment identifier")
@@ -415,7 +429,23 @@ async def payment_webhook(request: dict, db: AsyncSession = Depends(get_db)):
     if not sub:
         raise HTTPException(404, "Subscription not found")
 
-    if sub.status == "pending":
+    if sub.status == "pending" and sub.payment_checking_id:
+        try:
+            async with httpx.AsyncClient(timeout=LNBITS_TIMEOUT) as client:
+                resp = await client.get(
+                    lnbits_url(f"/api/v1/payments/{sub.payment_checking_id}"),
+                    headers=lnbits_headers(),
+                )
+                if resp.status_code != 200:
+                    raise HTTPException(502, f"LNBits error: {resp.text}")
+                data = resp.json()
+        except httpx.HTTPError as e:
+            raise HTTPException(502, f"LNBits connection error: {str(e)}")
+
+        # Only activate if LNBits confirms the invoice was actually paid.
+        if not data.get("paid"):
+            return {"status": "ok", "verified": False}
+
         plan_result = await db.execute(
             select(SubscriptionPlan).where(SubscriptionPlan.id == sub.plan_id)
         )
@@ -427,7 +457,7 @@ async def payment_webhook(request: dict, db: AsyncSession = Depends(get_db)):
         sub.expires_at = now + timedelta(days=duration) if duration > 0 else None
         await db.commit()
 
-    return {"status": "ok"}
+    return {"status": "ok", "verified": True}
 
 
 # --- Admin: list all subscriptions ---

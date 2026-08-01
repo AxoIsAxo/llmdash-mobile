@@ -1,5 +1,9 @@
 use_default_settings: true
 server:
+  # WARNING: hardcoded secret — generate a unique value per deployment,
+  # e.g. `openssl rand -hex 32`. This instance is only reachable on the
+  # internal docker network, but the secret protects the JSON API from
+  # cross-instance CSRF-style abuse if it is ever exposed.
   secret_key: "llmdash-searxng-change-in-production-deployments"
   bind_address: "0.0.0.0"
   port: 8080

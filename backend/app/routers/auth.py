@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import config as app_config
-from ..database import get_db, User, Conversation, UserModelUsage
+from ..database import get_db, User, UserModelUsage
 from ..config_file import ConfigFileManager
 from ..models import (
     AuthSetupRequest, AuthLoginRequest, AuthRegisterRequest,
@@ -26,11 +26,11 @@ def create_token(user_id: int, username: str, role: str) -> str:
         "role": role,
         "exp": datetime.now(timezone.utc) + timedelta(days=30),
     }
-    return jwt.encode(payload, app_config.settings.jwt_secret, algorithm="HS256")
+    return jwt.encode(payload, app_config.get_jwt_secret(), algorithm="HS256")
 
 
 def decode_token(token: str) -> dict:
-    return jwt.decode(token, app_config.settings.jwt_secret, algorithms=["HS256"])
+    return jwt.decode(token, app_config.get_jwt_secret(), algorithms=["HS256"])
 
 
 async def _get_user_model_usage(db: AsyncSession, user_id: int) -> dict:
@@ -50,14 +50,10 @@ def _user_dict(user) -> dict:
 
 
 async def get_current_user(request: Request, db: AsyncSession = Depends(get_db)):
-    token = None
     auth = request.headers.get("Authorization", "")
-    if auth.startswith("Bearer "):
-        token = auth[7:]
-    elif request.query_params.get("token"):
-        token = request.query_params.get("token")
-    if not token:
+    if not auth.startswith("Bearer "):
         raise HTTPException(401, "Not authenticated")
+    token = auth[7:]
     try:
         payload = decode_token(token)
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
@@ -150,7 +146,7 @@ async def register(req: AuthRegisterRequest, request: Request, db: AsyncSession 
         ip_count_result = await db.execute(select(User).where(User.ip_address == client_ip))
         ip_count = len(ip_count_result.scalars().all())
         if ip_count >= ip_limit:
-            raise HTTPException(403, f"Account limit reached for this IP address")
+            raise HTTPException(403, "Account limit reached for this IP address")
 
     user = User(
         username=req.username,
@@ -163,7 +159,7 @@ async def register(req: AuthRegisterRequest, request: Request, db: AsyncSession 
     await db.refresh(user)
 
     token = create_token(user.id, user.username, user.role)
-    return {"token": token, "user": {"id": user.id, "username": user.username, "role": user.role}}
+    return {"token": token, "user": {**_user_dict(user), "token_usage_by_model": {}}}
 
 
 @router.get("/me")
@@ -195,7 +191,6 @@ async def list_users(current_user: dict = Depends(require_role("owner", "admin")
 @router.post("/users")
 async def create_user(
     req: AuthSetupRequest,
-    request: Request,
     current_user: dict = Depends(require_role("owner", "admin")),
     db: AsyncSession = Depends(get_db),
 ):
@@ -203,21 +198,13 @@ async def create_user(
     if existing.scalar_one_or_none():
         raise HTTPException(409, "Username already exists")
 
-    client_ip = request.client.host if request.client else None
-
-    ip_limit = app_config.settings.ip_account_limit
-    if client_ip and ip_limit > 0:
-        ip_count_result = await db.execute(select(User).where(User.ip_address == client_ip))
-        ip_count = len(ip_count_result.scalars().all())
-        if ip_count >= ip_limit:
-            raise HTTPException(403, f"Account limit reached for this IP address")
-
+    # The IP account limit is a self-registration protection and must not
+    # apply to users created by an admin.
     role = "user"
     user = User(
         username=req.username,
         password_hash=User.hash_password(req.password),
         role=role,
-        ip_address=client_ip,
     )
     db.add(user)
     await db.commit()
@@ -314,7 +301,7 @@ async def get_registration(current_user: dict = Depends(require_role("owner", "a
 
 @router.post("/registration")
 async def toggle_registration(req: RegistrationToggleRequest, current_user: dict = Depends(require_role("owner", "admin"))):
-    ConfigFileManager.update(".env", {"REGISTRATION_ENABLED": "true" if req.enabled else "false"})
+    ConfigFileManager.update("data/.env", {"REGISTRATION_ENABLED": "true" if req.enabled else "false"})
     app_config.reload_settings()
     return {"enabled": app_config.settings.registration_enabled}
 
@@ -326,7 +313,7 @@ async def get_ip_limit(current_user: dict = Depends(require_role("owner", "admin
 
 @router.post("/ip-limit", response_model=IpLimitResponse)
 async def set_ip_limit(req: IpLimitUpdateRequest, current_user: dict = Depends(require_role("owner", "admin"))):
-    ConfigFileManager.update(".env", {"IP_ACCOUNT_LIMIT": str(req.limit)})
+    ConfigFileManager.update("data/.env", {"IP_ACCOUNT_LIMIT": str(req.limit)})
     app_config.reload_settings()
     return {"limit": app_config.settings.ip_account_limit}
 

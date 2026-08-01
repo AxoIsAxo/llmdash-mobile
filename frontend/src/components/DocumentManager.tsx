@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { FileText, Download, Upload, History, X, Loader2, Eye, Trash2, ChevronDown, File as FileIcon, Plus, ExternalLink } from 'lucide-react'
+import DOMPurify from 'dompurify'
 import { api } from '../api'
 import type { Document, DocumentVersion } from '../types'
+import MarkdownRenderer from './MarkdownRenderer'
 
 interface Props {
   currentUser: { id: number; role: string }
@@ -60,8 +62,7 @@ export default function DocumentManager({ currentUser, onClose }: Props) {
       const token = api.getToken()
       const formData = new FormData()
       formData.append('file', file)
-      formData.append('format', file.name.endsWith('.md') ? 'markdown' : 'docx')
-      const res = await fetch('/api/files/upload', {
+      const res = await fetch('/api/documents/upload', {
         method: 'POST',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
@@ -120,7 +121,7 @@ export default function DocumentManager({ currentUser, onClose }: Props) {
             >
               <Upload className="w-4 h-4" /> Upload
             </button>
-            <input ref={fileInputRef} type="file" accept=".md,.txt" className="hidden" onChange={handleUpload} />
+            <input ref={fileInputRef} type="file" accept=".md,.txt,.docx,.pdf,.odt,.tex,.py,.js,.ts,.html,.css,.json,.csv" className="hidden" onChange={handleUpload} />
             <button onClick={onClose} className="px-3 py-1.5 hover:bg-theme-bg-hover rounded-lg text-sm">Close</button>
           </div>
         </div>
@@ -173,11 +174,9 @@ export default function DocumentManager({ currentUser, onClose }: Props) {
                             <button onClick={() => loadVersions(doc.id)} className="p-1.5 hover:bg-theme-bg-hover rounded" title="History">
                               <History className="w-4 h-4" />
                             </button>
-                            {(currentUser.role === 'owner' || currentUser.role === 'admin') && (
-                              <button onClick={() => handleDelete(doc.id)} className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 rounded text-red-500" title="Delete">
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            )}
+                            <button onClick={() => handleDelete(doc.id)} className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 rounded text-red-500" title="Delete">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -217,10 +216,14 @@ export default function DocumentManager({ currentUser, onClose }: Props) {
                   </button>
                 </div>
               </div>
-              {previewDoc.format === 'html' || previewDoc.format === 'markdown' ? (
-                <div className="prose dark:prose-invert max-w-none text-sm" dangerouslySetInnerHTML={{ __html: previewDoc.content }} />
+              {previewDoc.format === 'html' ? (
+                <div className="prose dark:prose-invert max-w-none text-sm" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(previewDoc.content || '') }} />
+              ) : previewDoc.format === 'md' ? (
+                <div className="prose dark:prose-invert max-w-none text-sm">
+                  <MarkdownRenderer content={previewDoc.content || ''} />
+                </div>
               ) : (
-                <pre className="text-xs text-theme-muted whitespace-pre-wrap">{previewDoc.content.slice(0, 5000)}</pre>
+                <pre className="text-xs text-theme-muted whitespace-pre-wrap">{previewDoc.content?.slice(0, 5000)}</pre>
               )}
             </div>
           )}

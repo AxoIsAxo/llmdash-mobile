@@ -3,21 +3,19 @@ import base64
 import json
 import logging
 import os
-import sys
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-from fastapi import FastAPI, Depends, HTTPException, Query, APIRouter, Request, UploadFile, File, Form
+from fastapi import FastAPI, Depends, HTTPException, APIRouter, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
-from sqlalchemy import select, delete, update
+from sqlalchemy import select, delete, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import httpx
@@ -34,7 +32,6 @@ from .models import (
     UploadResponse, FileUploadSettings, FileUploadSettingsUpdate,
 )
 from .ai import get_provider, ToolDef
-from .tools import get_tool_definitions, execute_tool
 from .skills import register_builtins
 from .skills.registry import skill_registry
 from .skills.integration import build_system_prompt
@@ -42,8 +39,8 @@ from .config_file import ConfigFileManager
 from .sse import active_generations, push_to_queues, cleanup_generation
 from .model_capabilities import detect_audio_enabled
 from .sandbox import is_docker_available
-from .ocr import process_uploaded_file, is_allowed_file, is_image_file, is_audio_file, ocr_image, IMAGE_EXTENSIONS, is_ocr_available
-from .whisper_stt import transcribe_audio, transcribe_audio_openrouter, VALID_PROVIDERS, DEFAULT_PROVIDER, DEFAULT_OPENROUTER_MODEL
+from .ocr import process_uploaded_file, is_allowed_file, is_image_file, is_audio_file, ocr_image, is_ocr_available
+from .whisper_stt import transcribe_audio, transcribe_audio_openrouter, VALID_PROVIDERS, DEFAULT_PROVIDER, DEFAULT_OPENROUTER_MODEL, VALID_MODEL_SIZES, VALID_COMPUTE_TYPES, get_model as get_whisper_model
 from .audio_convert import prepare_audio_for_provider
 from .routers.auth import router as auth_router, get_current_user, require_role, load_provider_configs
 from .routers.subscriptions import router as subscriptions_router
@@ -68,6 +65,17 @@ async def lifespan(app: FastAPI):
             msg.status = "interrupted"
         if stuck:
             await sess.commit()
+
+    # Warm up the local Whisper model in the background so the first voice
+    # message doesn't block on a multi-hundred-MB download mid-request.
+    if (getattr(app_config.settings, "whisper_provider", "local") or "local").lower() == "local":
+        async def _warmup_whisper():
+            try:
+                await asyncio.to_thread(get_whisper_model)
+            except Exception as e:
+                logger.warning(f"Whisper warmup failed: {e}")
+        asyncio.create_task(_warmup_whisper())
+
     yield
 
 
@@ -80,7 +88,7 @@ app.add_exception_handler(429, _rate_limit_exceeded_handler)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -103,7 +111,9 @@ app.include_router(skills_router)
 
 @router.get("/models", response_model=list[ModelConfigResponse])
 async def list_models(current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    query = select(ModelConfig).order_by(ModelConfig.sort_order.is_(None), ModelConfig.sort_order, ModelConfig.id)
+    query = select(ModelConfig).order_by(
+        func.coalesce(ModelConfig.sort_order, 2**31 - 1), ModelConfig.id
+    )
     if current_user.get("role") not in ("owner", "admin"):
         query = query.where(ModelConfig.enabled == True)
     result = await db.execute(query)
@@ -163,6 +173,13 @@ async def create_model(cfg: ModelConfigCreate, current_user: dict = Depends(requ
 
 @router.put("/models/reorder")
 async def reorder_models(req: ModelReorderRequest, current_user: dict = Depends(require_role("owner", "admin")), db: AsyncSession = Depends(get_db)):
+    if len(req.model_ids) != len(set(req.model_ids)):
+        raise HTTPException(400, "model_ids must not contain duplicates")
+    result = await db.execute(select(ModelConfig.id).where(ModelConfig.id.in_(req.model_ids)))
+    found = {row[0] for row in result.all()}
+    missing = set(req.model_ids) - found
+    if missing:
+        raise HTTPException(400, f"Unknown model ids: {sorted(missing)}")
     for i, model_id in enumerate(req.model_ids):
         await db.execute(
             update(ModelConfig).where(ModelConfig.id == model_id).values(sort_order=i)
@@ -197,11 +214,10 @@ IMAGE_MODEL_PATTERNS = [
     "epicrealism", "juggernaut", "artifusion", "luna-diffusion", "pixart",
     "kolors", "hunyuan-3d", "janus", "seedream", "wai-", "noobai", "crystal-clear",
     "realistic-vision", "meinamix", "majicmix", "ghostmix", "babes", "perfectly-",
-    "counterfeit", "aingdiffusion", "deliberate", "disney-", "dreamlike",
+    "counterfeit", "aingdiffusion", "deliberate", "dreamlike",
     "pfg-art", "citrine-dream", "photonic", "realism-engine", "aniverse",
-    "flat-", "samaritan", "pixar-", "retro-", "hasdx",
+    "samaritan", "pixar-", "retro-", "hasdx",
     "image", "img-gen", "txt2img", "img2img",
-    "sdxl", "sd-", "turbo", "lightning", "hyper",
 ]
 IMAGE_MODEL_LOWERS = [p.lower() for p in IMAGE_MODEL_PATTERNS]
 
@@ -326,9 +342,10 @@ async def scan_models(current_user: dict = Depends(require_role("owner", "admin"
                     except Exception:
                         pass
             elif pc["type"] == "anthropic":
+                anthro_base = pc.get("base_url") or "https://api.anthropic.com"
                 async with httpx.AsyncClient(timeout=15) as client:
                     resp = await client.get(
-                        "https://api.anthropic.com/v1/models",
+                        f"{anthro_base.rstrip('/')}/v1/models",
                         headers={
                             "x-api-key": api_key,
                             "anthropic-version": "2023-06-01",
@@ -397,16 +414,11 @@ async def get_model(model_id: int, current_user: dict = Depends(get_current_user
     )
 
 
-@router.get("/models/{model_id}/detect-capabilities")
-async def detect_model_capabilities(model_id: int, current_user: dict = Depends(require_role("owner", "admin")), db: AsyncSession = Depends(get_db)):
+async def _probe_model_capabilities(model, db: AsyncSession) -> dict:
     """Probe the provider's /models endpoint for the saved model_name and
     return autodetected vision + audio capabilities. No pattern matching —
     the provider's architecture block is the source of truth.
     """
-    result = await db.execute(select(ModelConfig).where(ModelConfig.id == model_id))
-    model = result.scalar_one_or_none()
-    if not model:
-        raise HTTPException(404, "Model not found")
     if model.provider != "openai_compatible" or not model.base_url:
         return {"audio": False, "vision": False, "source": "unsupported_provider"}
     api_key = ""
@@ -442,6 +454,19 @@ async def detect_model_capabilities(model_id: int, current_user: dict = Depends(
         return {"audio": False, "vision": False, "source": f"error:{e}"}
 
 
+@router.get("/models/{model_id}/detect-capabilities")
+async def detect_model_capabilities(model_id: int, current_user: dict = Depends(require_role("owner", "admin")), db: AsyncSession = Depends(get_db)):
+    """Probe the provider's /models endpoint for the saved model_name and
+    return autodetected vision + audio capabilities. No pattern matching —
+    the provider's architecture block is the source of truth.
+    """
+    result = await db.execute(select(ModelConfig).where(ModelConfig.id == model_id))
+    model = result.scalar_one_or_none()
+    if not model:
+        raise HTTPException(404, "Model not found")
+    return await _probe_model_capabilities(model, db)
+
+
 @router.post("/models/{model_id}/auto-enable")
 async def auto_enable_capabilities(model_id: int, current_user: dict = Depends(require_role("owner", "admin")), db: AsyncSession = Depends(get_db)):
     """Probe the provider and flip audio_enabled / vision_enabled on the
@@ -451,7 +476,7 @@ async def auto_enable_capabilities(model_id: int, current_user: dict = Depends(r
     model = result.scalar_one_or_none()
     if not model:
         raise HTTPException(404, "Model not found")
-    cap = await detect_model_capabilities(model_id, current_user, db)
+    cap = await _probe_model_capabilities(model, db)
     changed = []
     if cap.get("audio") and not bool(getattr(model, "audio_enabled", False)):
         model.audio_enabled = True
@@ -603,6 +628,10 @@ async def list_env_vars(current_user: dict = Depends(require_role("owner", "admi
 
 @router.post("/config/env")
 async def update_env_vars(req: EnvUpdateRequest, current_user: dict = Depends(require_role("owner", "admin"))):
+    allowed = set(app_config.ENV_VAR_MAP.keys())
+    invalid = set(req.updates.keys()) - allowed
+    if invalid:
+        raise HTTPException(400, f"Unknown environment variables: {', '.join(sorted(invalid))}")
     existing = ConfigFileManager.read("data/.env")
     existing.update(req.updates)
     ConfigFileManager.write("data/.env", existing)
@@ -613,11 +642,13 @@ async def update_env_vars(req: EnvUpdateRequest, current_user: dict = Depends(re
 @router.get("/config/status")
 async def config_status(current_user: dict = Depends(get_current_user)):
     docker_ok = is_docker_available()
+    from importlib.util import find_spec
+    doc_ok = all(find_spec(m) for m in ("docx", "fpdf", "odf"))
     return {
         "docker_available": docker_ok,
         "tools": {
-            "web_search": True,
-            "document_editor": True,
+            "web_search": bool(app_config.settings.searxng_url),
+            "document_editor": doc_ok,
             "render_html": True,
             "sandbox": docker_ok,
         },
@@ -660,10 +691,16 @@ async def update_upload_settings(req: FileUploadSettingsUpdate, current_user: di
     if req.ocr_enabled is not None:
         updates["OCR_ENABLED"] = str(req.ocr_enabled).lower()
     if req.ocr_strategy is not None:
+        if req.ocr_strategy not in ("ocr", "deny"):
+            raise HTTPException(400, "ocr_strategy must be 'ocr' or 'deny'")
         updates["OCR_STRATEGY"] = req.ocr_strategy
     if req.whisper_model is not None:
+        if req.whisper_model not in VALID_MODEL_SIZES:
+            raise HTTPException(400, f"Invalid whisper model '{req.whisper_model}'. Must be one of: {', '.join(VALID_MODEL_SIZES)}")
         updates["WHISPER_MODEL"] = req.whisper_model
     if req.whisper_compute_type is not None:
+        if req.whisper_compute_type not in VALID_COMPUTE_TYPES:
+            raise HTTPException(400, f"Invalid whisper compute type '{req.whisper_compute_type}'. Must be one of: {', '.join(VALID_COMPUTE_TYPES)}")
         updates["WHISPER_COMPUTE_TYPE"] = req.whisper_compute_type
     if req.whisper_device is not None:
         updates["WHISPER_DEVICE"] = req.whisper_device
@@ -730,12 +767,21 @@ async def get_whisper_config(current_user: dict = Depends(get_current_user)):
 
 
 @router.post("/chat/upload", response_model=UploadResponse)
-async def upload_file(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
+async def upload_file(file: UploadFile = File(...), request: Request = None, current_user: dict = Depends(get_current_user)):
     if not app_config.settings.file_upload_enabled:
         raise HTTPException(403, "File uploads are disabled by the admin")
 
     if not file.filename:
         raise HTTPException(400, "No filename provided")
+
+    max_size = 20 * 1024 * 1024
+    if request is not None:
+        try:
+            declared = int(request.headers.get("content-length") or 0)
+            if declared > max_size:
+                raise HTTPException(413, f"File too large (max {max_size // (1024*1024)}MB)")
+        except ValueError:
+            pass
 
     safe_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in file.filename)
     if not is_allowed_file(safe_name):
@@ -749,14 +795,12 @@ async def upload_file(file: UploadFile = File(...), current_user: dict = Depends
     file_path = os.path.join(uploads_dir, stored_name)
 
     content = await file.read()
-    max_size = 20 * 1024 * 1024
     if len(content) > max_size:
-        raise HTTPException(400, f"File too large (max {max_size // (1024*1024)}MB)")
+        raise HTTPException(413, f"File too large (max {max_size // (1024*1024)}MB)")
 
     with open(file_path, "wb") as f:
         f.write(content)
 
-    force_ocr = not app_config.settings.ocr_enabled
     result = process_uploaded_file(file_path, file.filename, force_ocr=False)
 
     return UploadResponse(
@@ -815,9 +859,16 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
     if not conversation:
         raise HTTPException(404, "Conversation not found")
 
+    if req.conversation_id in active_generations:
+        raise HTTPException(409, "A generation is already in progress for this conversation")
+
     model_id = req.model_id or conversation.model_id
     if not model_id:
         raise HTTPException(400, "No model configured for this conversation")
+
+    if req.model_id and conversation.model_id != req.model_id:
+        conversation.model_id = req.model_id
+        await db.commit()
 
     model_result = await db.execute(select(ModelConfig).where(ModelConfig.id == model_id))
     model = model_result.scalar_one_or_none()
@@ -960,10 +1011,15 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
             att_type = (att.get("file_type", "") or "").lower()
 
             if att_path.startswith("/api/uploads/"):
-                stored_name = att_path.split("/")[-1]
+                stored_name = os.path.basename(att_path.split("/")[-1])
                 full_path = os.path.join(app_config.settings.uploads_dir, stored_name)
             else:
-                full_path = att_path
+                # Security: never open client-supplied paths. Attachments must
+                # reference files previously uploaded through /api/chat/upload.
+                raise HTTPException(400, "Invalid attachment path. Attachments must reference uploaded files.")
+
+            if not os.path.isfile(full_path):
+                raise HTTPException(400, f"Attachment file not found: {att_filename}")
 
             record = {
                 "filename": att_filename,
@@ -987,7 +1043,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                             "image_url": {"url": f"data:image/{mime};base64,{img_data}"},
                         })
                         record["image_included"] = True
-                    except Exception as e:
+                    except Exception:
                         content_parts.append({"type": "text", "text": f"\n[Failed to load image: {att_filename}]"})
                 else:
                     if ocr_strategy == "deny":
@@ -1123,7 +1179,6 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
     my_queue: asyncio.Queue = asyncio.Queue()
 
     async def run_ai_chat():
-        nonlocal messages
         async with async_session() as sess:
             streaming_msg_id = None
             try:
@@ -1359,14 +1414,15 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
 
                 if not db_messages and accumulated_content:
                     try:
+                        title_source = (req.message or "").strip() or accumulated_content[:200]
                         title_msgs = [
                             {"role": "system", "content": "Generate a very short, concise title (maximum 6 words) for a conversation that starts with this message. Return ONLY the title, no quotes or explanations."},
-                            {"role": "user", "content": accumulated_content}
+                            {"role": "user", "content": title_source}
                         ]
                         result = await provider.chat(title_msgs, [], model)
                         new_title = result.content.strip()[:255] or "New Chat"
                     except Exception:
-                        new_title = accumulated_content[:80].replace("\n", " ") or "New Chat"
+                        new_title = title_source[:80].replace("\n", " ") or "New Chat"
                     await sess.execute(
                         update(Conversation).where(Conversation.id == req.conversation_id).values(title=new_title)
                     )
@@ -1428,9 +1484,6 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                     pass
             finally:
                 cleanup_generation(req.conversation_id)
-
-    if req.conversation_id in active_generations:
-        raise HTTPException(409, "A generation is already in progress for this conversation")
 
     my_queue_final = my_queue
     active_generations[req.conversation_id] = {
@@ -1678,11 +1731,11 @@ async def generate_image(req: ImageGenerationRequest, current_user: dict = Depen
         per_model_row = per_model_result.scalar_one_or_none()
         per_model_img_usage = per_model_row.image_usage if per_model_row else 0
         if per_model_img_usage >= model_sub_image_limit * req.n:
-            raise HTTPException(403, f"Image limit reached for this model ({per_model_img_usage}/{model_sub_image_limit}). Upgrade your plan or contact an admin.")
+            raise HTTPException(403, f"Image limit reached for this model ({per_model_img_usage}/{model_sub_image_limit * req.n}). Upgrade your plan or contact an admin.")
 
     user_image_usage = getattr(user, "image_usage", 0) or 0
     if global_image_limit is not None and user_image_usage >= global_image_limit * req.n:
-        raise HTTPException(403, f"Image limit reached ({user_image_usage}/{global_image_limit}). Upgrade your plan or contact an admin.")
+        raise HTTPException(403, f"Image limit reached ({user_image_usage}/{global_image_limit * req.n}). Upgrade your plan or contact an admin.")
 
     user_prompt_msg = Message(conversation_id=req.conversation_id, role="user", content=f"[Image Generation] {req.prompt}")
     db.add(user_prompt_msg)
@@ -1726,6 +1779,13 @@ async def generate_image(req: ImageGenerationRequest, current_user: dict = Depen
 
 # --- Document Management ---
 
+def _file_size(path: str) -> int:
+    try:
+        return os.path.getsize(path) if path and os.path.exists(path) else 0
+    except OSError:
+        return 0
+
+
 @router.get("/documents")
 async def list_documents(current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(
@@ -1741,6 +1801,8 @@ async def list_documents(current_user: dict = Depends(get_current_user), db: Asy
             "format": d.format,
             "version": d.version,
             "file_path": d.file_path,
+            "file_size": _file_size(d.file_path),
+            "content": d.content_md,
             "created_at": d.created_at.isoformat() if d.created_at else "",
             "updated_at": d.updated_at.isoformat() if d.updated_at else "",
         }
@@ -1762,7 +1824,8 @@ async def get_document(doc_id: int, current_user: dict = Depends(get_current_use
         "format": doc.format,
         "version": doc.version,
         "file_path": doc.file_path,
-        "content_md": doc.content_md,
+        "file_size": _file_size(doc.file_path),
+        "content": doc.content_md,
         "created_at": doc.created_at.isoformat() if doc.created_at else "",
         "updated_at": doc.updated_at.isoformat() if doc.updated_at else "",
     }
@@ -1832,6 +1895,8 @@ async def list_document_versions(doc_id: int, current_user: dict = Depends(get_c
             "id": d.id,
             "version": d.version,
             "file_path": d.file_path,
+            "file_size": _file_size(d.file_path),
+            "content": d.content_md,
             "created_at": d.created_at.isoformat() if d.created_at else "",
         }
         for d in versions
@@ -1874,7 +1939,6 @@ async def upload_document(file: UploadFile = File(...), current_user: dict = Dep
     elif ext == "odt":
         try:
             from odf.opendocument import OpenDocumentText
-            from odf.text import P as OdfP
             d = OpenDocumentText(file_path)
             texts = []
             for elem in d.text.childNodes:

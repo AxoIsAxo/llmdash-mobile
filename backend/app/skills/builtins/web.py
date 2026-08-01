@@ -4,7 +4,7 @@ import random
 import re
 import asyncio
 from html.parser import HTMLParser
-from urllib.parse import quote, urlparse
+from urllib.parse import urlparse
 
 import httpx
 
@@ -126,7 +126,7 @@ class WebSearchSkill(Skill):
                     },
                 )
                 if resp.status_code != 200:
-                    return f"Search failed: {resp.status_code} {resp.text[:200]}"
+                    return f"Error: Search failed: {resp.status_code} {resp.text[:200]}"
                 data = resp.json()
                 results = data.get("results", [])
                 if not results:
@@ -183,7 +183,7 @@ class WebScrapeSkill(Skill):
                     resp = await client.get(url, headers=retry_headers)
 
                 if resp.status_code >= 400:
-                    return f"Failed to fetch page: HTTP {resp.status_code}"
+                    return f"Error: Failed to fetch page: HTTP {resp.status_code}"
 
                 content_type = resp.headers.get("content-type", "")
                 if "text/html" not in content_type:
@@ -205,8 +205,8 @@ class WebScrapeSkill(Skill):
                 return result
 
         except httpx.TimeoutException:
-            return f"Request timed out: {url}"
+            return f"Error: Request timed out: {url}"
         except httpx.ConnectError:
-            return f"Could not connect to: {url}"
+            return f"Error: Could not connect to: {url}"
         except Exception as e:
-            return f"Scrape error: {str(e)}"
+            return f"Error: Scrape error: {str(e)}"

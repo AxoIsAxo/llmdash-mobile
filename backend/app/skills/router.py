@@ -2,16 +2,15 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, delete
+from sqlalchemy import select
 
 from .models import SkillConfigDB
 from .registry import skill_registry
-from ..database import get_db, async_session
+from ..database import async_session
 from ..routers.auth import get_current_user, require_role
 
 logger = logging.getLogger(__name__)
@@ -73,12 +72,16 @@ async def create_skill(req: SkillConfigCreate, current_user: dict = Depends(requ
         existing = await sess.execute(select(SkillConfigDB).where(SkillConfigDB.name == req.name))
         if existing.scalar_one_or_none():
             raise HTTPException(409, f"Skill '{req.name}' already exists")
+        if skill_registry.get(req.name):
+            raise HTTPException(409, f"Skill '{req.name}' conflicts with a built-in tool")
+        # Skills are global (shared across admins). DB skills currently have no
+        # execution backend — they are metadata-only until a loader is implemented.
         cfg = SkillConfigDB(
             name=req.name,
             description=req.description,
             input_schema_json=json.dumps(req.input_schema),
             source="db",
-            user_id=current_user["user_id"],
+            user_id=None,
         )
         sess.add(cfg)
         await sess.commit()

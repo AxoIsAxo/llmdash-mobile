@@ -23,6 +23,7 @@ import SubscriptionPage from './components/SubscriptionPage'
 import CustomCssPanel from './components/CustomCssPanel'
 import DocumentManager from './components/DocumentManager'
 import VoiceButton from './components/VoiceButton'
+import DOMPurify from 'dompurify'
 import { DEFAULT_CSS } from './css-preset'
 
 const STYLE_ID = 'llmdash-user-css'
@@ -164,7 +165,6 @@ function App() {
   const closeModelPickers = () => { setShowModelPickerFooter(false); setShowModelPickerEmpty(false) }
   const [abortController, setAbortController] = useState<AbortController | null>(null)
   const [branchSiblings, setBranchSiblings] = useState<Record<string, number[]>>({})
-  const [branchConvToKey, setBranchConvToKey] = useState<Record<number, string>>({})
   const [copiedId, setCopiedId] = useState<number | null>(null)
   const [executingTools, setExecutingTools] = useState<Set<string>>(new Set())
   const [expandedToolCalls, setExpandedToolCalls] = useState<Set<string>>(new Set())
@@ -640,7 +640,12 @@ function App() {
           } else if (event.type === 'tool_start') {
             if (event.id) setExecutingTools(prev => new Set(prev).add(event.id!))
           } else if (event.type === 'tool_result') {
-            if (event.id) setExecutingTools(prev => { const next = new Set(prev); next.delete(event.id!); return next })
+            if (event.id) {
+              setExecutingTools(prev => { const next = new Set(prev); next.delete(event.id!); return next })
+              if (event.name === 'render_svg' || event.name === 'render_html') {
+                setExpandedToolCalls(prev => new Set(prev).add(event.id!))
+              }
+            }
             if (event.name === 'set_user_css' || event.name === 'patch_user_css' || event.name === 'append_user_css') {
               const authoritative = extractNewCssMarker(event.result)
               if (authoritative !== null) {
@@ -835,7 +840,6 @@ function App() {
         if (existing.includes(branch.id)) return prev
         return { ...prev, [key]: [...existing, branch.id] }
       })
-      setBranchConvToKey(prev => ({ ...prev, [branch.id]: key }))
       setConversations(prev => [branch, ...prev])
       setActiveConv(branch)
       const branchMsgs = await api.conversations.messages(branch.id)
@@ -1457,7 +1461,7 @@ function ToolResultContent({ content, toolCall, setSidePanel }: {
     const rest = content.slice(11)
     const parenIdx = rest.indexOf(' (')
     const b64 = parenIdx > 0 ? rest.slice(0, parenIdx) : rest
-    const svg = atob(b64)
+    const svg = DOMPurify.sanitize(atob(b64))
     return (
       <div className="max-w-full rounded-xl border border-theme-border-light bg-theme-bg-secondary overflow-hidden">
         <div className="flex items-center gap-2 px-3 py-1.5 bg-theme-bg-elevated text-xs text-theme-subtle border-b border-theme-border-light">
@@ -1793,7 +1797,11 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
             <div className="flex flex-wrap gap-2">
               {imageData.images.map((img, i) => (
                 <div key={i} className="rounded-lg overflow-hidden border border-theme-border-light max-w-sm">
-                  <img src={img} alt={`Generated ${i + 1}`} className="w-full object-contain" />
+                  <img
+                    src={img.startsWith('data:') || img.startsWith('http') ? img : `data:image/png;base64,${img}`}
+                    alt={`Generated ${i + 1}`}
+                    className="w-full object-contain"
+                  />
                 </div>
               ))}
             </div>

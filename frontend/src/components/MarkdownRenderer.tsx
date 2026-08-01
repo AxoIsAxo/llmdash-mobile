@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import rehypeRaw from 'rehype-raw'
+import rehypeSanitize from 'rehype-sanitize'
 import { Check, Copy, Download, Image } from 'lucide-react'
 
 function CodeBlock({ language, children }: { language?: string; children: React.ReactNode }) {
@@ -55,7 +56,7 @@ const MarkdownRenderer = memo(function MarkdownRenderer({ content }: { content: 
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
-      rehypePlugins={[rehypeRaw, rehypeHighlight]}
+      rehypePlugins={[rehypeRaw, rehypeSanitize, rehypeHighlight]}
       components={{
         code({ className, children, ...props }) {
           const match = /language-(\w+)/.exec(className || '')

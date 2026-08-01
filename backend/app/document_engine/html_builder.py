@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Optional
 from .ast_types import (
     BlockNode, InlineNode, Text, Bold, Italic, Strikethrough, Underline,
     InlineCode, Link, Image, MathInline, Subscript, Superscript,
@@ -7,9 +6,6 @@ from .ast_types import (
     BlockQuote, HorizontalRule, ChartDirective, MathBlock,
 )
 from .chart_generator import generate_chart_svg
-import base64
-import os
-import re
 
 
 def build_html(
