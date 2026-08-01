@@ -111,7 +111,7 @@ function SubscriptionPage({ currentUser, onClose }: Props) {
 
   return (
     <div className="fixed inset-0 bg-theme-overlay/60 z-50 flex items-center justify-center p-4">
-      <div className="bg-theme-bg-secondary rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto border border-theme-border-light shadow-2xl">
+      <div className="llm-modal bg-theme-bg-secondary rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto border border-theme-border-light shadow-2xl">
         <div className="p-6 border-b border-theme-border flex items-center justify-between">
           <h2 className="text-lg font-semibold flex items-center gap-2">
             <CreditCard className="w-5 h-5 text-theme-accent-text" />

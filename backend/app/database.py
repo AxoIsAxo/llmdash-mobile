@@ -30,6 +30,7 @@ class User(Base):
     image_usage = Column(Integer, nullable=False, default=0)
     ip_address = Column(String(45), nullable=True)
     custom_css = Column(Text, nullable=True)
+    theme_spec = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     @staticmethod
@@ -188,6 +189,16 @@ class Document(Base):
     __table_args__ = (UniqueConstraint("user_id", "filename", "format", "version", name="uq_doc_version"),)
 
 
+class ThemeHistory(Base):
+    __tablename__ = "theme_history"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    spec_json = Column(Text, nullable=True)
+    css = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -222,6 +233,9 @@ def _migrate(conn):
 
     if "custom_css" not in existing:
         conn.exec_driver_sql("ALTER TABLE users ADD COLUMN custom_css TEXT")
+
+    if "theme_spec" not in existing:
+        conn.exec_driver_sql("ALTER TABLE users ADD COLUMN theme_spec TEXT")
 
     msg_result = conn.exec_driver_sql("PRAGMA table_info(messages)")
     msg_cols = {row[1] for row in msg_result}
@@ -356,6 +370,16 @@ def _migrate(conn):
                     source VARCHAR(32) NOT NULL DEFAULT 'db',
                     enabled BOOLEAN NOT NULL DEFAULT 1,
                     user_id INTEGER
+                )
+            """)
+        if "theme_history" not in existing_tables:
+            conn.exec_driver_sql("""
+                CREATE TABLE IF NOT EXISTS theme_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    spec_json TEXT,
+                    css TEXT,
+                    created_at DATETIME
                 )
             """)
     except Exception:

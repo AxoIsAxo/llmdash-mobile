@@ -418,7 +418,7 @@ function App() {
             setExecutingTools(prev => { const next = new Set(prev); tcs.forEach((tc: any) => next.add(tc.id)); return next })
           }
           const cssTool = (event as any).tool_calls?.find((tc: any) =>
-            tc.name === 'set_user_css' || tc.name === 'patch_user_css' || tc.name === 'append_user_css'
+            tc.name === 'set_user_css' || tc.name === 'patch_user_css' || tc.name === 'append_user_css' || tc.name === 'patch_theme' || tc.name === 'reset_theme'
           )
           if (cssTool) {
             const cur = (document.getElementById(STYLE_ID) as HTMLStyleElement)?.textContent || DEFAULT_CSS
@@ -438,7 +438,7 @@ function App() {
                 setExpandedToolCalls(prev => new Set(prev).add(event.id!))
               }
             }
-            if (event.name === 'set_user_css' || event.name === 'patch_user_css' || event.name === 'append_user_css') {
+            if (event.name === 'set_user_css' || event.name === 'patch_user_css' || event.name === 'append_user_css' || event.name === 'patch_theme' || event.name === 'reset_theme') {
             const authoritative = extractNewCssMarker(event.result)
             if (authoritative !== null) {
               const cur = (document.getElementById(STYLE_ID) as HTMLStyleElement)?.textContent || DEFAULT_CSS
@@ -626,7 +626,7 @@ function App() {
               setExecutingTools(prev => { const next = new Set(prev); tcs2.forEach((tc: any) => next.add(tc.id)); return next })
             }
             const cssTool2 = event.tool_calls?.find((tc: any) =>
-              tc.name === 'set_user_css' || tc.name === 'patch_user_css' || tc.name === 'append_user_css'
+              tc.name === 'set_user_css' || tc.name === 'patch_user_css' || tc.name === 'append_user_css' || tc.name === 'patch_theme' || tc.name === 'reset_theme'
             )
             if (cssTool2) {
               const cur = (document.getElementById(STYLE_ID) as HTMLStyleElement)?.textContent || DEFAULT_CSS
@@ -646,7 +646,7 @@ function App() {
                 setExpandedToolCalls(prev => new Set(prev).add(event.id!))
               }
             }
-            if (event.name === 'set_user_css' || event.name === 'patch_user_css' || event.name === 'append_user_css') {
+            if (event.name === 'set_user_css' || event.name === 'patch_user_css' || event.name === 'append_user_css' || event.name === 'patch_theme' || event.name === 'reset_theme') {
               const authoritative = extractNewCssMarker(event.result)
               if (authoritative !== null) {
                 const cur = (document.getElementById(STYLE_ID) as HTMLStyleElement)?.textContent || DEFAULT_CSS
@@ -922,7 +922,7 @@ function App() {
               setExecutingTools(prev => { const next = new Set(prev); tcs3.forEach((tc: any) => next.add(tc.id)); return next })
             }
             const cssTool3 = event.tool_calls?.find((tc: any) =>
-              tc.name === 'set_user_css' || tc.name === 'patch_user_css' || tc.name === 'append_user_css'
+              tc.name === 'set_user_css' || tc.name === 'patch_user_css' || tc.name === 'append_user_css' || tc.name === 'patch_theme' || tc.name === 'reset_theme'
             )
             if (cssTool3) {
               const cur = (document.getElementById(STYLE_ID) as HTMLStyleElement)?.textContent || DEFAULT_CSS
@@ -942,7 +942,7 @@ function App() {
                 setExpandedToolCalls(prev => new Set(prev).add(event.id!))
               }
             }
-            if (event.name === 'set_user_css' || event.name === 'patch_user_css' || event.name === 'append_user_css') {
+            if (event.name === 'set_user_css' || event.name === 'patch_user_css' || event.name === 'append_user_css' || event.name === 'patch_theme' || event.name === 'reset_theme') {
               const authoritative = extractNewCssMarker(event.result)
               if (authoritative !== null) {
                 const cur = (document.getElementById(STYLE_ID) as HTMLStyleElement)?.textContent || DEFAULT_CSS
@@ -1027,7 +1027,7 @@ function App() {
   return (
     <div className="h-screen flex bg-theme-bg text-theme-text overflow-hidden">
       {/* Sidebar */}
-      <div className={`${showSidebar ? 'w-72' : 'w-0'} transition-all duration-200 border-r border-theme-border flex flex-col overflow-hidden bg-theme-bg-secondary`}>
+      <div className={`llm-sidebar ${showSidebar ? 'w-72' : 'w-0'} transition-all duration-200 border-r border-theme-border flex flex-col overflow-hidden bg-theme-bg-secondary`}>
         <div className="p-3 border-b border-theme-border flex items-center justify-between">
           <h1 className="font-bold text-lg flex items-center gap-2">
             <Bot className="w-5 h-5 text-theme-accent-text" />
@@ -1244,7 +1244,7 @@ function App() {
                 })}
               </div>
             )}
-            <div className="flex gap-2 items-end">
+            <div className="llm-input flex gap-2 items-end">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -1344,7 +1344,7 @@ function App() {
 
       {/* Document Preview Side Panel */}
       {sidePanel && (
-        <div className="w-[420px] border-l border-theme-border-light bg-theme-bg-secondary flex flex-col overflow-hidden">
+        <div className="llm-preview-panel w-[var(--theme-side-panel-width)] border-l border-theme-border-light bg-theme-bg-secondary flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-3 py-2 bg-theme-bg-elevated border-b border-theme-border-light shrink-0">
             <div className="flex items-center gap-2 text-xs min-w-0">
               <FileText className="w-3.5 h-3.5 text-theme-accent-text shrink-0" />
@@ -1480,7 +1480,7 @@ function ToolResultContent({ content, toolCall, setSidePanel }: {
         <div className="flex items-center gap-2 px-3 py-2 bg-theme-bg-elevated text-xs text-theme-subtle border-b border-theme-border-light">
           <Eye className="w-3.5 h-3.5" /> HTML Preview
         </div>
-        <iframe srcDoc={html} sandbox="allow-scripts" className="w-full h-96 bg-theme-preview-bg" title="HTML Preview" />
+        <iframe srcDoc={html} sandbox="allow-scripts" className="w-full h-[var(--theme-preview-height)] bg-theme-preview-bg" title="HTML Preview" />
       </div>
     )
   }
@@ -1602,7 +1602,7 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
         {isAssistant && message.reasoning_content && (
           <div className="flex justify-start mb-1">
             <div className="w-8 shrink-0" />
-            <div className="max-w-[75%] min-w-0">
+            <div className="llm-bubble llm-bubble-assistant max-w-[var(--theme-bubble-max-width)] min-w-0">
               <button
                 onClick={() => setThinkingExpanded(!thinkingExpanded)}
                 className="flex items-center gap-1.5 text-xs text-theme-muted hover:text-theme-text transition-colors py-0.5 w-full"
@@ -1624,11 +1624,11 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
         )}
         <div className="flex justify-start">
           {isAssistant && (
-            <div className="w-8 h-8 rounded-full bg-theme-accent flex items-center justify-center mr-2 mt-0.5 shrink-0">
+            <div className="llm-avatar w-[var(--theme-avatar-size)] h-[var(--theme-avatar-size)] rounded-full bg-theme-accent flex items-center justify-center mr-2 mt-0.5 shrink-0">
               <Bot className="w-4 h-4" />
             </div>
           )}
-          <div className="max-w-[75%] min-w-0 space-y-2">
+          <div className="llm-bubble llm-bubble-assistant max-w-[var(--theme-bubble-max-width)] min-w-0 space-y-2">
             <div className="flex flex-wrap gap-2">
               {toolCalls.map((tc, i) => {
                 const isExecuting = executingTools.has(tc.id)
@@ -1650,7 +1650,7 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
                   <div key={i} className="flex flex-col">
                     <button
                       onClick={() => { if (canExpand) onToggleToolCall(tc.id) }}
-                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-all cursor-pointer ${
+                      className={`llm-tool-pill flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-all cursor-pointer ${
                         isExecuting
                           ? 'bg-theme-accent/10 border-theme-accent-text/40 text-theme-accent-text shadow-sm'
                           : 'bg-theme-bg-elevated border-theme-border-light hover:bg-theme-bg-hover'
@@ -1725,7 +1725,7 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
         {message.reasoning_content && (
           <div className="flex justify-start mb-1">
             <div className="w-8 shrink-0" />
-            <div className="max-w-[75%] min-w-0">
+            <div className="llm-bubble llm-bubble-assistant max-w-[var(--theme-bubble-max-width)] min-w-0">
               <button
                 onClick={() => setThinkingExpanded(!thinkingExpanded)}
                 className="flex items-center gap-1.5 text-xs text-theme-muted hover:text-theme-text transition-colors py-0.5 w-full"
@@ -1742,10 +1742,10 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
           </div>
         )}
         <div className="flex justify-start">
-          <div className="w-8 h-8 rounded-full bg-theme-accent flex items-center justify-center mr-2 mt-0.5 shrink-0">
+          <div className="llm-avatar w-[var(--theme-avatar-size)] h-[var(--theme-avatar-size)] rounded-full bg-theme-accent flex items-center justify-center mr-2 mt-0.5 shrink-0">
             <Bot className="w-4 h-4" />
           </div>
-          <div className="max-w-[75%] min-w-0 space-y-2">
+          <div className="llm-bubble llm-bubble-assistant max-w-[var(--theme-bubble-max-width)] min-w-0 space-y-2">
             {message.content && (
               <div className="bg-theme-bg-elevated rounded-xl px-4 py-2.5">
                 <MarkdownRenderer content={message.content} />
@@ -1783,7 +1783,7 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
     return (
       <div>
         <div className="flex justify-start">
-          <div className="max-w-[80%] bg-theme-bg-elevated rounded-xl px-4 py-3 space-y-3">
+          <div className="llm-bubble llm-bubble-assistant max-w-[var(--theme-bubble-max-width)] bg-theme-bg-elevated rounded-xl px-4 py-3 space-y-3">
             <div className="flex items-center gap-2 text-xs text-theme-subtle">
               <Image className="w-3.5 h-3.5 text-theme-purple" />
               <span>Image Generation{imageData.size ? ` (${imageData.size})` : ''}</span>
@@ -1816,7 +1816,7 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
     return (
       <div>
         <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
-          <div className={`max-w-[80%] ${isUser ? 'bg-theme-msg-user' : 'bg-theme-bg-elevated'} rounded-xl px-4 py-2`}>
+          <div className={`llm-bubble ${isUser ? 'llm-bubble-user' : 'llm-bubble-assistant'} max-w-[var(--theme-bubble-max-width)] ${isUser ? 'bg-theme-msg-user' : 'bg-theme-bg-elevated'} rounded-xl px-4 py-2`}>
             {parts.map((part, i) => {
               if (part.startsWith('HTML_RENDER:')) {
                 try {
@@ -1826,7 +1826,7 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
                       <div className="flex items-center gap-2 px-3 py-1.5 bg-theme-bg-secondary text-xs text-theme-subtle border-b border-theme-border-light">
                         <Eye className="w-3 h-3" /> Preview
                       </div>
-                      <iframe srcDoc={html} sandbox="allow-scripts" className="w-full h-96 bg-theme-preview-bg" title="Preview" />
+                      <iframe srcDoc={html} sandbox="allow-scripts" className="w-full h-[var(--theme-preview-height)] bg-theme-preview-bg" title="Preview" />
                     </div>
                   )
                 } catch { return <span key={i}>{part}</span> }
@@ -1894,7 +1894,7 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
       {isAssistant && message.reasoning_content && (
         <div className="flex justify-start mb-1">
           <div className="w-8 shrink-0" />
-          <div className="max-w-[75%] min-w-0">
+          <div className="llm-bubble llm-bubble-assistant max-w-[var(--theme-bubble-max-width)] min-w-0">
             <button
               onClick={() => setThinkingExpanded(!thinkingExpanded)}
               className="flex items-center gap-1.5 text-xs text-theme-muted hover:text-theme-text transition-colors py-0.5 w-full"
@@ -1916,15 +1916,15 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
       )}
       <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
         {isAssistant && (
-          <div className="w-8 h-8 rounded-full bg-theme-accent flex items-center justify-center mr-2 mt-0.5 shrink-0">
+          <div className="llm-avatar w-[var(--theme-avatar-size)] h-[var(--theme-avatar-size)] rounded-full bg-theme-accent flex items-center justify-center mr-2 mt-0.5 shrink-0">
             <Bot className="w-4 h-4" />
           </div>
         )}
-        <div className={`max-w-[75%] ${isUser ? 'bg-theme-msg-user' : 'bg-theme-bg-elevated'} rounded-xl px-4 py-2.5`}>
+        <div className={`llm-bubble ${isUser ? 'llm-bubble-user' : 'llm-bubble-assistant'} max-w-[var(--theme-bubble-max-width)] ${isUser ? 'bg-theme-msg-user' : 'bg-theme-bg-elevated'} rounded-xl px-4 py-2.5`}>
           <MarkdownRenderer content={content} />
         </div>
         {isUser && (
-          <div className="w-8 h-8 rounded-full bg-theme-icon-user flex items-center justify-center ml-2 mt-0.5 shrink-0">
+          <div className="llm-avatar w-[var(--theme-avatar-size)] h-[var(--theme-avatar-size)] rounded-full bg-theme-icon-user flex items-center justify-center ml-2 mt-0.5 shrink-0">
             <span className="text-xs font-bold">U</span>
           </div>
         )}

@@ -128,6 +128,25 @@ export const api = {
         }),
     },
 
+    theme: {
+      get: () => request<import('./types').ThemeInfo>('/auth/theme'),
+      put: (spec: unknown) =>
+        request<{ spec: import('./types').ThemeSpec; css: string }>('/auth/theme', {
+          method: 'PUT',
+          body: JSON.stringify({ spec }),
+        }),
+      reset: (preset: string) =>
+        request<{ spec: import('./types').ThemeSpec; css: string }>('/auth/theme/reset', {
+          method: 'POST',
+          body: JSON.stringify({ preset }),
+        }),
+      history: () => request<import('./types').ThemeHistoryEntry[]>('/auth/theme/history'),
+      restore: (historyId: number) =>
+        request<{ spec: import('./types').ThemeSpec; css: string }>(`/auth/theme/restore/${historyId}`, {
+          method: 'POST',
+        }),
+    },
+
     providers: {
       list: () => request<import('./types').ProviderConfig[]>('/auth/providers'),
       update: (key: string, data: { name?: string; base_url?: string }) =>

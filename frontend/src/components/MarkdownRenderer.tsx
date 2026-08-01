@@ -18,7 +18,7 @@ function CodeBlock({ language, children }: { language?: string; children: React.
   }, [])
 
   return (
-    <div className="my-3 rounded-lg overflow-hidden border border-theme-border-light/50">
+    <div className="llm-code-block my-3 rounded-lg overflow-hidden border border-theme-border-light/50">
       <div className="flex items-center justify-between px-3 py-1.5 bg-theme-bg-secondary/80 text-xs text-theme-subtle">
         <span className="font-mono">{language || 'text'}</span>
         <button

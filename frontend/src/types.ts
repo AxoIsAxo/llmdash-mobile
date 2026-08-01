@@ -235,3 +235,23 @@ export interface DocumentVersion {
   content: string | null;
   created_at: string;
 }
+
+export interface ThemeSpec {
+  preset: string;
+  tokens: Record<string, Record<string, string | number>>;
+  components: Record<string, Record<string, string>>;
+}
+
+export interface ThemeInfo {
+  spec: ThemeSpec;
+  css: string;
+  presets: string[];
+  default_preset: string;
+}
+
+export interface ThemeHistoryEntry {
+  id: number;
+  created_at: string;
+  spec: ThemeSpec | null;
+  css: string | null;
+}

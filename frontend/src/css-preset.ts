@@ -91,6 +91,12 @@ export const BASE_THEME_CSS = `:root {
   --theme-chat-max-width: 56rem;
   --theme-panel-max-width: 48rem;
   --theme-dropdown-width: 16rem;
+  --theme-bubble-max-width: 75%;
+  --theme-side-panel-width: 420px;
+  --theme-avatar-size: 2rem;
+  --theme-message-gap: 1rem;
+  --theme-preview-height: 24rem;
+  --theme-auth-max-width: 24rem;
 
   /* Z-index */
   --theme-z-modal: 50;

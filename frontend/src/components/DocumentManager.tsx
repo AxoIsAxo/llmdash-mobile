@@ -109,7 +109,7 @@ export default function DocumentManager({ currentUser, onClose }: Props) {
 
   return (
     <div className="fixed inset-0 bg-theme-overlay/60 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-theme-bg-secondary rounded-2xl w-full max-w-4xl max-h-[85vh] flex flex-col border border-theme-border-light" onClick={e => e.stopPropagation()}>
+      <div className="llm-modal bg-theme-bg-secondary rounded-2xl w-full max-w-4xl max-h-[85vh] flex flex-col border border-theme-border-light" onClick={e => e.stopPropagation()}>
         <div className="p-4 border-b border-theme-border flex items-center justify-between shrink-0">
           <h2 className="text-lg font-semibold flex items-center gap-2">
             <FileText className="w-5 h-5 text-theme-accent-text" /> Documents

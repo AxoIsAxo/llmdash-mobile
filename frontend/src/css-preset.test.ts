@@ -12,4 +12,10 @@ describe('css-preset', () => {
       expect(BASE_THEME_CSS).toContain(token)
     }
   })
+
+  it('defines the layout tokens used by the theme system', () => {
+    for (const token of ['--theme-bubble-max-width', '--theme-side-panel-width', '--theme-avatar-size', '--theme-message-gap', '--theme-preview-height', '--theme-auth-max-width']) {
+      expect(BASE_THEME_CSS).toContain(token)
+    }
+  })
 })

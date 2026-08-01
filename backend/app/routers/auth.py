@@ -349,6 +349,10 @@ async def get_user_css(current_user: dict = Depends(get_current_user), db: Async
 
 @router.put("/css")
 async def save_user_css(req: CssUpdateRequest, current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from ..theme import validate_raw_css
+    ok, err = validate_raw_css(req.css)
+    if not ok:
+        raise HTTPException(400, f"Invalid CSS: {err}")
     result = await db.execute(select(User).where(User.id == current_user["user_id"]))
     user = result.scalar_one_or_none()
     if not user:

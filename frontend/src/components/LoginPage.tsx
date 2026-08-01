@@ -37,7 +37,7 @@ export default function LoginPage({ authStatus, onDone }: Props) {
 
   return (
     <div className="h-screen flex items-center justify-center bg-theme-bg">
-      <div className="w-full max-w-sm mx-4">
+      <div className="w-full max-w-[var(--theme-auth-max-width)] mx-4">
         <div className="text-center mb-8">
           <Bot className="w-14 h-14 text-theme-accent-text mx-auto mb-3" />
           <h1 className="text-2xl font-bold text-theme-text">LLMDash</h1>

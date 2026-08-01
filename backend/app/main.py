@@ -44,6 +44,7 @@ from .whisper_stt import transcribe_audio, transcribe_audio_openrouter, VALID_PR
 from .audio_convert import prepare_audio_for_provider
 from .routers.auth import router as auth_router, get_current_user, require_role, load_provider_configs
 from .routers.subscriptions import router as subscriptions_router
+from .routers.theme import router as theme_router
 
 router = APIRouter(prefix="/api")
 
@@ -103,6 +104,7 @@ async def coi_middleware(request: Request, call_next):
 
 app.include_router(auth_router)
 app.include_router(subscriptions_router)
+app.include_router(theme_router)
 from .skills.router import router as skills_router
 app.include_router(skills_router)
 
