@@ -10,3 +10,11 @@ data
 **/.env
 **/.env.*
 jwt_secret
+frontend/dist
+frontend/node_modules
+backend/tests
+backend/requirements-dev.txt
+backend/pyproject.toml
+backend/data
+*.log
+.DS_Store

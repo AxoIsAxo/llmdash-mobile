@@ -2,7 +2,7 @@
 FROM node:22-alpine AS frontend-builder
 WORKDIR /app
 COPY frontend/ ./
-RUN npm ci
+RUN npm ci --no-audit --no-fund
 RUN npm run build
 
 # Stage 2: Python backend
@@ -20,9 +20,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-noto \
     ffmpeg \
     tesseract-ocr \
+    tesseract-ocr-eng \
     texlive-latex-base \
     texlive-latex-recommended \
-    texlive-latex-extra \
+    texlive-fonts-recommended \
     libasound2 \
     libatk-bridge2.0-0 \
     libatk1.0-0 \
@@ -41,15 +42,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxkbcommon0 \
     libxrandr2 \
     libxshmfence1 \
-    tesseract-ocr-eng \
-    tesseract-ocr-chi-sim \
-    tesseract-ocr-jpn \
-    tesseract-ocr-kor \
-    tesseract-ocr-rus \
-    tesseract-ocr-fra \
-    tesseract-ocr-deu \
-    tesseract-ocr-spa \
-    tesseract-ocr-ara \
+    unzip \
     && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
     && chmod a+r /etc/apt/keyrings/docker.asc \
     && echo "deb [signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" > /etc/apt/sources.list.d/docker.list \
@@ -58,8 +51,44 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
+# texlive-latex-extra is ~700MB but the app's document template only needs
+# the `listings` and `ulem` packages from it. Fetch just those two from CTAN
+# into the local TeX tree, then verify by compiling the exact package set
+# the app uses. If the compile fails for any reason, fall back to the full
+# apt package so .tex -> PDF keeps working no matter what.
+RUN if ! kpsewhich listings.sty >/dev/null 2>&1; then \
+        mkdir -p /usr/local/share/texmf/tex/latex && cd /usr/local/share/texmf/tex/latex \
+        && curl -fsSLo listings.zip https://mirrors.ctan.org/macros/latex/contrib/listings.zip \
+        && unzip -qo listings.zip && rm -f listings.zip \
+        && (cd listings && tex listings.ins >/dev/null 2>&1; rm -f *.dtx *.ins *.pdf *.log) \
+        && curl -fsSLo ulem.zip https://mirrors.ctan.org/macros/latex/contrib/ulem.zip \
+        && unzip -qo ulem.zip && rm -f ulem.zip \
+        && mktexlsr /usr/local/share/texmf; \
+    fi \
+    && printf '%s\n' \
+        '\documentclass{article}' \
+        '\usepackage[utf8]{inputenc}' \
+        '\usepackage[T1]{fontenc}' \
+        '\usepackage{geometry}' \
+        '\usepackage{graphicx}' \
+        '\usepackage{booktabs}' \
+        '\usepackage{xcolor}' \
+        '\usepackage{listings}' \
+        '\usepackage[normalem]{ulem}' \
+        '\usepackage{hyperref}' \
+        '\usepackage{amsmath}' \
+        '\usepackage{amssymb}' \
+        '\usepackage{longtable}' \
+        '\usepackage{parskip}' \
+        '\begin{document}' \
+        'Test \uline{underline} and \lstinline|x = 1|.' \
+        '\end{document}' > /tmp/tpl.tex \
+    && { pdflatex -interaction=nonstopmode -halt-on-error -output-directory /tmp /tmp/tpl.tex >/dev/null 2>&1 && test -f /tmp/tpl.pdf; } \
+    || { apt-get update && apt-get install -y --no-install-recommends texlive-latex-extra && rm -rf /var/lib/apt/lists/*; } \
+    && rm -f /tmp/tpl.*
+
 # Install HyperFrames CLI globally (includes Chromium via Puppeteer)
-RUN npm install -g hyperframes && rm -rf ~/.npm && \
+RUN npm install -g --no-audit --no-fund hyperframes && rm -rf ~/.npm && \
     rm -rf /usr/lib/node_modules/hyperframes/node_modules/onnxruntime-node && \
     rm -rf /usr/lib/node_modules/hyperframes/node_modules/onnxruntime-common
 

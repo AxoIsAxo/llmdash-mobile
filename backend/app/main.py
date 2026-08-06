@@ -3,9 +3,12 @@ import base64
 import json
 import logging
 import os
+import re
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from types import SimpleNamespace
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -879,8 +882,86 @@ def _looks_like_deliberation(text: str) -> bool:
         return False
     if any(kw in stripped for kw in _DELIBERATION_ANSWER_KEYWORDS):
         return False
-    import re as _re
-    return any(_re.match(p, stripped) for p in _DELIBERATION_PATTERNS)
+    return any(re.match(p, stripped) for p in _DELIBERATION_PATTERNS)
+
+
+def _looks_like_filler(text: str) -> bool:
+    """True if the text is just a stall/"let me..." line with no substance."""
+    if not text or len(text) < 5:
+        return False
+    stripped = text.strip().lower()
+    filler_patterns = (
+        r"^(let me\s+(try|search|look|find|check|see|attempt|google|query))",
+        r"^(i('ll| will)\s+(try|search|look|find|check|see|attempt|google|query|use))",
+        r"^(searching|looking|trying|checking)",
+        r"^(i can\s+(try|search|look|find|check))",
+        r"^(perhaps\s+i\s+(should|can|could|need to))",
+        r"^(maybe\s+i\s+(should|can|could|need to))",
+        r"^(ok,?\s+)?(hold on|one moment|give me)",
+    )
+    for pat in filler_patterns:
+        if re.match(pat, stripped):
+            return True
+    if len(stripped) <= 60 and not any(
+        kw in stripped for kw in ("result", "found", "here", "page", "according", "showing")
+    ):
+        if any(kw in stripped for kw in ("search", "searching", "try", "trying", "find", "looking", "look", "scrape", "scraping", "fetch")):
+            return True
+    return False
+
+
+def _classify_no_action_turn(content: str, reasoning: str, finish_reason: Optional[str]) -> Optional[str]:
+    """Classify a finished model turn that produced no tool calls.
+
+    Returns None when the turn is an acceptable answer, otherwise a reason
+    string ('budget' | 'deliberation' | 'silent') describing why it should be
+    retried with an action nudge:
+      - 'budget'       — the output limit was hit (thinking burned the budget);
+                         retry with a larger max_tokens.
+      - 'deliberation' — the model only described a plan ("Let me check...").
+      - 'silent'       — no text at all (only thinking, maybe).
+    """
+    text = (content or "").strip()
+    filler = bool(text) and (_looks_like_deliberation(text) or _looks_like_filler(text))
+    if finish_reason in ("length", "max_tokens") and (not text or filler):
+        return "budget"
+    if not text:
+        return "silent"
+    if filler:
+        return "deliberation"
+    return None
+
+
+def _bump_model_max_tokens(model, new_max_tokens: int):
+    """Return a provider-call-safe view of a model config with a raised
+    max_tokens. Providers only read these fields; the DB row is untouched."""
+    return SimpleNamespace(
+        model_name=model.model_name,
+        max_tokens=new_max_tokens,
+        temperature=model.temperature,
+        thinking_enabled=getattr(model, "thinking_enabled", False),
+        thinking_budget_tokens=getattr(model, "thinking_budget_tokens", None),
+        api_key_env=model.api_key_env,
+        base_url=model.base_url,
+        provider=model.provider,
+    )
+
+
+# The agent loop never accepts a turn that only *planned* to act, ran out of
+# output tokens while thinking, or stayed silent. When that happens it retries
+# with this nudge, bounded by MAX_NO_ACTION_TURNS per request.
+NO_ACTION_NUDGE = (
+    "[Your previous reply only described what you planned to do (or was cut off "
+    "before you acted). Do NOT narrate a plan. Take action NOW: if the task needs "
+    "a tool, call it immediately as your first output; otherwise give the final "
+    "answer directly.]"
+)
+NO_ANSWER_NOTE = (
+    "*(The model did not produce a final answer — it kept planning without "
+    "acting. Try asking again or use a different model.)*"
+)
+MAX_NO_ACTION_TURNS = 2
+MAX_TOOL_ROUNDS = 5
 
 
 def _repair_tool_history(messages: list[dict]) -> list[dict]:
@@ -1312,120 +1393,156 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                     )
                     return any(k in msg for k in keywords)
 
-                chat_messages = messages
-                try:
-                    stream_iter = provider.stream_chat(chat_messages, tools, model)
-                except Exception as e:
-                    if audio_enabled and _looks_like_audio_error(e):
-                        logger.error(
-                            f"Audio embed rejected by model. The model advertises "
-                            f"audio support but the upstream rejected the payload. "
-                            f"Underlying error: {e}"
+                # --- Effective model budget -------------------------------------
+                # Reasoning models (thinking_enabled) commonly burn the entire
+                # configured max_tokens on thinking and stop before they can call
+                # a tool or answer. If the config leaves less than 1024 output
+                # tokens after the thinking budget, raise max_tokens for this
+                # request so the model can actually act.
+                effective_model = model
+                budget_bumped = False  # max_tokens raised (up-front or on length cutoff)
+                _thinking_budget = getattr(model, "thinking_budget_tokens", None) or 0
+                if getattr(model, "thinking_enabled", False) and _thinking_budget:
+                    _headroom = (getattr(model, "max_tokens", None) or 4096) - _thinking_budget
+                    if _headroom < 1024:
+                        if getattr(model, "provider", None) == "anthropic":
+                            _bumped = 32768  # Anthropic requires >= 32k with thinking
+                        else:
+                            _bumped = min(max(_thinking_budget + 2048, 8192), 32768)
+                        effective_model = _bump_model_max_tokens(model, _bumped)
+                        budget_bumped = True
+                        logger.info(
+                            f"thinking model {model.model_name}: max_tokens={getattr(model, 'max_tokens', None)} "
+                            f"leaves only {_headroom} output tokens after a {_thinking_budget} thinking budget; "
+                            f"raised to {_bumped} for this request"
                         )
-                    raise
 
-                async for chunk in stream_iter:
-                    if chunk.content_delta:
-                        accumulated_content += chunk.content_delta
-                        await push_event("content_delta", content=chunk.content_delta)
-                        await save_draft_progress()
-                    if chunk.reasoning_content_delta:
-                        accumulated_reasoning += chunk.reasoning_content_delta
-                        await push_event("reasoning_delta", content=chunk.reasoning_content_delta)
-                    if chunk.tool_calls is not None:
-                        final_tool_calls = chunk.tool_calls
-                    if chunk.usage:
-                        total_prompt_tokens += chunk.usage["prompt_tokens"]
-                        total_completion_tokens += chunk.usage["completion_tokens"]
-                        total_total_tokens += chunk.usage["total_tokens"]
-                    total_reasoning_tokens += chunk.reasoning_tokens
-
-                # --- Deliberation guard ---
-                # Some models reply with only a plan ("Let me fetch the actual
-                # site...", "I'll check...") and never call a tool. That is not
-                # an answer. Give the model ONE more chance to actually act.
-                if not final_tool_calls and _looks_like_deliberation(accumulated_content):
-                    logger.info(
-                        f"deliberation-only reply detected for conv {req.conversation_id}; "
-                        f"retrying with an action nudge"
-                    )
-                    messages.append({
-                        "role": "user",
-                        "content": (
-                            "[Your previous reply only described what you planned to do. "
-                            "Do NOT plan out loud — take action NOW: call the appropriate "
-                            "tool immediately if the task needs one, otherwise give the "
-                            "final answer directly.]"
-                        ),
-                    })
-                    accumulated_content = ""
-                    accumulated_reasoning = ""
-                    last_save_len = 0
-                    try:
-                        retry_iter = provider.stream_chat(messages, tools, model)
-                    except Exception:
-                        retry_iter = None
-                    if retry_iter is not None:
-                        async for chunk in retry_iter:
-                            if chunk.content_delta:
-                                accumulated_content += chunk.content_delta
-                                await push_event("content_delta", content=chunk.content_delta)
-                                await save_draft_progress()
-                            if chunk.reasoning_content_delta:
-                                accumulated_reasoning += chunk.reasoning_content_delta
-                                await push_event("reasoning_delta", content=chunk.reasoning_content_delta)
-                            if chunk.tool_calls is not None:
-                                final_tool_calls = chunk.tool_calls
-                            if chunk.usage:
-                                total_prompt_tokens += chunk.usage["prompt_tokens"]
-                                total_completion_tokens += chunk.usage["completion_tokens"]
-                                total_total_tokens += chunk.usage["total_tokens"]
-                            total_reasoning_tokens += chunk.reasoning_tokens
+                async def drain_turn(stream_iter) -> None:
+                    """Drain one provider stream into the shared accumulators."""
+                    nonlocal final_tool_calls, finish_reason
+                    nonlocal accumulated_content, accumulated_reasoning
+                    nonlocal total_prompt_tokens, total_completion_tokens, total_total_tokens, total_reasoning_tokens
+                    async for chunk in stream_iter:
+                        if chunk.content_delta:
+                            accumulated_content += chunk.content_delta
+                            await push_event("content_delta", content=chunk.content_delta)
+                            await save_draft_progress()
+                        if chunk.reasoning_content_delta:
+                            accumulated_reasoning += chunk.reasoning_content_delta
+                            await push_event("reasoning_delta", content=chunk.reasoning_content_delta)
+                        if chunk.tool_calls is not None:
+                            final_tool_calls = chunk.tool_calls
+                        if chunk.finish_reason is not None:
+                            finish_reason = chunk.finish_reason
+                        if chunk.usage:
+                            total_prompt_tokens += chunk.usage["prompt_tokens"]
+                            total_completion_tokens += chunk.usage["completion_tokens"]
+                            total_total_tokens += chunk.usage["total_tokens"]
+                        total_reasoning_tokens += chunk.reasoning_tokens
 
                 tool_round = 0
-                seen_tool_signatures: set[tuple] = set()
+                no_action_turns = 0
+                bailed_no_action = False
+                finish_reason = None
+                last_tool_signature = None
                 consecutive_search_failures = 0
                 # Every tool call that is actually EXECUTED, across all rounds.
                 # The DB assistant message must list ALL of them so every stored
                 # 'tool' result message has a matching tool_call_id.
                 all_tool_calls: list[dict] = []
 
-                def _looks_like_filler(text: str) -> bool:
-                    if not text or len(text) < 5:
-                        return False
-                    stripped = text.strip().lower()
-                    filler_patterns = (
-                        r"^(let me\s+(try|search|look|find|check|see|attempt|google|query))",
-                        r"^(i('ll| will)\s+(try|search|look|find|check|see|attempt|google|query|use))",
-                        r"^(searching|looking|trying|checking)",
-                        r"^(i can\s+(try|search|look|find|check))",
-                        r"^(perhaps\s+i\s+(should|can|could|need to))",
-                        r"^(maybe\s+i\s+(should|can|could|need to))",
-                        r"^(ok,?\s+)?(hold on|one moment|give me)",
-                    )
-                    import re as _re
-                    for pat in filler_patterns:
-                        if _re.match(pat, stripped):
-                            return True
-                    if len(stripped) <= 60 and not any(
-                        kw in stripped for kw in ("result", "found", "here", "page", "according", "showing")
-                    ):
-                        if any(kw in stripped for kw in ("search", "searching", "try", "trying", "find", "looking", "look", "scrape", "scraping", "fetch")):
-                            return True
-                    return False
+                while tool_round < MAX_TOOL_ROUNDS:
+                    turn_content_start = len(accumulated_content)
 
-                while final_tool_calls and tool_round < 5:
+                    # Collect one model turn. If the model produces only a plan
+                    # ("Let me check..."), burns its output budget on thinking, or
+                    # stays silent, nudge it to act NOW and retry — but never
+                    # accept a no-action turn as the final answer.
+                    while True:
+                        try:
+                            turn_iter = provider.stream_chat(messages, tools, effective_model)
+                        except Exception as e:
+                            if audio_enabled and _looks_like_audio_error(e):
+                                logger.error(
+                                    f"Audio embed rejected by model. The model advertises "
+                                    f"audio support but the upstream rejected the payload. "
+                                    f"Underlying error: {e}"
+                                )
+                            raise
+                        await drain_turn(turn_iter)
+
+                        if final_tool_calls:
+                            # Keep tool-calling turns, but drop any filler text the
+                            # model wrote before the call ("Let me search...").
+                            turn_text = accumulated_content[turn_content_start:].strip()
+                            if _looks_like_filler(turn_text):
+                                accumulated_content = accumulated_content[:turn_content_start]
+                                last_save_len = len(accumulated_content)
+                            break
+
+                        no_action = _classify_no_action_turn(
+                            accumulated_content[turn_content_start:],
+                            accumulated_reasoning,
+                            finish_reason,
+                        )
+                        if no_action is None:
+                            break  # a real answer
+
+                        # The user already saw this turn's (filler) text — strip it
+                        # from the stored answer, but keep the thinking. Applies to
+                        # both the nudge path and the final bail below.
+                        if accumulated_content[turn_content_start:].strip():
+                            accumulated_content = accumulated_content[:turn_content_start]
+                            last_save_len = len(accumulated_content)
+
+                        if no_action_turns >= MAX_NO_ACTION_TURNS:
+                            bailed_no_action = True
+                            logger.info(
+                                f"conv {req.conversation_id}: model produced only no-action turns "
+                                f"(last: {no_action}); giving up after {no_action_turns} nudges"
+                            )
+                            break
+
+                        no_action_turns += 1
+                        logger.info(
+                            f"conv {req.conversation_id}: no-action turn ({no_action}); "
+                            f"nudging ({no_action_turns}/{MAX_NO_ACTION_TURNS})"
+                        )
+                        messages.append({"role": "user", "content": NO_ACTION_NUDGE})
+                        if no_action == "budget" and not budget_bumped:
+                            budget_bumped = True
+                            base = getattr(effective_model, "max_tokens", None) or 4096
+                            if getattr(model, "provider", None) == "anthropic":
+                                new_max = max(base * 2, 32768)
+                            else:
+                                new_max = min(max(base, 8192), 16384)
+                            effective_model = _bump_model_max_tokens(model, new_max)
+                            logger.info(
+                                f"conv {req.conversation_id}: output budget exhausted; retrying with "
+                                f"max_tokens={effective_model.max_tokens}"
+                            )
+
+                    if not final_tool_calls:
+                        break  # answered (or bailed) without tools
+
+                    if consecutive_search_failures >= 3:
+                        turn_text = accumulated_content[turn_content_start:].strip()
+                        if _looks_like_filler(turn_text) or not turn_text:
+                            accumulated_content = accumulated_content[:turn_content_start]
+                        accumulated_content = (accumulated_content + "\n\n[Aborted: search and scraping tools failed 3 times in a row. Tell the user what happened and stop.]").strip()
+                        final_tool_calls = []
+                        break
+
                     tool_round += 1
-
                     current_sig = tuple(sorted(
                         (tc["name"], json.dumps(tc.get("arguments") or {}, sort_keys=True, default=str))
                         for tc in final_tool_calls
                     ))
-                    if current_sig in seen_tool_signatures:
-                        accumulated_content = (accumulated_content + "\n\n[Aborted: the same tool call failed twice in a row. Stop calling this tool and tell the user what went wrong.]").strip()
+                    if current_sig == last_tool_signature:
+                        accumulated_content = (accumulated_content + "\n\n[Aborted: you repeated the exact same tool call twice in a row. Stop calling this tool and tell the user what went wrong.]").strip()
                         final_tool_calls = []
                         break
-                    seen_tool_signatures.add(current_sig)
+                    last_tool_signature = current_sig
 
                     for tc in final_tool_calls:
                         if not any(c["id"] == tc["id"] for c in all_tool_calls):
@@ -1476,43 +1593,11 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                         await sess.commit()
                         messages.append({"role": "tool", "tool_call_id": tr["tool_call_id"], "tool_name": tr["tool_name"], "content": tr["content"]})
 
+                    # This round is fully captured in `assistant_entry`; the next
+                    # turn starts fresh (thinking and text below this point).
                     accumulated_reasoning = ""
                     final_tool_calls = []
                     last_save_len = 0
-                    content_len_before_round = len(accumulated_content)
-
-                    # Always send tools so the model can retry after a failed
-                    # tool call. The `while ... and tool_round < 5` loop already
-                    # caps the number of rounds, so there's no infinite-loop risk.
-                    next_tools = tools
-                    async for chunk in provider.stream_chat_with_results(messages, next_tools, model, tool_results):
-                        if chunk.content_delta:
-                            accumulated_content += chunk.content_delta
-                            await push_event("content_delta", content=chunk.content_delta)
-                            await save_draft_progress()
-                        if chunk.reasoning_content_delta:
-                            accumulated_reasoning += chunk.reasoning_content_delta
-                            await push_event("reasoning_delta", content=chunk.reasoning_content_delta)
-                        if chunk.tool_calls is not None:
-                            final_tool_calls = chunk.tool_calls
-                        if chunk.usage:
-                            total_prompt_tokens += chunk.usage["prompt_tokens"]
-                            total_completion_tokens += chunk.usage["completion_tokens"]
-                            total_total_tokens += chunk.usage["total_tokens"]
-                        total_reasoning_tokens += chunk.reasoning_tokens
-
-                    if final_tool_calls:
-                        new_content = accumulated_content[content_len_before_round:].strip()
-                        if _looks_like_filler(new_content):
-                            accumulated_content = accumulated_content[:content_len_before_round]
-
-                    if final_tool_calls and consecutive_search_failures >= 3:
-                        new_content = accumulated_content[content_len_before_round:].strip()
-                        if _looks_like_filler(new_content) or not new_content:
-                            accumulated_content = accumulated_content[:content_len_before_round]
-                        accumulated_content = (accumulated_content + "\n\n[Aborted: search and scraping tools failed 3 times in a row. Tell the user what happened and stop.]").strip()
-                        final_tool_calls = []
-                        break
 
                 if streaming_msg_id is not None:
                     draft.content = accumulated_content or draft.content
@@ -1536,6 +1621,16 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                     await sess.commit()
                 if accumulated_content:
                     await push_event("content", content=accumulated_content, reasoning_content=accumulated_reasoning or None)
+                elif bailed_no_action or accumulated_reasoning:
+                    # The model only deliberated (or burned its budget) and never
+                    # produced a real answer — keep the thinking, say so plainly.
+                    draft.content = NO_ANSWER_NOTE
+                    await sess.commit()
+                    await push_event("content", content=NO_ANSWER_NOTE, reasoning_content=accumulated_reasoning or None)
+                elif all_tool_calls:
+                    # The model acted (tool rounds ran) but produced no closing
+                    # text — the executed tool pills are the answer.
+                    await push_event("content", content=draft.content or "", reasoning_content=accumulated_reasoning or None)
                 elif not final_tool_calls:
                     await push_event("error", error="Received an empty response from the model. Please verify your API key and model configuration.")
                 else:

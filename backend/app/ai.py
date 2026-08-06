@@ -121,7 +121,7 @@ def _parse_tool_arguments(raw: str, tool_name: str) -> tuple[dict, str]:
         try:
             parsed = json.loads(raw[: last_close + 1])
             if isinstance(parsed, dict):
-                return parsed, False
+                return parsed, "recovered"
         except (json.JSONDecodeError, TypeError):
             pass
 
@@ -603,15 +603,7 @@ class AIProvider(ABC):
         ...
 
     @abstractmethod
-    async def chat_with_results(self, messages: list[dict], tools: list[ToolDef], model_config, tool_results: list[dict]) -> AIResponse:
-        ...
-
-    @abstractmethod
     async def stream_chat(self, messages: list[dict], tools: list[ToolDef], model_config) -> AsyncGenerator[StreamChunk, None]:
-        ...
-
-    @abstractmethod
-    async def stream_chat_with_results(self, messages: list[dict], tools: list[ToolDef], model_config, tool_results: list[dict]) -> AsyncGenerator[StreamChunk, None]:
         ...
 
     @abstractmethod
@@ -754,54 +746,9 @@ class OpenAICompatibleProvider(AIProvider):
             reasoning_content=getattr(msg, "reasoning_content", "") or getattr(msg, "reasoning", "") or "",
         )
 
-    async def chat_with_results(self, messages: list[dict], tools: list[ToolDef], model_config, tool_results: list[dict]) -> AIResponse:
+    async def generate_image(self, prompt: str, model_config, size: str = "1024x1024", n: int = 1) -> ImageGenerationResult:
         client = await self._get_client(model_config)
-        openai_messages = self._convert_messages(messages)
-        openai_tools = build_tool_specs(tools)
-        kwargs = {
-            "model": model_config.model_name,
-            "messages": openai_messages,
-            "temperature": model_config.temperature or 0.7,
-            "max_tokens": model_config.max_tokens or 4096,
-        }
-        thinking_requested = False
-        if getattr(model_config, "thinking_enabled", False):
-            kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
-            thinking_requested = True
-        tools_sent = False
-        if openai_tools:
-            kwargs["tools"] = openai_tools
-            tools_sent = True
-
-        try:
-            response = await client.chat.completions.create(**kwargs)
-        except Exception as e:
-            error_str = str(e).lower()
-            if tools_sent and ("support tool" in error_str or "tool use" in error_str or "function call" in error_str or "tool_choice" in error_str or "tools" in error_str):
-                return await self.chat_with_results(messages, [], model_config, tool_results)
-            if thinking_requested and ("thinking" in error_str or "reasoning" in error_str):
-                kwargs.pop("extra_body", None)
-                try:
-                    response = await client.chat.completions.create(**kwargs)
-                except Exception as e2:
-                    error_str2 = str(e2).lower()
-                    if tools_sent and ("support tool" in error_str2 or "tool use" in error_str2 or "tool_choice" in error_str2 or "tools" in error_str2):
-                        return await self.chat_with_results(messages, [], model_config, tool_results)
-                    raise e2
-            else:
-                raise e
-        msg = response.choices[0].message
-
-        tool_calls, content = self._extract_tool_calls(msg)
-
-        return AIResponse(
-            content=content,
-            tool_calls=tool_calls,
-            reasoning_content=getattr(msg, "reasoning_content", "") or getattr(msg, "reasoning", "") or "",
-        )
-
-    @staticmethod
-    def _extract_tool_calls(msg) -> tuple[list[dict], str]:
+        base_url = (model_config.base_url or "").lower()
         """Pull tool calls out of an OpenAI message, falling back to inline
         `<tool_call>...</tool_call>` text for models that don't use the
         tool_calls API (e.g. mimo v2.5). Returns (tool_calls, cleaned_content).
@@ -991,10 +938,6 @@ class OpenAICompatibleProvider(AIProvider):
         async for chunk in self._stream_openai(messages, tools, model_config):
             yield chunk
 
-    async def stream_chat_with_results(self, messages: list[dict], tools: list[ToolDef], model_config, tool_results: list[dict]) -> AsyncGenerator[StreamChunk, None]:
-        async for chunk in self._stream_openai(messages, tools, model_config):
-            yield chunk
-
     async def generate_image(self, prompt: str, model_config, size: str = "1024x1024", n: int = 1) -> ImageGenerationResult:
         client = await self._get_client(model_config)
         base_url = (model_config.base_url or "").lower()
@@ -1170,9 +1113,6 @@ class AnthropicProvider(AIProvider):
 
         return AIResponse(content=content, tool_calls=tool_calls, reasoning_content=reasoning_content)
 
-    async def chat_with_results(self, messages: list[dict], tools: list[ToolDef], model_config, tool_results: list[dict]) -> AIResponse:
-        return await self.chat(messages, tools, model_config)
-
     async def stream_chat(self, messages: list[dict], tools: list[ToolDef], model_config) -> AsyncGenerator[StreamChunk, None]:
         client = await self._get_client(model_config)
         converted, system = self._convert_messages(messages)
@@ -1250,10 +1190,6 @@ class AnthropicProvider(AIProvider):
                 finish_reason=final.stop_reason,
                 usage=usage,
             )
-
-    async def stream_chat_with_results(self, messages: list[dict], tools: list[ToolDef], model_config, tool_results: list[dict]) -> AsyncGenerator[StreamChunk, None]:
-        async for chunk in self.stream_chat(messages, tools, model_config):
-            yield chunk
 
     async def generate_image(self, prompt: str, model_config, size: str = "1024x1024", n: int = 1) -> ImageGenerationResult:
         raise NotImplementedError("Image generation is not supported on the Anthropic provider. Use an OpenAI-compatible provider.")

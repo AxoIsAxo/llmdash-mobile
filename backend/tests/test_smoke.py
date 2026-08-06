@@ -5,6 +5,7 @@ Run with:  pip install -r requirements-dev.txt && pytest
 
 import os
 import tempfile
+from types import SimpleNamespace
 
 _tmp = tempfile.mkdtemp(prefix="llmdash_test_")
 os.environ["DATABASE_PATH"] = os.path.join(_tmp, "test.db")
@@ -14,7 +15,17 @@ os.environ["JWT_SECRET"] = "test-secret-for-smoke-tests"
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app.main import _looks_like_deliberation, _repair_tool_history, app  # noqa: E402
+from app.ai import StreamChunk  # noqa: E402
+from app.main import (  # noqa: E402
+    NO_ACTION_NUDGE,
+    NO_ANSWER_NOTE,
+    _bump_model_max_tokens,
+    _classify_no_action_turn,
+    _looks_like_deliberation,
+    _looks_like_filler,
+    _repair_tool_history,
+    app,
+)
 
 
 def test_looks_like_deliberation():
@@ -140,3 +151,284 @@ def test_full_flow():
             headers=headers,
         )
         assert forged.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Agent-loop helpers (the "thinks a lot, then stops" fixes)
+# ---------------------------------------------------------------------------
+
+
+def test_classify_no_action_turn():
+    # Real answers are accepted.
+    assert _classify_no_action_turn("The answer is 42.", "", None) is None
+    assert _classify_no_action_turn("Here are the results of the search: ...", "", None) is None
+    assert _classify_no_action_turn("Here is a partial answer even though tokens ran out.", "", "length") is None
+    # Plan/filler text is not an answer.
+    assert _classify_no_action_turn("Let me check the theme first.", "", None) == "deliberation"
+    assert _classify_no_action_turn("I'll search for that now.", "", None) == "deliberation"
+    # Silent turns (only thinking) are not answers.
+    assert _classify_no_action_turn("", "thinking hard about it...", None) == "silent"
+    assert _classify_no_action_turn("", "", None) == "silent"
+    # Budget exhaustion with no substance is a budget cutoff.
+    assert _classify_no_action_turn("", "", "length") == "budget"
+    assert _classify_no_action_turn("Let me try another query.", "", "max_tokens") == "budget"
+
+
+def test_looks_like_filler():
+    assert _looks_like_filler("Let me search for that.") is True
+    assert _looks_like_filler("I'll look it up now") is True
+    assert _looks_like_filler("Searching...") is True
+    assert _looks_like_filler("Here is what I found.") is False
+    assert _looks_like_filler("") is False
+    assert _looks_like_filler("x") is False
+
+
+def test_bump_model_max_tokens():
+    class FakeModel:
+        model_name = "mock-chat"
+        max_tokens = 4096
+        temperature = 0.7
+        thinking_enabled = True
+        thinking_budget_tokens = 4000
+        api_key_env = "DEEPSEEK_API_KEY"
+        base_url = "http://127.0.0.1:1/v1"
+        provider = "openai_compatible"
+
+    bumped = _bump_model_max_tokens(FakeModel(), 8192)
+    assert bumped.max_tokens == 8192
+    assert bumped.model_name == "mock-chat"
+    assert bumped.thinking_enabled is True
+    assert bumped.api_key_env == "DEEPSEEK_API_KEY"
+    # The original model row is untouched.
+    assert FakeModel.max_tokens == 4096
+
+
+class ScriptedProvider:
+    """Async provider that replays scripted StreamChunk turns.
+
+    Each element of `turns` is either a list of StreamChunk or a callable
+    receiving the current messages and returning the chunks. Records every
+    message list and model config it was called with for assertions.
+    """
+
+    def __init__(self, turns):
+        self.turns = list(turns)
+        self.calls: list[list[dict]] = []
+        self.model_configs = []
+
+    def _next(self, messages, model_config):
+        self.calls.append(list(messages))
+        self.model_configs.append(model_config)
+        turn = self.turns.pop(0)
+        return turn(messages) if callable(turn) else turn
+
+    async def stream_chat(self, messages, tools, model_config):
+        for chunk in self._next(messages, model_config):
+            yield chunk
+
+    async def chat(self, messages, tools, model_config):
+        return SimpleNamespace(content="Scripted title")
+
+
+def _sse_events(text: str) -> list[dict]:
+    import json as _json
+    events = []
+    for line in text.splitlines():
+        if line.startswith("data: ") and line.strip() != "data: [DONE]":
+            events.append(_json.loads(line[len("data: "):]))
+    return events
+
+
+def _owner_headers(client):
+    status = client.get("/api/auth/status").json()
+    if status["needs_setup"]:
+        client.post("/api/auth/setup", json={"username": "owner", "password": "test1234"})
+    login = client.post("/api/auth/login", json={"username": "owner", "password": "test1234"})
+    assert login.status_code == 200
+    return {"Authorization": f"Bearer {login.json()['token']}"}
+
+
+def _make_conv(client, headers, name):
+    created = client.post(
+        "/api/models",
+        json={
+            "name": name,
+            "provider": "openai_compatible",
+            "model_name": f"scripted-{name.lower()}",
+            "base_url": "http://127.0.0.1:1/v1",
+            "enabled": True,
+        },
+        headers=headers,
+    )
+    assert created.status_code == 201, created.text
+    model_id = created.json()["id"]
+    conv = client.post("/api/conversations", json={"title": "t", "model_id": model_id}, headers=headers)
+    return conv.json()["id"], model_id
+
+
+def _last_assistant(client, headers, conv_id):
+    msgs = client.get(f"/api/conversations/{conv_id}/messages", headers=headers).json()
+    return [m for m in msgs if m["role"] == "assistant"][-1]
+
+
+def test_agent_nudges_deliberation_turn_until_it_acts(monkeypatch):
+    """A plan-only reply ("Let me check...") must NOT be the final answer:
+    the loop nudges the model, it calls a tool, and the stored answer is the
+    follow-up text — not the filler."""
+    fake = ScriptedProvider([
+        # Turn 1: only a plan, no tool call.
+        [StreamChunk(content_delta="Let me check that for you..."), StreamChunk(finish_reason="stop")],
+        # Turn 2: after the nudge, the model finally acts (unknown tool ->
+        # registry returns a fast error, no network/docker needed).
+        [StreamChunk(tool_calls=[{"id": "c1", "name": "no_such_tool", "arguments": {}}], finish_reason="tool_calls")],
+        # Turn 3: final answer after the (failed) tool round.
+        [StreamChunk(content_delta="I could not find it, here is why."), StreamChunk(finish_reason="stop")],
+    ])
+    monkeypatch.setattr("app.main.get_provider", lambda provider_type: fake)
+
+    with TestClient(app) as client:
+        headers = _owner_headers(client)
+        conv_id, _ = _make_conv(client, headers, "Nudge")
+
+        resp = client.post(
+            "/api/chat/stream",
+            json={"conversation_id": conv_id, "message": "find me x"},
+            headers=headers,
+        )
+        assert resp.status_code == 200
+        events = _sse_events(resp.text)
+
+        # The model was nudged exactly once (2nd stream call) with the action nudge.
+        assert any(m["role"] == "user" and m["content"] == NO_ACTION_NUDGE for m in fake.calls[1])
+        # The nudge turn produced a tool call.
+        assert any(e["type"] == "tool_calls" for e in events)
+        # The follow-up turn saw the tool result in history.
+        assert any(m["role"] == "tool" for m in fake.calls[2])
+
+        last = _last_assistant(client, headers, conv_id)
+        assert last["content"] == "I could not find it, here is why."
+        assert "Let me check" not in last["content"]
+
+
+def test_agent_recovers_silent_thinking_turn(monkeypatch):
+    """A turn that produced ONLY thinking (no text, no tool call) must be
+    retried, and the thinking is preserved in the stored message."""
+    fake = ScriptedProvider([
+        [StreamChunk(reasoning_content_delta="I should look this up carefully..."), StreamChunk(finish_reason="stop")],
+        [StreamChunk(content_delta="The answer is 42."), StreamChunk(finish_reason="stop")],
+    ])
+    monkeypatch.setattr("app.main.get_provider", lambda provider_type: fake)
+
+    with TestClient(app) as client:
+        headers = _owner_headers(client)
+        conv_id, _ = _make_conv(client, headers, "Silent")
+
+        resp = client.post(
+            "/api/chat/stream",
+            json={"conversation_id": conv_id, "message": "think then answer"},
+            headers=headers,
+        )
+        assert resp.status_code == 200
+
+        last = _last_assistant(client, headers, conv_id)
+        assert last["content"] == "The answer is 42."
+        assert "look this up carefully" in (last["reasoning_content"] or "")
+
+
+def test_agent_raises_budget_when_thinking_burns_max_tokens(monkeypatch):
+    """finish_reason='length' with no output must trigger ONE retry with a
+    larger max_tokens, then succeed."""
+    fake = ScriptedProvider([
+        # Turn 1: reasoning burned the whole budget — nothing else came out.
+        [StreamChunk(reasoning_content_delta="lots and lots of thinking..."), StreamChunk(finish_reason="length")],
+        # Turn 2: with the bigger budget the model answers.
+        [StreamChunk(content_delta="Now I can actually answer."), StreamChunk(finish_reason="stop")],
+    ])
+    monkeypatch.setattr("app.main.get_provider", lambda provider_type: fake)
+
+    with TestClient(app) as client:
+        headers = _owner_headers(client)
+        conv_id, _ = _make_conv(client, headers, "Budget")
+
+        resp = client.post(
+            "/api/chat/stream",
+            json={"conversation_id": conv_id, "message": "big task"},
+            headers=headers,
+        )
+        assert resp.status_code == 200
+
+        # The retry got a bumped max_tokens (4096 -> 8192).
+        assert fake.model_configs[1].max_tokens > fake.model_configs[0].max_tokens
+        last = _last_assistant(client, headers, conv_id)
+        assert last["content"] == "Now I can actually answer."
+
+
+def test_agent_bails_with_note_after_repeated_deliberation(monkeypatch):
+    """After the bounded nudges the loop gives up with a clear note — the
+    plan/filler text must NOT leak through as the final answer."""
+    fake = ScriptedProvider([
+        [StreamChunk(content_delta="Let me check that for you..."), StreamChunk(finish_reason="stop")],
+        [StreamChunk(content_delta="I'll search for it right away."), StreamChunk(finish_reason="stop")],
+        [StreamChunk(content_delta="First, I need to look at the data."), StreamChunk(finish_reason="stop")],
+    ])
+    monkeypatch.setattr("app.main.get_provider", lambda provider_type: fake)
+
+    with TestClient(app) as client:
+        headers = _owner_headers(client)
+        conv_id, _ = _make_conv(client, headers, "Bail")
+
+        resp = client.post(
+            "/api/chat/stream",
+            json={"conversation_id": conv_id, "message": "do the thing"},
+            headers=headers,
+        )
+        assert resp.status_code == 200
+
+        # Exactly 2 nudges were sent, one per failed turn.
+        assert sum(1 for m in fake.calls[1] if m["role"] == "user" and m["content"] == NO_ACTION_NUDGE) == 1
+        assert sum(1 for m in fake.calls[2] if m["role"] == "user" and m["content"] == NO_ACTION_NUDGE) == 2
+
+        last = _last_assistant(client, headers, conv_id)
+        assert last["content"] == NO_ANSWER_NOTE
+        assert "Let me check" not in last["content"]
+
+
+def test_thinking_model_gets_headroom_upfront(monkeypatch):
+    """A thinking model configured with a self-defeating budget (max_tokens
+    4096, thinking 4000) must get a raised max_tokens on the very first call."""
+    fake = ScriptedProvider([
+        [StreamChunk(content_delta="Done."), StreamChunk(finish_reason="stop")],
+    ])
+    monkeypatch.setattr("app.main.get_provider", lambda provider_type: fake)
+
+    with TestClient(app) as client:
+        headers = _owner_headers(client)
+        created = client.post(
+            "/api/models",
+            json={
+                "name": "Thinker",
+                "provider": "openai_compatible",
+                "model_name": "scripted-thinker",
+                "base_url": "http://127.0.0.1:1/v1",
+                "enabled": True,
+                "max_tokens": 4096,
+                "thinking_enabled": True,
+                "thinking_budget_tokens": 4000,
+            },
+            headers=headers,
+        )
+        assert created.status_code == 201, created.text
+        conv_id = created.json()["id"]
+        conv = client.post("/api/conversations", json={"title": "t", "model_id": conv_id}, headers=headers)
+
+        resp = client.post(
+            "/api/chat/stream",
+            json={"conversation_id": conv.json()["id"], "message": "think"},
+            headers=headers,
+        )
+        assert resp.status_code == 200
+
+        # headroom was 96 (< 1024) -> the very first call uses 8192.
+        assert fake.model_configs[0].max_tokens == 8192
+        last = _last_assistant(client, headers, conv.json()["id"])
+        assert last["content"] == "Done."
