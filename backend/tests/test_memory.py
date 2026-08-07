@@ -725,3 +725,6 @@ def test_extraction_prompt_requires_durability():
     assert "does this depend on the current task" in p
     assert "make the logo simpler" in p  # the explicit negative example
     assert "do NOT emit" in p
+    # pronouns must be normalized so facts never read as the AI's voice
+    assert "PRONOUN NORMALIZATION" in p
+    assert "my favorite character" in p  # the anti-example from the bug report

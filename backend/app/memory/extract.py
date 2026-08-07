@@ -46,6 +46,7 @@ RULES — strict extraction only:
 - Do NOT emit: small talk, one-off commands, tool output, assistant explanations, anything not stated by the user, OR anything tied to the current task.
 - Ignore assistant turns that report errors or tool-only rounds (they carry no user facts).
 - persona_deltas kind must be one of preference|identity|state. State = active goals/working set (e.g. "user is building X").
+- PRONOUN NORMALIZATION: rewrite the user's first-person pronouns (my, I, me, we, our) as "the user" so stored facts read from a neutral observer: emit "User's favorite character is Arya Stark" — NEVER "User prefers arya stark, she's my favorite character". No atom text may contain a first-person pronoun that could be read as the AI's.
 
 Examples — do NOT emit:
 - "User wants the logo design to be simpler" (feedback about the current task's output)

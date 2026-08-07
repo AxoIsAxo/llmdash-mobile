@@ -12,7 +12,8 @@ def test_default_spec_validates_and_generates_triplets():
     spec, errors = validate_theme_spec(DEFAULT_SPEC)
     assert spec is not None and not errors
     css = theme_spec_to_css(spec)
-    assert "--theme-bg: 3 7 18;" in css
+    assert "--theme-bg: 16 19 31;" in css  # Extrovert · Ink (dark) default
+    assert "--theme-accent: 255 92 138;" in css
     assert "--theme-sidebar-width: 18rem;" in css
     assert "--theme-bubble-max-width: 75%;" in css
     assert ":root {" in css
@@ -84,10 +85,12 @@ def test_normalize_theme_patch_merge_and_preset():
     assert merged["tokens"]["colors"]["accent"] == "255 92 138"
     assert merged["tokens"]["layout"]["sidebar"] == "320px"
     # preset switch replaces base
-    preset, errors = normalize_theme_patch(base, {"preset": "glassmorphism"})
+    preset, errors = normalize_theme_patch(base, {"preset": "extrovert-light"})
     assert preset is not None and not errors
-    assert preset["preset"] == "glassmorphism"
-    assert ".llm-sidebar" in theme_spec_to_css(preset)
+    assert preset["preset"] == "extrovert-light"
+    css = theme_spec_to_css(preset)
+    assert "--theme-bg: 246 245 251;" in css  # light theme actually applied
+    assert "--theme-accent: 232 53 122;" in css
     # null deletes a token
     merged2, errors = normalize_theme_patch(base, {"tokens": {"layout": {"sidebar": None}}})
     assert merged2 is not None and not errors
@@ -101,7 +104,7 @@ def test_unknown_preset_rejected():
 
 
 def test_presets_all_valid():
-    for name in ("default", "compact", "glassmorphism", "brutalism"):
+    for name in ("extrovert", "extrovert-light"):
         spec, errors = validate_theme_spec(get_preset(name))
         assert spec is not None and not errors, name
         css = theme_spec_to_css(spec)

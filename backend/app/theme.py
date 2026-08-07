@@ -301,7 +301,7 @@ ALLOWED_COMPONENT_PROPS = {
     "font-weight",
 }
 
-ALLOWED_PRESETS = ("default", "compact", "glassmorphism", "brutalism")
+ALLOWED_PRESETS = ("extrovert", "extrovert-light")
 
 
 # --------------------------------------------------------------------------
@@ -309,32 +309,32 @@ ALLOWED_PRESETS = ("default", "compact", "glassmorphism", "brutalism")
 # --------------------------------------------------------------------------
 
 DEFAULT_SPEC: dict = {
-    "preset": "default",
+    "preset": "extrovert",
     "tokens": {
         "colors": {
-            "bg": "#030712", "bg_secondary": "#111827", "bg_elevated": "#1f2937",
-            "bg_hover": "#374151", "bg_active": "#374151", "overlay": "#000000",
-            "msg_user": "#047857", "msg_ai": "#1f2937", "code_bg": "#1a1b26",
-            "text": "#f3f4f6", "text_secondary": "#d1d5db", "muted": "#6b7280",
-            "subtle": "#9ca3af", "accent_text": "#34d399", "accent_dim": "#6ee7b7",
-            "danger_text": "#f87171", "icon_muted": "#374151", "icon_user": "#2563eb",
-            "icon_ai": "#059669", "accent": "#059669", "accent_hover": "#10b981",
-            "danger": "#dc2626", "danger_hover": "#ef4444", "border": "#1f2937",
-            "border_light": "#374151", "purple": "#c084fc", "amber": "#fbbf24",
-            "switch_off": "#4b5563", "blue": "#2563eb", "blue_text": "#93c5fd",
-            "spinner": "#34d399", "focus_ring": "#10b981", "preview_bg": "#ffffff",
+            "bg": "#10131f", "bg_secondary": "#181b2e", "bg_elevated": "#212540",
+            "bg_hover": "#2a2f4d", "bg_active": "#2a2f4d", "overlay": "#000000",
+            "msg_user": "#38243b", "msg_ai": "#181b2e", "code_bg": "#1b1e30",
+            "text": "#f2f0fb", "text_secondary": "#a8aacc", "muted": "#7679a0",
+            "subtle": "#8f92b8", "accent_text": "#ff5c8a", "accent_dim": "#7aecef",
+            "danger_text": "#ff5d6c", "icon_muted": "#3a3f5e", "icon_user": "#ff5c8a",
+            "icon_ai": "#5cdfe0", "accent": "#ff5c8a", "accent_hover": "#ff7da3",
+            "danger": "#ff5d6c", "danger_hover": "#ff7a85", "border": "#2a2e48",
+            "border_light": "#3a3f5e", "purple": "#a78bfa", "amber": "#ffce4d",
+            "switch_off": "#484d6a", "blue": "#5cdfe0", "blue_text": "#7aecef",
+            "spinner": "#ff5c8a", "focus_ring": "#ff7da3", "preview_bg": "#ffffff",
         },
         "fonts": {
-            "sans": "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+            "sans": "'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
             "mono": "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace",
         },
         "radius": {
-            "default": "0.25rem", "sm": "0.125rem", "md": "0.375rem", "lg": "0.5rem",
-            "xl": "0.75rem", "2xl": "1rem", "full": "9999px",
+            "default": "0.75rem", "sm": "0.5rem", "md": "0.75rem", "lg": "1rem",
+            "xl": "1.375rem", "2xl": "1.5rem", "full": "9999px",
         },
         "shadows": {
-            "xl": "0 20px 25px -5px rgb(0 0 0 / 0.1)",
-            "2xl": "0 25px 50px -12px rgb(0 0 0 / 0.25)",
+            "xl": "0 6px 22px rgb(0 0 0 / 0.28)",
+            "2xl": "0 18px 48px rgb(0 0 0 / 0.38)",
         },
         "typography": {
             "xs": "0.75rem", "sm": "0.875rem", "base": "1rem", "lg": "1.125rem",
@@ -356,175 +356,27 @@ DEFAULT_SPEC: dict = {
 }
 
 PRESETS: dict[str, dict] = {
-    "default": DEFAULT_SPEC,
-    "compact": {
-        "preset": "compact",
+    "extrovert": DEFAULT_SPEC,
+    "extrovert-light": {
+        "preset": "extrovert-light",
         "tokens": {
             "colors": {
-                "bg": "#0b0e14", "bg_secondary": "#151922", "bg_elevated": "#1d2330",
-                "bg_hover": "#2a3242", "bg_active": "#2a3242", "overlay": "#000000",
-                "msg_user": "#0d6e5a", "msg_ai": "#1d2330", "code_bg": "#12151d",
-                "text": "#eef1f6", "text_secondary": "#c8cedb", "muted": "#6c7484",
-                "subtle": "#97a0b3", "accent_text": "#3ddc9d", "accent_dim": "#6fe8bc",
-                "danger_text": "#f87171", "icon_muted": "#2a3242", "icon_user": "#3b82f6",
-                "icon_ai": "#10b981", "accent": "#10b981", "accent_hover": "#34d399",
-                "danger": "#dc2626", "danger_hover": "#ef4444", "border": "#1d2330",
-                "border_light": "#2a3242", "purple": "#a78bfa", "amber": "#fbbf24",
-                "switch_off": "#3f4859", "blue": "#3b82f6", "blue_text": "#93c5fd",
-                "spinner": "#3ddc9d", "focus_ring": "#34d399", "preview_bg": "#0b0e14",
-            },
-            "fonts": {
-                "sans": "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
-                "mono": "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace",
-            },
-            "radius": {
-                "default": "0.2rem", "sm": "0.125rem", "md": "0.25rem", "lg": "0.4rem",
-                "xl": "0.6rem", "2xl": "0.75rem", "full": "9999px",
-            },
-            "shadows": {
-                "xl": "0 12px 18px -6px rgb(0 0 0 / 0.2)",
-                "2xl": "0 16px 28px -8px rgb(0 0 0 / 0.3)",
-            },
-            "typography": {
-                "xs": "0.7rem", "sm": "0.8125rem", "base": "0.9375rem", "lg": "1.05rem",
-                "xl": "1.15rem", "2xl": "1.375rem",
-            },
-            "weights": {"medium": 500, "semibold": 600, "bold": 700},
-            "motion": {
-                "duration": "150ms", "ease": "cubic-bezier(0.4, 0, 0.2, 1)",
-                "spin": "1s", "pulse": "2s",
-            },
-            "layout": {
-                "sidebar": "14rem", "chat_max": "48rem", "panel_max": "42rem",
-                "dropdown": "14rem", "bubble_max": "65%", "side_panel": "360px",
-                "avatar": "1.75rem", "message_gap": "0.5rem", "preview_height": "20rem",
-                "auth_max": "22rem", "z_modal": 50,
+                "bg": "#f6f5fb", "bg_secondary": "#ffffff", "bg_elevated": "#f0eef7",
+                "bg_hover": "#e6e3f2", "bg_active": "#e6e3f2", "overlay": "#000000",
+                "msg_user": "#fdebef", "msg_ai": "#ffffff", "code_bg": "#f3f1f9",
+                "text": "#1a1d2e", "text_secondary": "#5a5d7a", "muted": "#8a8da8",
+                "subtle": "#6e718d", "accent_text": "#e8357a", "accent_dim": "#079aa6",
+                "danger_text": "#d63342", "icon_muted": "#c4c0d6", "icon_user": "#e8357a",
+                "icon_ai": "#06b6c4", "accent": "#e8357a", "accent_hover": "#c91f63",
+                "danger": "#d63342", "danger_hover": "#b42836", "border": "#dcd9e8",
+                "border_light": "#c4c0d6", "purple": "#7c60c8", "amber": "#d4900f",
+                "switch_off": "#c4c0d6", "blue": "#06b6c4", "blue_text": "#079aa6",
+                "spinner": "#e8357a", "focus_ring": "#c91f63", "preview_bg": "#ffffff",
             },
         },
         "components": {},
     },
-    "glassmorphism": {
-        "preset": "glassmorphism",
-        "tokens": {
-            "colors": {
-                "bg": "#0a0e1a", "bg_secondary": "#121727", "bg_elevated": "#1b2136",
-                "bg_hover": "#2a3150", "bg_active": "#2a3150", "overlay": "#000000",
-                "msg_user": "#ff5c8a", "msg_ai": "#1b2136", "code_bg": "#0d1120",
-                "text": "#eef0f8", "text_secondary": "#c6cbe0", "muted": "#6b7290",
-                "subtle": "#98a0c0", "accent_text": "#ff8fae", "accent_dim": "#ffc2d3",
-                "danger_text": "#ff8fa3", "icon_muted": "#2a3150", "icon_user": "#5cdfe0",
-                "icon_ai": "#ff5c8a", "accent": "#ff5c8a", "accent_hover": "#ff7aa0",
-                "danger": "#ff5c7a", "danger_hover": "#ff7a93", "border": "#262d4a",
-                "border_light": "#3a4370", "purple": "#c084fc", "amber": "#ffce4d",
-                "switch_off": "#3a4370", "blue": "#5cdfe0", "blue_text": "#a8ecee",
-                "spinner": "#ff8fae", "focus_ring": "#ff5c8a", "preview_bg": "#0a0e1a",
-            },
-            "fonts": {
-                "sans": "Hanken Grotesk, -apple-system, 'Segoe UI', Roboto, sans-serif",
-                "mono": "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace",
-            },
-            "radius": {
-                "default": "1rem", "sm": "0.5rem", "md": "0.875rem", "lg": "1.25rem",
-                "xl": "1.5rem", "2xl": "1.75rem", "full": "9999px",
-            },
-            "shadows": {
-                "xl": "0 20px 40px -12px rgb(0 0 0 / 0.5)",
-                "2xl": "0 30px 60px -12px rgb(0 0 0 / 0.55)",
-            },
-            "typography": {
-                "xs": "0.75rem", "sm": "0.875rem", "base": "1rem", "lg": "1.125rem",
-                "xl": "1.25rem", "2xl": "1.5rem",
-            },
-            "weights": {"medium": 500, "semibold": 600, "bold": 700},
-            "motion": {
-                "duration": "240ms", "ease": "cubic-bezier(0.2, 0.8, 0.2, 1)",
-                "spin": "1s", "pulse": "2s",
-            },
-            "layout": {
-                "sidebar": "18rem", "chat_max": "56rem", "panel_max": "48rem",
-                "dropdown": "16rem", "bubble_max": "75%", "side_panel": "420px",
-                "avatar": "2.25rem", "message_gap": "1.25rem", "preview_height": "26rem",
-                "auth_max": "24rem", "z_modal": 50,
-            },
-        },
-        "components": {
-            "sidebar": {
-                "background": "rgb(18 23 39 / 0.65)", "backdrop-filter": "blur(18px) saturate(1.4)",
-                "border-color": "rgb(58 67 112 / 0.5)", "border-width": "1px",
-            },
-            "bubble": {
-                "background": "rgb(27 33 54 / 0.55)", "backdrop-filter": "blur(12px) saturate(1.2)",
-                "border-color": "rgb(58 67 112 / 0.4)", "border-width": "1px",
-            },
-            "modal": {
-                "background": "rgb(18 23 39 / 0.85)", "backdrop-filter": "blur(24px) saturate(1.4)",
-                "border-color": "rgb(58 67 112 / 0.5)", "border-width": "1px",
-            },
-            "input": {
-                "background": "rgb(27 33 54 / 0.5)", "backdrop-filter": "blur(10px)",
-                "border-color": "rgb(58 67 112 / 0.5)", "border-width": "1px",
-            },
-            "button": {
-                "background": "rgb(255 92 138 / 0.9)", "backdrop-filter": "blur(8px)",
-                "border-color": "rgb(255 92 138 / 0.3)", "border-width": "1px",
-            },
-            "preview_panel": {
-                "background": "rgb(18 23 39 / 0.75)", "backdrop-filter": "blur(20px)",
-                "border-color": "rgb(58 67 112 / 0.5)", "border-width": "1px",
-            },
-            "avatar": {"background": "rgb(255 92 138 / 0.85)"},
-        },
-    },
-    "brutalism": {
-        "preset": "brutalism",
-        "tokens": {
-            "colors": {
-                "bg": "#101010", "bg_secondary": "#171717", "bg_elevated": "#1f1f1f",
-                "bg_hover": "#2c2c2c", "bg_active": "#2c2c2c", "overlay": "#000000",
-                "msg_user": "#ff4d00", "msg_ai": "#1f1f1f", "code_bg": "#0a0a0a",
-                "text": "#fafafa", "text_secondary": "#d4d4d4", "muted": "#808080",
-                "subtle": "#a3a3a3", "accent_text": "#ff4d00", "accent_dim": "#ff7a3d",
-                "danger_text": "#ff2b2b", "icon_muted": "#2c2c2c", "icon_user": "#ff4d00",
-                "icon_ai": "#ff4d00", "accent": "#ff4d00", "accent_hover": "#ff6a2b",
-                "danger": "#ff2b2b", "danger_hover": "#ff5555", "border": "#2c2c2c",
-                "border_light": "#3d3d3d", "purple": "#b45cff", "amber": "#ffce4d",
-                "switch_off": "#3d3d3d", "blue": "#00b7ff", "blue_text": "#7fd8ff",
-                "spinner": "#ff4d00", "focus_ring": "#ff4d00", "preview_bg": "#101010",
-            },
-            "fonts": {
-                "sans": "ui-monospace, 'JetBrains Mono', Menlo, monospace",
-                "mono": "ui-monospace, 'JetBrains Mono', Menlo, monospace",
-            },
-            "radius": {
-                "default": "0", "sm": "0", "md": "0", "lg": "0",
-                "xl": "0", "2xl": "0", "full": "0",
-            },
-            "shadows": {
-                "xl": "none", "2xl": "none",
-            },
-            "typography": {
-                "xs": "0.75rem", "sm": "0.875rem", "base": "1rem", "lg": "1.125rem",
-                "xl": "1.25rem", "2xl": "1.5rem",
-            },
-            "weights": {"medium": 600, "semibold": 700, "bold": 800},
-            "motion": {
-                "duration": "100ms", "ease": "steps(2)",
-                "spin": "1s", "pulse": "2s",
-            },
-            "layout": {
-                "sidebar": "16rem", "chat_max": "60rem", "panel_max": "48rem",
-                "dropdown": "16rem", "bubble_max": "80%", "side_panel": "400px",
-                "avatar": "2rem", "message_gap": "1rem", "preview_height": "24rem",
-                "auth_max": "24rem", "z_modal": 50,
-            },
-        },
-        "components": {
-            "button": {"border-width": "2px", "border-style": "solid", "border-color": "#ff4d00"},
-            "bubble": {"border-width": "1px", "border-style": "solid", "border-color": "#2c2c2c"},
-        },
-    },
 }
-
 
 def _deep_merge(base: dict, patch: dict) -> dict:
     """JSON-merge-patch style merge: dicts merge recursively, None deletes."""

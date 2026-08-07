@@ -27,7 +27,7 @@ class ThemePutRequest(BaseModel):
 
 
 class ThemeResetRequest(BaseModel):
-    preset: str = "default"
+    preset: str = "extrovert"
 
 
 def _spec_json(spec: dict) -> str:
