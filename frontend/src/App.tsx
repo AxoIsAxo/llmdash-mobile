@@ -1645,6 +1645,122 @@ function ToolResultContent({ content, toolCall, setSidePanel }: {
   )
 }
 
+// --- Thinking section: reasoning + tool activity, one collapsible block ---
+
+function ThinkingSection({ message, messages, executingTools, expandedToolCalls, onToggleToolCall, setSidePanel }: {
+  message: Message
+  messages: Message[]
+  executingTools: Set<string>
+  expandedToolCalls: Set<string>
+  onToggleToolCall: (id: string) => void
+  setSidePanel: (panel: SidePanel | null) => void
+}) {
+  const toolCalls = message.tool_calls_json
+  const hasTools = toolCalls && Array.isArray(toolCalls) && toolCalls.length > 0
+  const reasoning = message.reasoning_content || ''
+  const [thinkingExpanded, setThinkingExpanded] = useState(false)
+
+  useEffect(() => {
+    if (message.status === 'generating' && (reasoning || hasTools)) {
+      setThinkingExpanded(true)
+    } else if (message.status !== 'generating' && message.status !== undefined) {
+      setThinkingExpanded(false)
+    }
+  }, [message.status, reasoning, hasTools])
+
+  if (!reasoning && !hasTools) return null
+
+  return (
+    <div className="flex justify-start mb-1">
+      <div className="w-8 shrink-0" />
+      <div className="llm-bubble llm-bubble-assistant max-w-[var(--theme-bubble-max-width)] min-w-0">
+        <button
+          onClick={() => setThinkingExpanded(!thinkingExpanded)}
+          className="flex items-center gap-1.5 text-xs text-theme-muted hover:text-theme-text transition-colors py-0.5 w-full"
+        >
+          {message.status === 'generating' ? (
+            <><Loader2 className="w-3 h-3 animate-spin text-theme-purple" /><span className="text-theme-purple">Thinking...</span></>
+          ) : (
+            <><Brain className="w-3 h-3 text-theme-purple" /><span>Thinking</span></>
+          )}
+          {hasTools && <span className="text-theme-muted/70">· {toolCalls.length} tool call{toolCalls.length > 1 ? 's' : ''}</span>}
+          {thinkingExpanded ? <ChevronUp className="w-3 h-3 ml-auto" /> : <ChevronDown className="w-3 h-3 ml-auto" />}
+        </button>
+        {thinkingExpanded && (
+          <div className="mt-1 rounded-xl bg-theme-bg-elevated/50 border border-theme-border-light/50 px-3 py-2 text-sm space-y-2">
+            {reasoning && (
+              <div className="text-theme-subtle italic">
+                <MarkdownRenderer content={reasoning} />
+              </div>
+            )}
+            {hasTools && (
+              <div className="space-y-1">
+                {toolCalls.map((tc, i) => {
+                  const isExecuting = executingTools.has(tc.id)
+                  const resultMsg = messages.find(m => m.role === 'tool' && m.tool_call_id === tc.id)
+                  const hasResult = !isExecuting && !!resultMsg
+                  const isExpanded = expandedToolCalls.has(tc.id)
+                  const canExpand = isExecuting || hasResult
+                  const summary = isExecuting
+                    ? 'executing...'
+                    : hasResult
+                      ? (tc.name === 'web_search' || tc.name === 'web_scrape')
+                        ? (() => {
+                            const count = (resultMsg!.content!.match(/^\d+\.\s/gm) || []).length
+                            return count > 0 ? `${count} result${count === 1 ? '' : 's'}` : 'done'
+                          })()
+                        : 'done'
+                      : 'done'
+                  return (
+                    <div key={i}>
+                      <button
+                        onClick={() => { if (canExpand) onToggleToolCall(tc.id) }}
+                        className={`flex items-center gap-1 w-full text-left px-2 py-1 rounded-lg border font-mono text-xs transition-colors cursor-pointer ${
+                          isExecuting
+                            ? 'bg-theme-accent/10 border-theme-accent-text/40 text-theme-accent-text'
+                            : 'bg-theme-bg-secondary/60 border-theme-border-light/60 text-theme-text-secondary hover:bg-theme-bg-hover'
+                        }`}
+                      >
+                        <span className="text-theme-muted">[</span>
+                        <span className="text-theme-accent-text">{tc.name}</span>
+                        <span className="text-theme-muted">]</span>
+                        <span className={`ml-1 ${isExecuting ? 'text-theme-accent-text' : 'text-theme-muted'}`}>{summary}</span>
+                        <span className="ml-auto flex items-center gap-1">
+                          {isExecuting && <Loader2 className="w-3 h-3 animate-spin text-theme-accent-text" />}
+                          {canExpand && (isExpanded
+                            ? <ChevronDown className="w-3 h-3 text-theme-muted" />
+                            : <ChevronRight className="w-3 h-3 text-theme-muted" />)}
+                        </span>
+                      </button>
+                      {isExpanded && isExecuting && (
+                        <div className="mt-1 rounded-xl bg-theme-bg-elevated/50 border border-theme-accent-text/20 px-3 py-2">
+                          <div className="flex items-center gap-2 mb-1.5 text-xs text-theme-accent-text">
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                            <span className="font-medium">Executing {tc.name}...</span>
+                          </div>
+                          <div className="text-xs text-theme-muted mb-0.5 font-medium">Arguments:</div>
+                          <pre className="text-xs text-theme-text-secondary whitespace-pre-wrap font-mono bg-theme-bg-secondary/50 rounded-lg p-2 max-h-60 overflow-y-auto">
+                            {JSON.stringify(tc.arguments, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+                      {isExpanded && resultMsg && (
+                        <div className="mt-1">
+                          <ToolResultContent content={resultMsg.content || ''} toolCall={tc} setSidePanel={setSidePanel} />
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // --- Message Bubble ---
 
 function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCopy, copiedId, executingTools, expandedToolCalls, onToggleToolCall, setSidePanel }: {
@@ -1665,44 +1781,12 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
   const isUser = message.role === 'user'
   const isAssistant = message.role === 'assistant'
   const toolCalls = message.tool_calls_json
-  const [thinkingExpanded, setThinkingExpanded] = useState(false)
-
-  useEffect(() => {
-    if (message.status === 'generating' && message.reasoning_content) {
-      setThinkingExpanded(true)
-    } else if (message.status !== 'generating' && message.status !== undefined) {
-      setThinkingExpanded(false)
-    }
-  }, [message.status, message.reasoning_content])
-
   const isGenerating = message.status === 'generating'
 
   if (toolCalls && Array.isArray(toolCalls) && toolCalls.length > 0) {
     return (
       <div>
-        {isAssistant && message.reasoning_content && (
-          <div className="flex justify-start mb-1">
-            <div className="w-8 shrink-0" />
-            <div className="llm-bubble llm-bubble-assistant max-w-[var(--theme-bubble-max-width)] min-w-0">
-              <button
-                onClick={() => setThinkingExpanded(!thinkingExpanded)}
-                className="flex items-center gap-1.5 text-xs text-theme-muted hover:text-theme-text transition-colors py-0.5 w-full"
-              >
-                {message.status === 'generating' ? (
-                  <><Loader2 className="w-3 h-3 animate-spin text-theme-purple" /><span className="text-theme-purple">Thinking...</span></>
-                ) : (
-                  <><Brain className="w-3 h-3 text-theme-purple" /><span>Reasoning</span></>
-                )}
-                {thinkingExpanded ? <ChevronUp className="w-3 h-3 ml-auto" /> : <ChevronDown className="w-3 h-3 ml-auto" />}
-              </button>
-              {thinkingExpanded && (
-                <div className="mt-1 rounded-xl bg-theme-bg-elevated/50 border border-theme-border-light/50 px-3 py-2 text-sm text-theme-subtle italic">
-                  <MarkdownRenderer content={message.reasoning_content || ''} />
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+        <ThinkingSection message={message} messages={messages} executingTools={executingTools} expandedToolCalls={expandedToolCalls} onToggleToolCall={onToggleToolCall} setSidePanel={setSidePanel} />
         <div className="flex justify-start">
           {isAssistant && (
             <div className="llm-avatar w-[var(--theme-avatar-size)] h-[var(--theme-avatar-size)] rounded-full bg-theme-accent flex items-center justify-center mr-2 mt-0.5 shrink-0">
@@ -1710,77 +1794,6 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
             </div>
           )}
           <div className="llm-bubble llm-bubble-assistant max-w-[var(--theme-bubble-max-width)] min-w-0 space-y-2">
-            <div className="flex flex-wrap gap-2">
-              {toolCalls.map((tc, i) => {
-                const isExecuting = executingTools.has(tc.id)
-                const resultMsg = messages.find(m => m.role === 'tool' && m.tool_call_id === tc.id)
-                const hasResult = !isExecuting && !!resultMsg
-                const isExpanded = expandedToolCalls.has(tc.id)
-                const canExpand = isExecuting || hasResult
-                const summary = isExecuting
-                  ? 'executing...'
-                  : hasResult
-                    ? (tc.name === 'web_search' || tc.name === 'web_scrape')
-                      ? (() => {
-                          const count = (resultMsg!.content!.match(/^\d+\.\s/gm) || []).length
-                          return count > 0 ? `${count} result${count === 1 ? '' : 's'}` : 'done'
-                        })()
-                      : 'done'
-                    : 'done'
-                return (
-                  <div key={i} className="flex flex-col">
-                    <button
-                      onClick={() => { if (canExpand) onToggleToolCall(tc.id) }}
-                      className={`llm-tool-pill flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-all cursor-pointer ${
-                        isExecuting
-                          ? 'bg-theme-accent/10 border-theme-accent-text/40 text-theme-accent-text shadow-sm'
-                          : 'bg-theme-bg-elevated border-theme-border-light hover:bg-theme-bg-hover'
-                      }`}
-                    >
-                      {isExecuting ? (
-                        <span className="relative flex h-3 w-3">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-theme-accent-text opacity-75" />
-                          <span className="relative inline-flex rounded-full h-3 w-3 bg-theme-accent-text" />
-                        </span>
-                      ) : (
-                        <Bot className="w-3.5 h-3.5 text-theme-accent-text" />
-                      )}
-                      <span className="font-mono">{tc.name}</span>
-                      <span className={isExecuting ? 'text-theme-accent-text' : 'text-theme-muted'}>{summary}</span>
-                      {isExecuting && (
-                        <span className="flex gap-0.5 ml-1">
-                          <span className="w-0.5 h-0.5 rounded-full bg-theme-accent-text animate-bounce" style={{ animationDelay: '0ms' }} />
-                          <span className="w-0.5 h-0.5 rounded-full bg-theme-accent-text animate-bounce" style={{ animationDelay: '150ms' }} />
-                          <span className="w-0.5 h-0.5 rounded-full bg-theme-accent-text animate-bounce" style={{ animationDelay: '300ms' }} />
-                        </span>
-                      )}
-                      {canExpand && (
-                        isExpanded
-                          ? <ChevronDown className="w-3 h-3 ml-1 text-theme-muted" />
-                          : <ChevronRight className="w-3 h-3 ml-1 text-theme-muted" />
-                      )}
-                    </button>
-                    {isExpanded && isExecuting && (
-                      <div className="mt-1 rounded-xl bg-theme-bg-elevated/50 border border-theme-accent-text/20 px-4 py-3 animate-in fade-in">
-                        <div className="flex items-center gap-2 mb-2 text-xs text-theme-accent-text">
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                          <span className="font-medium">Executing {tc.name}...</span>
-                        </div>
-                        <div className="text-xs text-theme-muted mb-1 font-medium">Arguments:</div>
-                        <pre className="text-xs text-theme-text-secondary whitespace-pre-wrap font-mono bg-theme-bg-secondary/50 rounded-lg p-2 max-h-60 overflow-y-auto">
-                          {JSON.stringify(tc.arguments, null, 2)}
-                        </pre>
-                      </div>
-                    )}
-                    {isExpanded && resultMsg && (
-                      <div className="mt-1">
-                        <ToolResultContent content={resultMsg.content || ''} toolCall={tc} setSidePanel={setSidePanel} />
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
             {isGenerating && isAssistant && !message.content && toolCalls.every(
               (tc: any) => !executingTools.has(tc.id) && messages.find(m => m.role === 'tool' && m.tool_call_id === tc.id)
             ) && (
@@ -1804,25 +1817,7 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
   if (isGenerating && isAssistant && !toolCalls?.length) {
     return (
       <div>
-        {message.reasoning_content && (
-          <div className="flex justify-start mb-1">
-            <div className="w-8 shrink-0" />
-            <div className="llm-bubble llm-bubble-assistant max-w-[var(--theme-bubble-max-width)] min-w-0">
-              <button
-                onClick={() => setThinkingExpanded(!thinkingExpanded)}
-                className="flex items-center gap-1.5 text-xs text-theme-muted hover:text-theme-text transition-colors py-0.5 w-full"
-              >
-                <><Loader2 className="w-3 h-3 animate-spin text-theme-purple" /><span className="text-theme-purple">Thinking...</span></>
-                {thinkingExpanded ? <ChevronUp className="w-3 h-3 ml-auto" /> : <ChevronDown className="w-3 h-3 ml-auto" />}
-              </button>
-              {thinkingExpanded && (
-                <div className="mt-1 rounded-xl bg-theme-bg-elevated/50 border border-theme-border-light/50 px-3 py-2 text-sm text-theme-subtle italic">
-                  <MarkdownRenderer content={message.reasoning_content || ''} />
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+        <ThinkingSection message={message} messages={messages} executingTools={executingTools} expandedToolCalls={expandedToolCalls} onToggleToolCall={onToggleToolCall} setSidePanel={setSidePanel} />
         <div className="flex justify-start">
           <div className="llm-avatar w-[var(--theme-avatar-size)] h-[var(--theme-avatar-size)] rounded-full bg-theme-accent flex items-center justify-center mr-2 mt-0.5 shrink-0">
             <Bot className="w-4 h-4" />
@@ -1973,28 +1968,8 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
           </div>
         </div>
       )}
-      {isAssistant && message.reasoning_content && (
-        <div className="flex justify-start mb-1">
-          <div className="w-8 shrink-0" />
-          <div className="llm-bubble llm-bubble-assistant max-w-[var(--theme-bubble-max-width)] min-w-0">
-            <button
-              onClick={() => setThinkingExpanded(!thinkingExpanded)}
-              className="flex items-center gap-1.5 text-xs text-theme-muted hover:text-theme-text transition-colors py-0.5 w-full"
-            >
-              {message.status === 'generating' ? (
-                <><Loader2 className="w-3 h-3 animate-spin text-theme-purple" /><span className="text-theme-purple">Thinking...</span></>
-              ) : (
-                <><Brain className="w-3 h-3 text-theme-purple" /><span>Reasoning</span></>
-              )}
-              {thinkingExpanded ? <ChevronUp className="w-3 h-3 ml-auto" /> : <ChevronDown className="w-3 h-3 ml-auto" />}
-            </button>
-            {thinkingExpanded && (
-              <div className="mt-1 rounded-xl bg-theme-bg-elevated/50 border border-theme-border-light/50 px-3 py-2 text-sm text-theme-subtle italic">
-                <MarkdownRenderer content={message.reasoning_content || ''} />
-              </div>
-            )}
-          </div>
-        </div>
+      {isAssistant && (
+        <ThinkingSection message={message} messages={messages} executingTools={executingTools} expandedToolCalls={expandedToolCalls} onToggleToolCall={onToggleToolCall} setSidePanel={setSidePanel} />
       )}
       <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
         {isAssistant && (
