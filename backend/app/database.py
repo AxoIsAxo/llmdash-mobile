@@ -108,6 +108,9 @@ class Message(Base):
     tool_name = Column(String(128), nullable=True)
     attachments_json = Column(Text, nullable=True)
     reasoning_content = Column(Text, nullable=True)
+    # Chronological thinking timeline for the UI:
+    # [{"type":"reasoning","text":...}, {"type":"tool","id":"c1"}, ...]
+    thinking_json = Column(Text, nullable=True)
     status = Column(String(32), default="done", nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -243,6 +246,8 @@ def _migrate(conn):
         conn.exec_driver_sql("ALTER TABLE messages ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'done'")
     if "attachments_json" not in msg_cols:
         conn.exec_driver_sql("ALTER TABLE messages ADD COLUMN attachments_json TEXT")
+    if "thinking_json" not in msg_cols:
+        conn.exec_driver_sql("ALTER TABLE messages ADD COLUMN thinking_json TEXT")
 
     model_cfg_result = conn.exec_driver_sql("PRAGMA table_info(model_configs)")
     model_cfg_cols = {row[1] for row in model_cfg_result}

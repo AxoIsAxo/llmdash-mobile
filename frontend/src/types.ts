@@ -62,6 +62,7 @@ export interface Message {
   status?: string;
   created_at: string;
   memory_saved?: MemorySavedItem[] | null;
+  thinking_json?: ThinkingEntry[] | null;
 }
 
 export interface GenerateStatus {
@@ -82,6 +83,12 @@ export interface ToolCall {
 export interface MemorySavedItem {
   kind: string;
   text: string;
+}
+
+export interface ThinkingEntry {
+  type: 'reasoning' | 'tool';
+  text?: string;
+  id?: string;
 }
 
 export interface StreamEvent {

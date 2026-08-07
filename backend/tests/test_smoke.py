@@ -733,3 +733,33 @@ def test_parallel_tool_execution_per_round(monkeypatch):
         assert sorted(results) == ["c1", "c2"]
         last = _last_assistant(client, headers, conv_id)
         assert last["content"] == "Done."
+
+
+def test_thinking_timeline_is_chronological(monkeypatch):
+    """The thinking timeline stores reasoning and tool markers in call order,
+    so the UI can show where in the thinking each tool was called."""
+    fake = ScriptedProvider([
+        [StreamChunk(reasoning_content_delta="I should search the web first."),
+         StreamChunk(tool_calls=[{"id": "c1", "name": "no_such_tool", "arguments": {}}], finish_reason="tool_calls")],
+        [StreamChunk(reasoning_content_delta="The result is clear now."),
+         StreamChunk(content_delta="The answer is 42."), StreamChunk(finish_reason="stop")],
+    ])
+    monkeypatch.setattr("app.main.get_provider", lambda provider_type: fake)
+
+    with TestClient(app) as client:
+        headers = _owner_headers(client)
+        conv_id, _ = _make_conv(client, headers, "Timeline")
+        resp = client.post(
+            "/api/chat/stream",
+            json={"conversation_id": conv_id, "message": "find it"},
+            headers=headers,
+        )
+        assert resp.status_code == 200
+        msgs = client.get(f"/api/conversations/{conv_id}/messages", headers=headers).json()
+        last = [m for m in msgs if m["role"] == "assistant"][-1]
+        tl = last["thinking_json"]
+        assert tl is not None
+        assert [e["type"] for e in tl] == ["reasoning", "tool", "reasoning"]
+        assert tl[0]["text"] == "I should search the web first."
+        assert tl[1]["id"] == "c1"
+        assert tl[2]["text"] == "The result is clear now."

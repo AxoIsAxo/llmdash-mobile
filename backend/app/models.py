@@ -217,6 +217,7 @@ class MessageResponse(BaseModel):
     tool_call_id: Optional[str] = None
     tool_name: Optional[str] = None
     reasoning_content: Optional[str] = None
+    thinking_json: Optional[Any] = None
     status: str = "done"
     created_at: str
 

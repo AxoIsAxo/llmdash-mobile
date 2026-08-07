@@ -613,6 +613,7 @@ async def get_messages(conv_id: int, current_user: dict = Depends(get_current_us
             tool_calls_json=json.loads(m.tool_calls_json) if m.tool_calls_json else None,
             tool_call_id=m.tool_call_id, tool_name=m.tool_name,
             reasoning_content=m.reasoning_content,
+            thinking_json=json.loads(m.thinking_json) if m.thinking_json else None,
             status=m.status or "done",
             created_at=m.created_at.isoformat() if m.created_at else "",
         )
@@ -1597,6 +1598,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                 no_action_turns = 0
                 bailed_no_action = False
                 has_final_answer = False  # a real (text) answer was produced
+                thinking_timeline: list[dict] = []  # chronological thinking + tool markers
                 finish_reason = None
                 last_tool_signature = None
                 consecutive_search_failures = 0
@@ -1635,7 +1637,13 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                             # Tool round: any text the model wrote before the
                             # calls is narration ("Let me search...") — discard
                             # it; it never reaches the client or the stored
-                            # message.
+                            # message. Record where in the thinking the tools
+                            # were called (chronological timeline).
+                            if round_reasoning:
+                                thinking_timeline.append({"type": "reasoning", "text": round_reasoning})
+                                round_reasoning = ""
+                            for _tc in final_tool_calls:
+                                thinking_timeline.append({"type": "tool", "id": _tc.get("id", "")})
                             break
 
                         no_action = _classify_no_action_turn(
@@ -1796,9 +1804,16 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                         await push_event("content_delta", content=final_text)
                         await save_draft_progress(force=True)
 
+                # Close the thinking timeline with the final turn's reasoning
+                # (the answer turn, the forced final round, or a bail).
+                if round_reasoning:
+                    thinking_timeline.append({"type": "reasoning", "text": round_reasoning})
+                _thinking_json = json.dumps(thinking_timeline) if thinking_timeline else None
+
                 if streaming_msg_id is not None:
                     draft.content = accumulated_content
                     draft.reasoning_content = accumulated_reasoning or None
+                    draft.thinking_json = _thinking_json
                     draft.status = "done"
                     draft.created_at = datetime.now(timezone.utc)
                     # Persist ALL executed tool calls (not just the last round).
@@ -1813,6 +1828,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                         role="assistant",
                         content=accumulated_content or "",
                         reasoning_content=accumulated_reasoning or None,
+                        thinking_json=_thinking_json,
                         status="done",
                     ))
                     await sess.commit()
