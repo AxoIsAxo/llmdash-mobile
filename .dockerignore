@@ -1,6 +1,9 @@
 .venv
 **/.venv
 **/.pytest_cache
+.uv-cache
+.uv-python
+.reasonix
 __pycache__
 *.pyc
 node_modules
