@@ -714,3 +714,14 @@ def test_chat_stream_emits_memory_saved_pill(monkeypatch):
         saved = [e for e in events if e.get("type") == "memory_saved"]
         assert saved, [e.get("type") for e in events]
         assert saved[0]["items"][0] == {"kind": "atom", "text": "User is named axo"}
+
+
+def test_extraction_prompt_requires_durability():
+    """The extraction prompt must gate on durability — session-specific task
+    feedback ('make the logo simpler') must never become durable memory."""
+    from app.memory.extract import EXTRACTION_SYSTEM_PROMPT as p
+
+    assert "DURABILITY IS THE #1 FILTER" in p
+    assert "does this depend on the current task" in p
+    assert "make the logo simpler" in p  # the explicit negative example
+    assert "do NOT emit" in p

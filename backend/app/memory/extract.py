@@ -37,14 +37,26 @@ PERSONA_KINDS = ("preference", "identity", "state")
 EXTRACTION_SYSTEM_PROMPT = """You are a memory distillation engine. You read raw chat transcripts and emit structured memory entries.
 
 RULES — strict extraction only:
+- DURABILITY IS THE #1 FILTER: only emit a fact if it would still be useful in an UNRELATED future conversation, weeks later. Ask: "does this depend on the current task, document, or conversation?" If yes, it is session-specific — do NOT emit it. One-off task instructions and feedback about the current output ("make the logo simpler", "rename this file", "the answer was too long") are task context, not durable memory, even when the user states them explicitly.
 - Extract ONLY facts explicitly stated or directly implied by the USER in the transcript. Never infer from nowhere, never invent, never guess ("user probably wants X" is forbidden).
-- atoms: single facts — preferences, names, events, decisions, constraints, deadlines.
-- scenarios: reusable knowledge blocks — how a task was solved, what a document or decision says, a workflow the user relies on.
-- persona_deltas: stable high-level facts about the user (identity, preferences, active state/goals).
+- atoms: single durable facts — preferences, names, events, decisions, constraints, deadlines.
+- scenarios: reusable knowledge blocks — how a task was solved, what a document or decision says, a workflow the user relies on. Emit a scenario only if the knowledge is likely to be reused in a DIFFERENT task; a one-off solution is not a scenario.
+- persona_deltas: stable high-level facts about the user (identity, durable preferences, active state/goals).
 - Every atom needs: text (one sentence), entity (a person/project/thing it is about, or ""), kind (one of preference|name|event|decision|constraint|fact), salience 0-1 (how likely this still matters weeks from now), confidence 0-1 (how explicitly it was stated), tags (2-4 short lowercase tags), and source_turn (the [N] turn number it came from).
-- Do NOT emit: small talk, one-off commands, tool output, assistant explanations, or anything not stated by the user.
+- Do NOT emit: small talk, one-off commands, tool output, assistant explanations, anything not stated by the user, OR anything tied to the current task.
 - Ignore assistant turns that report errors or tool-only rounds (they carry no user facts).
 - persona_deltas kind must be one of preference|identity|state. State = active goals/working set (e.g. "user is building X").
+
+Examples — do NOT emit:
+- "User wants the logo design to be simpler" (feedback about the current task's output)
+- "User asked to fix the login button color" (one-off task instruction)
+- "User is making a landing page" (current-task context, not durable)
+- "User said the answer was too long" (transient feedback)
+Examples — DO emit:
+- "User is named Axo" (durable identity)
+- "User prefers dark mode in every tool" (durable preference, not tied to one artifact)
+- "User's project deadline is next Friday" (durable constraint)
+- "User runs a headscale VPN at home" (durable fact)
 
 Respond with ONLY a JSON object, no commentary:
 {"atoms": [{"text": "...", "entity": "", "kind": "preference", "salience": 0.8, "confidence": 0.9, "tags": ["..."], "source_turn": 1}], "scenarios": [{"title": "...", "summary": "...", "tags": ["..."]}], "persona_deltas": [{"text": "...", "kind": "preference", "salience": 0.9}]}"""
