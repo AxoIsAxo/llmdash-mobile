@@ -124,16 +124,23 @@ async def build_authorize_url(redirect_uri: str) -> tuple[str, dict]:
 
 
 async def exchange_code(code: str, session: dict) -> dict:
-    """Exchange the authorization code for tokens (client_secret_post)."""
+    """Exchange the authorization code for tokens.
+
+    Sends the client secret only when one is configured (``client_secret_post``);
+    without it the client is a public client (``none`` auth method) — which
+    Extrovert supports, and PKCE S256 still binds the code to the verifier.
+    """
     doc = await _discovery_doc()
     body = {
         "grant_type": "authorization_code",
         "client_id": app_config.settings.extrovert_client_id,
-        "client_secret": app_config.settings.extrovert_client_secret,
         "code": code,
         "code_verifier": session["verifier"],
         "redirect_uri": session["redirect_uri"],
     }
+    secret = (app_config.settings.extrovert_client_secret or "").strip()
+    if secret:
+        body["client_secret"] = secret
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.post(doc["token_endpoint"], json=body)
         resp.raise_for_status()

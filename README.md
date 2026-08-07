@@ -252,7 +252,7 @@ Then set the env vars:
 | Variable | Description |
 |----------|-------------|
 | `EXTROVERT_CLIENT_ID` | The app's client id |
-| `EXTROVERT_CLIENT_SECRET` | The app's client secret |
+| `EXTROVERT_CLIENT_SECRET` | Optional — Extrovert supports public clients (`none` auth); PKCE S256 secures the exchange either way. Recommended for a web app, but omit it to use the public-client flow |
 | `EXTROVERT_ISSUER` | `https://extrovert.redforged.eu` (default) |
 | `EXTROVERT_REDIRECT_URI` | Optional override for the auto-derived callback URL |
 | `EXTROVERT_AUTO_LINK` | `true` (default) — a matching existing username is linked (converted) on first login |

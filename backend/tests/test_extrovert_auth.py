@@ -46,6 +46,7 @@ def _b64u_int(i: int) -> str:
 class Handler(BaseHTTPRequestHandler):
     id_token = ""
     userinfo = {"sub": "sub-123", "preferred_username": "axo"}
+    token_body: dict = {}
 
     def do_GET(self):
         if self.path == "/.well-known/openid-configuration":
@@ -72,6 +73,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if self.path == "/token":
+            Handler.token_body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
             self._send({"access_token": "acc", "token_type": "Bearer", "id_token": Handler.id_token})
         else:
             self.send_error(404)
@@ -190,4 +192,19 @@ def test_extrovert_status_flag(monkeypatch):
     with TestClient(app) as client:
         assert client.get("/api/auth/status").json()["extrovert_enabled"] is True
         assert client.get("/api/auth/extrovert/start").status_code == 200
+    srv.shutdown()
+
+
+def test_extrovert_login_works_without_client_secret(monkeypatch):
+    """Public-client flow: no client_secret configured -> the token request
+    omits it entirely, and PKCE still secures the exchange."""
+    srv, issuer = _start_provider()
+    _enable_extrovert(monkeypatch, issuer)
+    monkeypatch.setattr(app_config.settings, "extrovert_client_secret", "")
+    with TestClient(app) as client:
+        token = _run_oauth(client, issuer, sub="sub-pub", username="pubperson")
+        me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+        assert me.status_code == 200
+        assert me.json()["username"] == "pubperson"
+    assert "client_secret" not in Handler.token_body, Handler.token_body
     srv.shutdown()
