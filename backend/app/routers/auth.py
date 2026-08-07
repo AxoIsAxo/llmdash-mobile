@@ -191,29 +191,35 @@ async def extrovert_callback(state: str, code: str, request: Request, db: AsyncS
     sub = str(id_claims.get("sub") or info.get("sub") or "")
     username = str(info.get("preferred_username") or id_claims.get("preferred_username") or info.get("name") or "extrovert-user")
 
-    user = (await db.execute(select(User).where(User.oauth_sub == sub))).scalar_one_or_none()
-
-    if user is None and session.get("link_user_id"):
-        # Explicit conversion: link the authenticated account to this identity.
-        user = (await db.execute(select(User).where(User.id == session["link_user_id"]))).scalar_one_or_none()
-        if user is not None and not user.oauth_sub:
-            user.oauth_sub = sub
-            user.username = await _extrovert_username(username, db)
-            await db.commit()
-        else:
-            user = None  # account vanished or already linked to another identity
-
-    if user is None:
-        if not app_config.settings.extrovert_allow_signup:
-            return HTMLResponse(_oauth_html("No LLMDash account is linked to this Extrovert account, and new signups are disabled."))
-        user = User(
-            username=await _extrovert_username(username, db),
-            password_hash=secrets.token_hex(32),  # OAuth-only account, no usable password
-            role="user",
-            oauth_sub=sub,
-        )
-        db.add(user)
+    link_user_id = session.get("link_user_id")
+    if link_user_id is not None:
+        # Explicit conversion / RE-LINK: only ever touch the authenticated
+        # account. Linking a new identity replaces the previous link (the old
+        # Extrovert identity simply no longer maps to this account); an
+        # identity already owned by a DIFFERENT account is rejected.
+        target = (await db.execute(select(User).where(User.id == link_user_id))).scalar_one_or_none()
+        if target is None:
+            return HTMLResponse(_oauth_html("Account not found. Please log in again and retry."))
+        owner = (await db.execute(select(User).where(User.oauth_sub == sub))).scalar_one_or_none()
+        if owner is not None and owner.id != target.id:
+            return HTMLResponse(_oauth_html("This Extrovert account is already linked to another LLMDash account."))
+        target.oauth_sub = sub  # links, or replaces the previous link
+        target.username = await _extrovert_username(username, db)
         await db.commit()
+        user = target
+    else:
+        user = (await db.execute(select(User).where(User.oauth_sub == sub))).scalar_one_or_none()
+        if user is None:
+            if not app_config.settings.extrovert_allow_signup:
+                return HTMLResponse(_oauth_html("No LLMDash account is linked to this Extrovert account, and new signups are disabled."))
+            user = User(
+                username=await _extrovert_username(username, db),
+                password_hash=secrets.token_hex(32),  # OAuth-only account, no usable password
+                role="user",
+                oauth_sub=sub,
+            )
+            db.add(user)
+            await db.commit()
 
     token = create_token(user.id, user.username, user.role)
     return HTMLResponse(_oauth_html(token=token))

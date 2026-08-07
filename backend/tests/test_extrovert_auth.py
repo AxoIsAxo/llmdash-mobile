@@ -102,6 +102,7 @@ def _enable_extrovert(monkeypatch, issuer):
     monkeypatch.setattr(app_config.settings, "extrovert_client_secret", "super-secret")
     monkeypatch.setattr(app_config.settings, "extrovert_issuer", issuer)
     monkeypatch.setattr(app_config.settings, "extrovert_allow_signup", True)
+    monkeypatch.setattr(app_config.settings, "ip_account_limit", 100)  # many registrations share 127.0.0.1
     monkeypatch.setattr(app_config.settings, "extrovert_redirect_uri", "http://testserver/api/auth/extrovert/callback")
 
 
@@ -248,4 +249,85 @@ def test_extrovert_login_works_without_client_secret(monkeypatch):
         assert me.status_code == 200
         assert me.json()["username"] == "@pubperson"  # namespaced
     assert "client_secret" not in Handler.token_body, Handler.token_body
+    srv.shutdown()
+
+
+def _link_flow(client, issuer, sub, username):
+    """Run the authenticated link flow; returns nothing (raises on error)."""
+    start = client.get("/api/auth/extrovert/start?mode=link", headers=_LINK_HEADERS)
+    assert start.status_code == 200, start.text
+    q = urllib.parse.parse_qs(urllib.parse.urlsplit(start.json()["url"]).query)
+    Handler.id_token = _id_token(issuer, q["nonce"][0], sub=sub, username=username)
+    Handler.userinfo = {"sub": sub, "preferred_username": username}
+    resp = client.get(f"/api/auth/extrovert/callback?state={q['state'][0]}&code=abc")
+    assert resp.status_code == 200
+    return resp
+
+
+_LINK_HEADERS: dict = {}
+
+
+def test_extrovert_relink_replaces_previous_identity(monkeypatch):
+    """An already-linked account can CHANGE its Extrovert identity: the old
+    sub no longer maps to it, the new one does (same user id)."""
+    global _LINK_HEADERS
+    srv, issuer = _start_provider()
+    _enable_extrovert(monkeypatch, issuer)
+    monkeypatch.setattr(app_config.settings, "registration_enabled", True)
+    with TestClient(app) as client:
+        headers = _owner_headers(client)
+        reg = client.post("/api/auth/register", json={"username": "flip", "password": "pw12345678"}, headers=headers)
+        assert reg.status_code == 200, reg.text
+        _LINK_HEADERS = {"Authorization": f"Bearer {reg.json()['token']}"}
+        users = client.get("/api/auth/users", headers=headers).json()
+        flip_id = next(u["id"] for u in users if u["username"] == "flip")
+
+        # link identity A
+        resp = _link_flow(client, issuer, "sub-a", "flipname")
+        assert "Signed in via Extrovert" in resp.text
+        # change to identity B
+        resp = _link_flow(client, issuer, "sub-b", "othername")
+        assert "Signed in via Extrovert" in resp.text
+
+        after = client.get("/api/auth/users", headers=headers).json()
+        linked = next(u for u in after if u["id"] == flip_id)
+        assert linked["username"] == "@othername"  # renamed to the new identity
+
+        # old identity no longer maps to this account -> a NEW account is created
+        token_new = _run_oauth(client, issuer, sub="sub-a", username="flipname")
+        me_new = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token_new}"})
+        assert me_new.json()["user_id"] != flip_id
+
+        # new identity logs into the ORIGINAL account
+        token_orig = _run_oauth(client, issuer, sub="sub-b", username="othername")
+        me_orig = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token_orig}"})
+        assert me_orig.json()["user_id"] == flip_id
+    srv.shutdown()
+
+
+def test_extrovert_relink_rejects_identity_owned_by_another(monkeypatch):
+    """Linking an Extrovert identity that already belongs to a DIFFERENT
+    account must fail — never hijack or log into the other account."""
+    global _LINK_HEADERS
+    srv, issuer = _start_provider()
+    _enable_extrovert(monkeypatch, issuer)
+    monkeypatch.setattr(app_config.settings, "registration_enabled", True)
+    with TestClient(app) as client:
+        headers = _owner_headers(client)
+        # user one links identity X
+        reg1 = client.post("/api/auth/register", json={"username": "first", "password": "pw12345678"}, headers=headers)
+        _LINK_HEADERS = {"Authorization": f"Bearer {reg1.json()['token']}"}
+        resp = _link_flow(client, issuer, "sub-x", "xname")
+        assert "Signed in via Extrovert" in resp.text
+
+        # user two tries to link the SAME identity X
+        reg2 = client.post("/api/auth/register", json={"username": "second", "password": "pw12345678"}, headers=headers)
+        _LINK_HEADERS = {"Authorization": f"Bearer {reg2.json()['token']}"}
+        resp = _link_flow(client, issuer, "sub-x", "xname")
+        assert "already linked to another LLMDash account" in resp.text
+
+        # the other account was untouched
+        users = client.get("/api/auth/users", headers=headers).json()
+        second = next(u for u in users if u["username"] == "second")
+        assert second["username"] == "second"
     srv.shutdown()

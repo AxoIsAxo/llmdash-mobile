@@ -13,6 +13,7 @@ interface Props {
 function AccountPanel({ currentUser, onClose, onRefreshUser }: Props) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [confirmChange, setConfirmChange] = useState(false)
 
   const handleConnect = async () => {
     setBusy(true)
@@ -66,8 +67,35 @@ function AccountPanel({ currentUser, onClose, onRefreshUser }: Props) {
                 : 'Link this account to your Extrovert identity. It will be renamed to your Extrovert username (@…) and you can sign in with Extrovert from then on.'}
             </p>
             {currentUser.extrovert_linked ? (
-              <div className="flex items-center gap-2 text-sm text-theme-accent-text">
-                <CheckCircle2 className="w-4 h-4" /> Linked to Extrovert
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-2 text-sm text-theme-accent-text">
+                  <CheckCircle2 className="w-4 h-4" /> Linked to Extrovert (@{currentUser.username.replace(/^@/, '')})
+                </div>
+                {confirmChange ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-theme-muted flex-1">Replace the link? The current Extrovert account will no longer sign into this account.</span>
+                    <button
+                      onClick={handleConnect}
+                      disabled={busy}
+                      className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-theme-danger hover:bg-theme-danger-hover text-white transition-colors disabled:opacity-50"
+                    >
+                      {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Change'}
+                    </button>
+                    <button
+                      onClick={() => setConfirmChange(false)}
+                      className="px-2.5 py-1.5 rounded-lg text-xs border border-theme-border-light text-theme-text-secondary hover:bg-theme-bg-elevated transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setConfirmChange(true)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border border-theme-border-light text-theme-text-secondary hover:bg-theme-bg-elevated hover:text-theme-text transition-colors"
+                  >
+                    <Link2 className="w-3.5 h-3.5" /> Change Extrovert account
+                  </button>
+                )}
               </div>
             ) : (
               <button
