@@ -157,6 +157,7 @@ export const api = {
     },
     extrovertStart: (mode: 'login' | 'link' = 'login') =>
       request<{ url: string }>(`/auth/extrovert/start${mode === 'link' ? '?mode=link' : ''}`),
+    deleteMe: () => request<{ status: string }>('/auth/me/delete', { method: 'POST' }),
   },
 
   models: {

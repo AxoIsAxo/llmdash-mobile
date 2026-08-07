@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { api } from '../api'
 import type { User } from '../types'
-import { X, UserRound, LogIn, Loader2, CheckCircle2, Link2 } from 'lucide-react'
+import { X, UserRound, LogIn, Loader2, CheckCircle2, Link2, Trash2, AlertTriangle } from 'lucide-react'
 import SubscriptionSection from './SubscriptionPage'
 
 interface Props {
@@ -14,6 +14,8 @@ function AccountPanel({ currentUser, onClose, onRefreshUser }: Props) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirmChange, setConfirmChange] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   const handleConnect = async () => {
     setBusy(true)
@@ -109,6 +111,53 @@ function AccountPanel({ currentUser, onClose, onRefreshUser }: Props) {
             )}
           </div>
           <SubscriptionSection currentUser={currentUser} />
+
+          {/* Danger zone */}
+          <div className="p-4 rounded-xl bg-theme-danger/5 border border-theme-danger/25">
+            <div className="flex items-center gap-2 text-sm font-medium text-theme-danger-text mb-1">
+              <AlertTriangle className="w-4 h-4" /> Danger zone
+            </div>
+            <p className="text-xs text-theme-muted mb-3">
+              Permanently delete your account, all conversations and your memory. This cannot be undone.
+            </p>
+            {confirmDelete ? (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-theme-muted flex-1">Are you absolutely sure? This is permanent.</span>
+                <button
+                  onClick={async () => {
+                    setDeleting(true)
+                    try {
+                      await api.auth.deleteMe()
+                      localStorage.removeItem('llmdash_token')
+                      window.location.href = '/'
+                    } catch (e: any) {
+                      setError(e.message || 'Could not delete account')
+                      setDeleting(false)
+                      setConfirmDelete(false)
+                    }
+                  }}
+                  disabled={deleting}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-theme-danger hover:bg-theme-danger-hover text-white transition-colors disabled:opacity-50"
+                >
+                  {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Yes, delete my account'}
+                </button>
+                <button
+                  onClick={() => setConfirmDelete(false)}
+                  disabled={deleting}
+                  className="px-3 py-1.5 rounded-lg text-xs border border-theme-border-light text-theme-text-secondary hover:bg-theme-bg-elevated transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmDelete(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-theme-danger/15 hover:bg-theme-danger/25 text-theme-danger-text border border-theme-danger/30 transition-colors"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> Delete account
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

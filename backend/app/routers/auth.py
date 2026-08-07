@@ -212,11 +212,19 @@ async def extrovert_callback(state: str, code: str, request: Request, db: AsyncS
         if user is None:
             if not app_config.settings.extrovert_allow_signup:
                 return HTMLResponse(_oauth_html("No LLMDash account is linked to this Extrovert account, and new signups are disabled."))
+            # A new account counts against the per-IP limit, same as register.
+            client_ip = request.client.host if request.client else None
+            ip_limit = app_config.settings.ip_account_limit
+            if client_ip and ip_limit > 0:
+                ip_count = len((await db.execute(select(User).where(User.ip_address == client_ip))).scalars().all())
+                if ip_count >= ip_limit:
+                    return HTMLResponse(_oauth_html("Account limit reached for this IP address."))
             user = User(
                 username=await _extrovert_username(username, db),
                 password_hash=secrets.token_hex(32),  # OAuth-only account, no usable password
                 role="user",
                 oauth_sub=sub,
+                ip_address=client_ip,
             )
             db.add(user)
             await db.commit()
@@ -411,6 +419,28 @@ async def update_user(
 
     await db.commit()
     return {"status": "updated"}
+
+
+@router.post("/me/delete")
+async def delete_me(current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Delete the authenticated user's own account (conversations cascade,
+    memory store wiped). The last owner account cannot be deleted."""
+    if current_user["role"] == "owner":
+        owners = (await db.execute(select(User).where(User.role == "owner"))).scalars().all()
+        if len(owners) <= 1:
+            raise HTTPException(400, "Cannot delete the last owner account")
+    target = (await db.execute(select(User).where(User.id == current_user["user_id"]))).scalar_one_or_none()
+    if target is None:
+        raise HTTPException(404, "User not found")
+    await db.delete(target)
+    await db.commit()
+    try:
+        from ..memory.store import Store
+
+        Store(app_config.settings.memory_dir).reset_user(current_user["user_id"])
+    except Exception:
+        pass
+    return {"status": "deleted"}
 
 
 @router.delete("/users/{user_id}")

@@ -331,3 +331,57 @@ def test_extrovert_relink_rejects_identity_owned_by_another(monkeypatch):
         second = next(u for u in users if u["username"] == "second")
         assert second["username"] == "second"
     srv.shutdown()
+
+
+def test_delete_own_account(monkeypatch):
+    srv, issuer = _start_provider()
+    _enable_extrovert(monkeypatch, issuer)
+    monkeypatch.setattr(app_config.settings, "registration_enabled", True)
+    with TestClient(app) as client:
+        headers = _owner_headers(client)
+        reg = client.post("/api/auth/register", json={"username": "gone", "password": "pw12345678"}, headers=headers)
+        assert reg.status_code == 200, reg.text
+        user_headers = {"Authorization": f"Bearer {reg.json()['token']}"}
+
+        dele = client.post("/api/auth/me/delete", headers=user_headers)
+        assert dele.status_code == 200 and dele.json()["status"] == "deleted"
+
+        # token is now invalid
+        assert client.get("/api/auth/me", headers=user_headers).status_code == 401
+        users = client.get("/api/auth/users", headers=headers).json()
+        assert all(u["username"] != "gone" for u in users)
+    srv.shutdown()
+
+
+def test_delete_own_account_last_owner_blocked():
+    with TestClient(app) as client:
+        headers = _owner_headers(client)
+        resp = client.post("/api/auth/me/delete", headers=headers)
+        assert resp.status_code == 400
+        assert "last owner" in resp.json()["detail"]
+
+
+def test_extrovert_signup_respects_ip_limit(monkeypatch):
+    srv, issuer = _start_provider()
+    _enable_extrovert(monkeypatch, issuer)
+    monkeypatch.setattr(app_config.settings, "registration_enabled", True)
+    with TestClient(app) as client:
+        headers = _owner_headers(client)
+        # All non-owner users in this shared DB registered from 127.0.0.1
+        # (owners are created by /setup with no ip_address). Allow exactly
+        # ONE more account from this IP.
+        users_before = client.get("/api/auth/users", headers=headers).json()
+        ip_users = max(0, len(users_before) - 1)  # exclude the single owner
+        monkeypatch.setattr(app_config.settings, "ip_account_limit", ip_users + 1)
+
+        reg = client.post("/api/auth/register", json={"username": "ipuser", "password": "pw12345678"}, headers=headers)
+        assert reg.status_code == 200, reg.text  # takes the last allowed slot
+
+        # a NEW Extrovert account from the same IP is now blocked
+        start = client.get("/api/auth/extrovert/start")
+        q = urllib.parse.parse_qs(urllib.parse.urlsplit(start.json()["url"]).query)
+        Handler.id_token = _id_token(issuer, q["nonce"][0], sub="sub-ip", username="ipx")
+        Handler.userinfo = {"sub": "sub-ip", "preferred_username": "ipx"}
+        resp = client.get(f"/api/auth/extrovert/callback?state={q['state'][0]}&code=abc")
+        assert "Account limit reached for this IP address." in resp.text
+    srv.shutdown()
