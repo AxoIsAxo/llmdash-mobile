@@ -503,6 +503,7 @@ def test_agent_bails_with_note_after_repeated_deliberation(monkeypatch):
         headers = _owner_headers(client)
         conv_id, _ = _make_conv(client, headers, "Bail")
 
+        print("CONV_ID:", repr(conv_id), flush=True)
         resp = client.post(
             "/api/chat/stream",
             json={"conversation_id": conv_id, "message": "do the thing"},
@@ -628,3 +629,36 @@ def test_after_tools_silent_turn_gets_answer_nudge(monkeypatch):
         assert any(m["role"] == "user" and m["content"] == ANSWER_NUDGE for m in fake.calls[2])
         last = _last_assistant(client, headers, conv_id)
         assert last["content"] == "OK here is the summary of what I found."
+
+
+def test_no_narration_in_stream(monkeypatch):
+    """Narration between tool rounds must NEVER reach the client — only the
+    finished answer is streamed as content (plan text, "Let me..." narration,
+    and tool-round preamble are all discarded by the runtime)."""
+    fake = ScriptedProvider([
+        # Turn 1: model plans out loud, no tools -> nudged, text discarded
+        [StreamChunk(content_delta="Let me check the docs for that..."), StreamChunk(finish_reason="stop")],
+        # Turn 2: tool round with narration before the call -> discarded
+        [StreamChunk(content_delta="Let me fetch the page now."),
+         StreamChunk(tool_calls=[{"id": "c1", "name": "no_such_tool", "arguments": {}}], finish_reason="tool_calls")],
+        # Turn 3: the finished answer -> the ONLY text the client sees
+        [StreamChunk(content_delta="The final answer."), StreamChunk(finish_reason="stop")],
+    ])
+    monkeypatch.setattr("app.main.get_provider", lambda provider_type: fake)
+
+    with TestClient(app) as client:
+        headers = _owner_headers(client)
+        conv_id, _ = _make_conv(client, headers, "Narr")
+
+        resp = client.post(
+            "/api/chat/stream",
+            json={"conversation_id": conv_id, "message": "do the thing"},
+            headers=headers,
+        )
+        assert resp.status_code == 200
+        events = _sse_events(resp.text)
+        deltas = "".join(e.get("content", "") for e in events if e["type"] == "content_delta")
+        assert "Let me" not in deltas, deltas
+        assert "The final answer." in deltas
+        last = _last_assistant(client, headers, conv_id)
+        assert last["content"] == "The final answer."

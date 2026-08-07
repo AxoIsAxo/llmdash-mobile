@@ -1490,6 +1490,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
             try:
                 accumulated_content = ""
                 accumulated_reasoning = ""
+                turn_content: list[str] = []  # per-turn content buffer
                 final_tool_calls = []
                 total_prompt_tokens = 0
                 total_completion_tokens = 0
@@ -1514,10 +1515,14 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
 
                 async def save_draft_progress(force=False):
                     nonlocal last_save_len
-                    if force or len(accumulated_content) - last_save_len >= 5:
-                        draft.content = accumulated_content
+                    # Provisional: accumulated final text + the current turn's
+                    # buffer (may include narration mid-tool-round — the
+                    # finalize step overwrites with the clean final answer).
+                    provisional = accumulated_content + "".join(turn_content)
+                    if force or len(provisional) - last_save_len >= 5:
+                        draft.content = provisional
                         await sess.commit()
-                        last_save_len = len(accumulated_content)
+                        last_save_len = len(provisional)
 
                 def _looks_like_audio_error(err: Exception) -> bool:
                     msg = (str(err) or "").lower()
@@ -1553,14 +1558,18 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                         )
 
                 async def drain_turn(stream_iter) -> None:
-                    """Drain one provider stream into the shared accumulators."""
+                    """Drain one provider stream. Content is BUFFERED into
+                    ``turn_content`` and only forwarded to the client when the
+                    turn turns out to be the FINAL answer — narration written
+                    inside tool rounds or no-action turns ("Let me search...")
+                    is discarded and never shown. Thinking streams live. The
+                    draft is persisted provisionally for crash safety."""
                     nonlocal final_tool_calls, finish_reason
-                    nonlocal accumulated_content, accumulated_reasoning, round_reasoning
+                    nonlocal accumulated_reasoning, round_reasoning
                     nonlocal total_prompt_tokens, total_completion_tokens, total_total_tokens, total_reasoning_tokens
                     async for chunk in stream_iter:
                         if chunk.content_delta:
-                            accumulated_content += chunk.content_delta
-                            await push_event("content_delta", content=chunk.content_delta)
+                            turn_content.append(chunk.content_delta)
                             await save_draft_progress()
                         if chunk.reasoning_content_delta:
                             accumulated_reasoning += chunk.reasoning_content_delta
@@ -1609,32 +1618,33 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                                     f"Underlying error: {e}"
                                 )
                             raise
+                        turn_content.clear()
                         await drain_turn(turn_iter)
+                        turn_text = "".join(turn_content)
 
                         if final_tool_calls:
-                            # Keep tool-calling turns, but drop any filler text the
-                            # model wrote before the call ("Let me search...").
-                            turn_text = accumulated_content[turn_content_start:].strip()
-                            if _looks_like_filler(turn_text):
-                                accumulated_content = accumulated_content[:turn_content_start]
-                                last_save_len = len(accumulated_content)
+                            # Tool round: any text the model wrote before the
+                            # calls is narration ("Let me search...") — discard
+                            # it; it never reaches the client or the stored
+                            # message.
                             break
 
                         no_action = _classify_no_action_turn(
-                            accumulated_content[turn_content_start:],
+                            turn_text,
                             accumulated_reasoning,
                             finish_reason,
                         )
                         if no_action is None:
-                            break  # a real answer
+                            # A real answer — the ONLY text that reaches the
+                            # client. Flush the buffered turn now.
+                            if turn_text:
+                                accumulated_content += turn_text
+                                await push_event("content_delta", content=turn_text)
+                                await save_draft_progress(force=True)
+                            break
 
-                        # The user already saw this turn's (filler) text — strip it
-                        # from the stored answer, but keep the thinking. Applies to
-                        # both the nudge path and the final bail below.
-                        if accumulated_content[turn_content_start:].strip():
-                            accumulated_content = accumulated_content[:turn_content_start]
-                            last_save_len = len(accumulated_content)
-
+                        # No-action turn (plan/filler/silence): its text is
+                        # discarded too, then we nudge the model to act.
                         if no_action_turns >= MAX_NO_ACTION_TURNS:
                             bailed_no_action = True
                             logger.info(
