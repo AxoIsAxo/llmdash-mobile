@@ -155,6 +155,7 @@ export const api = {
           body: JSON.stringify(data),
         }),
     },
+    extrovertStart: () => request<{ url: string }>('/auth/extrovert/start'),
   },
 
   models: {

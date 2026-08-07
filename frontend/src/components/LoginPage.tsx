@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Bot, Loader2, UserPlus } from 'lucide-react'
+import { Bot, Loader2, UserPlus, LogIn } from 'lucide-react'
 import { api } from '../api'
 import type { AuthResponse, AuthStatus } from '../types'
 
@@ -12,6 +12,19 @@ export default function LoginPage({ authStatus, onDone }: Props) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [extrovertLoading, setExtrovertLoading] = useState(false)
+
+  const handleExtrovert = async () => {
+    setExtrovertLoading(true)
+    setError('')
+    try {
+      const { url } = await api.auth.extrovertStart()
+      window.location.href = url
+    } catch (e: any) {
+      setError(e.message || 'Could not start Extrovert login')
+      setExtrovertLoading(false)
+    }
+  }
   const [loading, setLoading] = useState(false)
   const [mode, setMode] = useState<'login' | 'register'>('login')
 
@@ -83,6 +96,24 @@ export default function LoginPage({ authStatus, onDone }: Props) {
               <UserPlus className="w-3.5 h-3.5" />
               {mode === 'login' ? 'Create new account' : 'Back to login'}
             </button>
+          )}
+          {authStatus.extrovert_enabled && (
+            <>
+              <div className="flex items-center gap-2 my-3 text-xs text-theme-muted">
+                <span className="flex-1 h-px bg-theme-border-light" />
+                or
+                <span className="flex-1 h-px bg-theme-border-light" />
+              </div>
+              <button
+                type="button"
+                onClick={handleExtrovert}
+                disabled={extrovertLoading}
+                className="w-full py-2 rounded-lg text-sm font-medium border border-theme-border-light text-theme-text-secondary hover:bg-theme-bg-elevated hover:text-theme-text transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {extrovertLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogIn className="w-4 h-4 text-theme-accent-text" />}
+                Continue with Extrovert
+              </button>
+            </>
           )}
         </form>
       </div>

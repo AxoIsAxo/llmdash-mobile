@@ -13,6 +13,7 @@ export interface User {
 export interface AuthStatus {
   needs_setup: boolean;
   registration_enabled: boolean;
+  extrovert_enabled?: boolean;
 }
 
 export interface AuthResponse {

@@ -238,6 +238,28 @@ The model's only memory footprint is a ~20-line `# Memory protocol` block (in `b
 | `MEMORY_EXTRACT_MIN_TURNS` | `10` | Turns before a batch extraction triggers |
 | `MEMORY_EXTRACT_BATCH_CHARS` | `40000` | Max transcript chars per extraction call |
 
+### Extrovert login (OIDC)
+
+Let users register / log in with their Extrovert account, and convert an existing password account by logging in with a matching Extrovert username. Register an OAuth app in Extrovert (`/settings/developers`) with:
+
+| Field | Value |
+|-------|-------|
+| Redirect URIs | `https://<your-llmdash-host>/api/auth/extrovert/callback` (exact match) |
+| Scopes | `openid profile` |
+
+Then set the env vars:
+
+| Variable | Description |
+|----------|-------------|
+| `EXTROVERT_CLIENT_ID` | The app's client id |
+| `EXTROVERT_CLIENT_SECRET` | The app's client secret |
+| `EXTROVERT_ISSUER` | `https://extrovert.redforged.eu` (default) |
+| `EXTROVERT_REDIRECT_URI` | Optional override for the auto-derived callback URL |
+| `EXTROVERT_AUTO_LINK` | `true` (default) — a matching existing username is linked (converted) on first login |
+| `EXTROVERT_ALLOW_SIGNUP` | `true` (default) — first-time Extrovert logins create a new account |
+
+A "Continue with Extrovert" button appears on the login page. Note: auto-linking matches by username — if your LLMDash instance is multi-user and untrusted, disable `EXTROVERT_AUTO_LINK` so only pre-linked accounts can log in.
+
 ### Manual maintenance (from `backend/`)
 
 ```bash

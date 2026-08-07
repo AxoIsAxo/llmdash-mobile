@@ -36,6 +36,14 @@ class Settings(BaseSettings):
     memory_extract_min_turns: int = 10
     memory_extract_batch_chars: int = 40000
 
+    # Extrovert OIDC login
+    extrovert_client_id: str = ""
+    extrovert_client_secret: str = ""
+    extrovert_issuer: str = "https://extrovert.redforged.eu"
+    extrovert_redirect_uri: str = ""  # override the auto-derived callback URL
+    extrovert_auto_link: bool = True   # match existing username on login
+    extrovert_allow_signup: bool = True  # create new accounts on first login
+
     model_config = {"env_file": "data/.env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
@@ -65,6 +73,12 @@ ENV_VAR_MAP = {
     "MEMORY_EXTRACT_MODEL": "memory_extract_model",
     "MEMORY_EXTRACT_MIN_TURNS": "memory_extract_min_turns",
     "MEMORY_EXTRACT_BATCH_CHARS": "memory_extract_batch_chars",
+    "EXTROVERT_CLIENT_ID": "extrovert_client_id",
+    "EXTROVERT_CLIENT_SECRET": "extrovert_client_secret",
+    "EXTROVERT_ISSUER": "extrovert_issuer",
+    "EXTROVERT_REDIRECT_URI": "extrovert_redirect_uri",
+    "EXTROVERT_AUTO_LINK": "extrovert_auto_link",
+    "EXTROVERT_ALLOW_SIGNUP": "extrovert_allow_signup",
 }
 
 

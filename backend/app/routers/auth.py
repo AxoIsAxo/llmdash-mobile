@@ -1,13 +1,17 @@
 import json
 import jwt
+import secrets
+import time
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import config as app_config
 from ..database import get_db, User, UserModelUsage
 from ..config_file import ConfigFileManager
+from .. import extrovert_auth
 from ..models import (
     AuthSetupRequest, AuthLoginRequest, AuthRegisterRequest,
     UserResponse, UserUpdateRequest, RegistrationToggleRequest,
@@ -17,6 +21,28 @@ from ..models import (
 )
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+# In-flight Extrovert OAuth sessions (state -> {verifier, nonce, redirect_uri, ts}).
+_pending_oauth: dict[str, dict] = {}
+
+
+def _oauth_redirect_uri(request: Request) -> str:
+    override = (app_config.settings.extrovert_redirect_uri or "").strip()
+    if override:
+        return override.rstrip("/")
+    return str(request.base_url).rstrip("/") + "/api/auth/extrovert/callback"
+
+
+async def _unique_username(base: str, db) -> str:
+    username = base or "extrovert-user"
+    candidate = username
+    i = 2
+    while True:
+        exists = (await db.execute(select(User.id).where(User.username == candidate))).scalar_one_or_none()
+        if not exists:
+            return candidate
+        candidate = f"{username}{i}"
+        i += 1
 
 
 def create_token(user_id: int, username: str, role: str) -> str:
@@ -88,7 +114,75 @@ async def auth_status(db: AsyncSession = Depends(get_db)):
     return {
         "needs_setup": len(users) == 0,
         "registration_enabled": app_config.settings.registration_enabled,
+        "extrovert_enabled": extrovert_auth._enabled(),
     }
+
+
+@router.get("/extrovert/start")
+async def extrovert_start(request: Request):
+    """Begin Extrovert OIDC login — returns the authorize URL (PKCE S256)."""
+    if not extrovert_auth._enabled():
+        raise HTTPException(404, "Extrovert login is not configured")
+    try:
+        url, session = await extrovert_auth.build_authorize_url(_oauth_redirect_uri(request))
+    except Exception as e:
+        raise HTTPException(502, f"Could not reach Extrovert: {e}")
+    _pending_oauth[session["state"]] = session
+    return {"url": url}
+
+
+@router.get("/extrovert/callback")
+async def extrovert_callback(state: str, code: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """OIDC callback — verifies the ID token, then logs in / links / signs up."""
+    session = _pending_oauth.pop(state, None)
+    if session is None:
+        return HTMLResponse(_oauth_html("Login expired. Please try again."))
+    if time.monotonic() - session["ts"] > extrovert_auth.STATE_TTL:
+        return HTMLResponse(_oauth_html("Login expired. Please try again."))
+    try:
+        tokens = await extrovert_auth.exchange_code(code, session)
+        id_claims = await extrovert_auth.verify_id_token(tokens["id_token"], session["nonce"])
+        info = await extrovert_auth.fetch_userinfo(tokens["access_token"])
+    except Exception as e:
+        return HTMLResponse(_oauth_html(f"Extrovert login failed: {e}"))
+
+    sub = str(id_claims.get("sub") or info.get("sub") or "")
+    username = str(info.get("preferred_username") or id_claims.get("preferred_username") or info.get("name") or "extrovert-user")[:64]
+
+    user = (await db.execute(select(User).where(User.oauth_sub == sub))).scalar_one_or_none()
+    if user is None and app_config.settings.extrovert_auto_link:
+        # Convert an existing password account: same username, not claimed yet.
+        user = (await db.execute(
+            select(User).where(User.username == username, User.oauth_sub.is_(None))
+        )).scalar_one_or_none()
+        if user is not None:
+            user.oauth_sub = sub
+            await db.commit()
+    if user is None:
+        if not app_config.settings.extrovert_allow_signup:
+            return HTMLResponse(_oauth_html("No LLMDash account matches this Extrovert account, and new signups are disabled."))
+        username = await _unique_username(username, db)
+        user = User(
+            username=username,
+            password_hash=secrets.token_hex(32),  # OAuth-only account, no usable password
+            role="user",
+            oauth_sub=sub,
+        )
+        db.add(user)
+        await db.commit()
+
+    token = create_token(user.id, user.username, user.role)
+    return HTMLResponse(_oauth_html(token=token))
+
+
+def _oauth_html(error: str = "", token: str = "") -> str:
+    if error:
+        return f"""<!DOCTYPE html><html><body style="font-family:sans-serif;background:#10131f;color:#f2f0fb;display:flex;align-items:center;justify-content:center;height:100vh">
+        <div style="text-align:center;max-width:420px"><h2>LLMDash · Extrovert login</h2><p style="color:#ff5d6c">{error}</p>
+        <a href="/" style="color:#ff7da3">Back to LLMDash</a></div></body></html>"""
+    return f"""<!DOCTYPE html><html><body style="font-family:sans-serif;background:#10131f;color:#f2f0fb;display:flex;align-items:center;justify-content:center;height:100vh">
+    <div style="text-align:center"><h2>Signed in via Extrovert</h2><p>Redirecting you back to LLMDash…</p></div>
+    <script>localStorage.setItem('llmdash_token', {json.dumps(token)}); location.href = '/';</script></body></html>"""
 
 
 @router.post("/setup")

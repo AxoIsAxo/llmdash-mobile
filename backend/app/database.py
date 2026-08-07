@@ -23,6 +23,8 @@ class User(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     username = Column(String(64), unique=True, nullable=False)
     password_hash = Column(String(256), nullable=False)
+    # Extrovert OIDC subject when the account is an Extrovert-auth account
+    oauth_sub = Column(String(128), nullable=True, unique=True)
     role = Column(String(16), nullable=False, default="user")
     token_limit = Column(Integer, nullable=True, default=None)
     token_usage = Column(Integer, nullable=False, default=0)
@@ -253,6 +255,9 @@ def _migrate(conn):
     model_cfg_cols = {row[1] for row in model_cfg_result}
     if "thinking_enabled" not in model_cfg_cols:
         conn.exec_driver_sql("ALTER TABLE model_configs ADD COLUMN thinking_enabled BOOLEAN DEFAULT 0")
+    user_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(users)")}
+    if "oauth_sub" not in user_cols:
+        conn.exec_driver_sql("ALTER TABLE users ADD COLUMN oauth_sub VARCHAR(128)")
     if "thinking_budget_tokens" not in model_cfg_cols:
         conn.exec_driver_sql("ALTER TABLE model_configs ADD COLUMN thinking_budget_tokens INTEGER")
     if "sort_order" not in model_cfg_cols:
