@@ -19,7 +19,6 @@ import MarkdownRenderer from './components/MarkdownRenderer'
 import SetupWizard from './components/SetupWizard'
 import LoginPage from './components/LoginPage'
 import AdminPanel from './components/AdminPanel'
-import SubscriptionPage from './components/SubscriptionPage'
 import CustomCssPanel from './components/CustomCssPanel'
 import DocumentManager from './components/DocumentManager'
 import MemoryPanel from './components/MemoryPanel'
@@ -151,7 +150,6 @@ function App() {
   const [imageGenSize, setImageGenSize] = useState('1024x1024')
   const [showSidebar, setShowSidebar] = useState(true)
   const [showAdmin, setShowAdmin] = useState(false)
-  const [showSubscription, setShowSubscription] = useState(false)
   const [showCustomCss, setShowCustomCss] = useState(false)
   const [showDocuments, setShowDocuments] = useState(false)
   const [showMemory, setShowMemory] = useState(false)
@@ -1145,9 +1143,6 @@ function App() {
           <button onClick={() => setShowAccount(true)} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-theme-bg-elevated rounded-lg text-sm">
             <UserRound className="w-4 h-4 text-theme-accent-text" /> Account
           </button>
-          <button onClick={() => setShowSubscription(true)} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-theme-bg-elevated rounded-lg text-sm">
-            <CreditCard className="w-4 h-4 text-theme-accent-text" /> Subscription
-          </button>
           <button onClick={() => setShowCustomCss(true)} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-theme-bg-elevated rounded-lg text-sm">
             <Palette className="w-4 h-4 text-theme-accent-text" /> Custom CSS
           </button>
@@ -1442,14 +1437,6 @@ function App() {
           currentUser={currentUser}
           onClose={() => { setShowAdmin(false); loadModels() }}
           onRefreshModels={loadModels}
-        />
-      )}
-
-      {/* Subscription Page Modal */}
-      {showSubscription && (
-        <SubscriptionPage
-          currentUser={currentUser}
-          onClose={() => setShowSubscription(false)}
         />
       )}
 

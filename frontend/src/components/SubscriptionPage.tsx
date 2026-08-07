@@ -5,10 +5,9 @@ import { CreditCard, Zap, Clock, CheckCircle, XCircle, AlertTriangle, Loader2, R
 
 interface Props {
   currentUser: { role: string }
-  onClose: () => void
 }
 
-function SubscriptionPage({ currentUser, onClose }: Props) {
+function SubscriptionSection({ currentUser }: Props) {
   const [plans, setPlans] = useState<SubscriptionPlan[]>([])
   const [mySub, setMySub] = useState<UserSubscription | null>(null)
   const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan | null>(null)
@@ -101,28 +100,22 @@ function SubscriptionPage({ currentUser, onClose }: Props) {
 
   if (loading) {
     return (
-      <div className="fixed inset-0 bg-theme-overlay/60 z-50 flex items-center justify-center">
-        <div className="bg-theme-bg-secondary rounded-xl p-8">
-          <Loader2 className="w-8 h-8 animate-spin text-theme-accent-text" />
-        </div>
+      <div className="flex items-center justify-center gap-2 text-theme-muted text-sm py-8">
+        <Loader2 className="w-4 h-4 animate-spin" /> Loading subscription…
       </div>
     )
   }
 
   return (
-    <div className="fixed inset-0 bg-theme-overlay/60 z-50 flex items-center justify-center p-4">
-      <div className="llm-modal bg-theme-bg-secondary rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto border border-theme-border-light shadow-2xl">
-        <div className="p-6 border-b border-theme-border flex items-center justify-between">
-          <h2 className="text-lg font-semibold flex items-center gap-2">
-            <CreditCard className="w-5 h-5 text-theme-accent-text" />
-            Subscription
-          </h2>
-          <button onClick={onClose} className="p-1 hover:bg-theme-bg-elevated rounded text-theme-muted hover:text-theme-text-secondary">
-            <XCircle className="w-5 h-5" />
-          </button>
-        </div>
+    <section className="space-y-4">
+      <h3 className="flex items-center gap-2 text-sm font-semibold text-theme-text-secondary">
+        <span className="flex items-center justify-center w-6 h-6 rounded-md bg-theme-accent/15 text-theme-accent-text">
+          <CreditCard className="w-4 h-4" />
+        </span>
+        Subscription
+      </h3>
 
-        <div className="p-6 space-y-6">
+      <div className="space-y-6">
           {/* Current subscription status */}
           {mySub && (
             <div className={`p-4 rounded-xl border ${
@@ -295,9 +288,8 @@ function SubscriptionPage({ currentUser, onClose }: Props) {
             </div>
           </div>
         </div>
-      </div>
-    </div>
+    </section>
   )
 }
 
-export default SubscriptionPage
+export default SubscriptionSection

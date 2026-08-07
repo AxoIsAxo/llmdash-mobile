@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { api } from '../api'
 import type { User } from '../types'
 import { X, UserRound, LogIn, Loader2, CheckCircle2, Link2 } from 'lucide-react'
+import SubscriptionSection from './SubscriptionPage'
 
 interface Props {
   currentUser: User
@@ -27,7 +28,7 @@ function AccountPanel({ currentUser, onClose, onRefreshUser }: Props) {
 
   return (
     <div className="fixed inset-0 bg-theme-overlay/60 backdrop-blur-[2px] flex items-center justify-center z-50 p-4">
-      <div className="llm-modal bg-theme-bg-secondary rounded-2xl w-full max-w-md border border-theme-border-light shadow-2xl overflow-hidden">
+      <div className="llm-modal bg-theme-bg-secondary rounded-2xl w-full max-w-2xl max-h-[88vh] flex flex-col border border-theme-border-light shadow-2xl overflow-hidden">
         <div className="flex items-center gap-3 px-6 py-4 border-b border-theme-border bg-theme-bg-elevated/30">
           <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-theme-accent/20 text-theme-accent-text">
             <UserRound className="w-5 h-5" />
@@ -41,7 +42,7 @@ function AccountPanel({ currentUser, onClose, onRefreshUser }: Props) {
           </button>
         </div>
 
-        <div className="px-6 py-5 space-y-4">
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
           {error && <div className="text-sm text-theme-danger-text bg-theme-danger/10 border border-theme-danger/20 rounded-lg px-3 py-2">{error}</div>}
 
           <div className="flex items-center justify-between p-3 rounded-xl bg-theme-bg-elevated/50 border border-theme-border">
@@ -79,6 +80,7 @@ function AccountPanel({ currentUser, onClose, onRefreshUser }: Props) {
               </button>
             )}
           </div>
+          <SubscriptionSection currentUser={currentUser} />
         </div>
       </div>
     </div>
