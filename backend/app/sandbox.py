@@ -211,7 +211,7 @@ async def run_in_alpine(command: str, timeout: int = 30, conversation_id: int = 
     if not conversation_id:
         # No conversation context (defensive fallback): one-shot container.
         rc, out, err = await _docker(
-            "run", "--rm", "-i",
+            "run", "--rm",
             "--memory", "512m", "--memory-swap", "1g", "--cpus", "1", "--pids-limit", "64",
             "alpine:latest", "sh", "-c", command,
             timeout=timeout,
@@ -226,5 +226,5 @@ async def run_in_alpine(command: str, timeout: int = 30, conversation_id: int = 
         return "Error: could not start the sandbox container for this conversation."
     _sandboxes[conversation_id] = {"container": container, "last_used": time.monotonic()}
 
-    rc, out, err = await _docker("exec", "-i", container, "sh", "-c", command, timeout=timeout)
+    rc, out, err = await _docker("exec", container, "sh", "-c", command, timeout=timeout)
     return _format_result(rc, out, err)

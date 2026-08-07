@@ -58,6 +58,20 @@ def test_looks_like_deliberation():
         "Fetching the site now:"
     )
     assert _looks_like_deliberation(long_plan_2) is True
+    # Third reported failure: narration before a run_command attempt.
+    long_plan_3 = (
+        "The user wants two things: save the current Telegram-like design to a file in their "
+        "documents, and create a new design inspired by extrovert.redforged.eu. Let me first "
+        "get the current theme to save it, and scrape the website to see what it looks like. "
+        "I can do these in parallel: get_theme + web_scrape of extrovert.redforged.eu. For "
+        "saving to documents — I have edit_document tool which creates downloadable file "
+        "artifacts. Let me start by getting the current theme and scraping the site in "
+        "parallel.The website extrovert.redforged.eu just shows a login page. Let me try to "
+        "get more design info. Let me use run_command with curl to grab the HTML and look "
+        "for colors, fonts. The site is a login page — let me pull its raw HTML/CSS to "
+        "extract the actual design details (colors, fonts, layout)."
+    )
+    assert _looks_like_deliberation(long_plan_3) is True
     # Long real answers must NOT be flagged.
     long_answer = (
         "I'll explain the architecture: the backend is FastAPI with an async SQLAlchemy "
