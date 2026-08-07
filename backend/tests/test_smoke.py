@@ -20,6 +20,7 @@ from app.main import (  # noqa: E402
     NO_ACTION_NUDGE,
     NO_ANSWER_NOTE,
     FINAL_ANSWER_NUDGE,
+    MAX_TOOL_ROUNDS,
     _bump_model_max_tokens,
     _classify_no_action_turn,
     _looks_like_deliberation,
@@ -675,7 +676,7 @@ def test_agent_finishes_with_answer_after_tool_cap(monkeypatch):
     the runtime forces one final text-only round so the user gets a finished
     reply instead of tool pills and silence ('the AI just stopped')."""
     turns = []
-    for i in range(5):
+    for i in range(MAX_TOOL_ROUNDS):
         turns.append([
             StreamChunk(tool_calls=[{"id": f"c{i}", "name": "no_such_tool", "arguments": {"q": str(i)}}], finish_reason="tool_calls"),
         ])
@@ -701,3 +702,34 @@ def test_agent_finishes_with_answer_after_tool_cap(monkeypatch):
         # the forced final round was the last stream call, with tools disabled
         assert fake.tools_list[-1] == []  # tools list empty on the final round
         assert FINAL_ANSWER_NUDGE in fake.calls[-1][-1]["content"]
+
+
+def test_parallel_tool_execution_per_round(monkeypatch):
+    """All tool calls in one round execute concurrently and each emits its
+    own tool_start/tool_result, mapping results back by id (agent-style)."""
+    fake = ScriptedProvider([
+        [StreamChunk(tool_calls=[
+            {"id": "c1", "name": "no_such_tool", "arguments": {"q": "a"}},
+            {"id": "c2", "name": "no_such_tool", "arguments": {"q": "b"}},
+        ], finish_reason="tool_calls")],
+        [StreamChunk(content_delta="Done."), StreamChunk(finish_reason="stop")],
+    ])
+    monkeypatch.setattr("app.main.get_provider", lambda provider_type: fake)
+
+    with TestClient(app) as client:
+        headers = _owner_headers(client)
+        conv_id, _ = _make_conv(client, headers, "Par")
+
+        resp = client.post(
+            "/api/chat/stream",
+            json={"conversation_id": conv_id, "message": "do both"},
+            headers=headers,
+        )
+        assert resp.status_code == 200
+        events = _sse_events(resp.text)
+        starts = [e["id"] for e in events if e["type"] == "tool_start"]
+        results = [e["id"] for e in events if e["type"] == "tool_result"]
+        assert sorted(starts) == ["c1", "c2"]
+        assert sorted(results) == ["c1", "c2"]
+        last = _last_assistant(client, headers, conv_id)
+        assert last["content"] == "Done."

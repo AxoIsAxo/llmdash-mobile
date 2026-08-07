@@ -1053,7 +1053,10 @@ NO_ANSWER_NOTE = (
     "acting. Try asking again or use a different model.)*"
 )
 MAX_NO_ACTION_TURNS = 2
-MAX_TOOL_ROUNDS = 5
+# Agent-style loop: no practical ceiling on tool rounds — the model runs
+# until it answers, like Claude Code/OpenCode. 30 is only a runaway backstop
+# (the forced final-answer round still guarantees closure after it).
+MAX_TOOL_ROUNDS = 30
 
 
 def _repair_tool_history(messages: list[dict]) -> list[dict]:
@@ -1713,12 +1716,25 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
 
                     await push_event("tool_calls", tool_calls=final_tool_calls, content=accumulated_content)
 
-                    tool_results = []
-                    for tc in final_tool_calls:
+                    async def _run_tool_call(tc):
+                        # Execute one tool call; the result maps back by id.
                         await push_event("tool_start", name=tc["name"], id=tc["id"])
-                        result = await skill_registry.execute(tc["name"], tc["arguments"], _current_user=current_user, _conversation_id=req.conversation_id)
-                        tool_results.append({"tool_call_id": tc["id"], "tool_name": tc["name"], "content": result})
+                        try:
+                            result = await skill_registry.execute(
+                                tc["name"], tc["arguments"],
+                                _current_user=current_user, _conversation_id=req.conversation_id,
+                            )
+                        except Exception as e:
+                            result = f"__TOOL_ERROR__: Tool execution error: {e}"
                         await push_event("tool_result", name=tc["name"], id=tc["id"], result=result)
+                        return {"tool_call_id": tc["id"], "tool_name": tc["name"], "content": result}
+
+                    # Execute every tool call in this round CONCURRENTLY —
+                    # agent-style, like Claude Code's parallel tool_use blocks.
+                    # gather preserves result order (maps back by tool_call_id).
+                    tool_results = await asyncio.gather(
+                        *[_run_tool_call(tc) for tc in final_tool_calls]
+                    )
 
                     search_tool_names = frozenset(("web_search", "web_scrape"))
                     for tr in tool_results:
