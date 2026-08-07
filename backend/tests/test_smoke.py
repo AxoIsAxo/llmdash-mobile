@@ -127,11 +127,15 @@ def test_full_flow():
         # --- auth status / setup / login ---
         status = client.get("/api/auth/status")
         assert status.status_code == 200
-        assert status.json()["needs_setup"] is True
-
-        setup = client.post("/api/auth/setup", json={"username": "owner", "password": "test1234"})
-        assert setup.status_code == 200
-        token = setup.json()["token"]
+        if status.json()["needs_setup"]:
+            setup = client.post("/api/auth/setup", json={"username": "owner", "password": "test1234"})
+            assert setup.status_code == 200
+            token = setup.json()["token"]
+        else:
+            # An earlier test module sharing this DB already ran setup.
+            login = client.post("/api/auth/login", json={"username": "owner", "password": "test1234"})
+            assert login.status_code == 200
+            token = login.json()["token"]
         headers = {"Authorization": f"Bearer {token}"}
 
         me = client.get("/api/auth/me", headers=headers)

@@ -48,8 +48,16 @@ from .audio_convert import prepare_audio_for_provider
 from .routers.auth import router as auth_router, get_current_user, require_role, load_provider_configs
 from .routers.subscriptions import router as subscriptions_router
 from .routers.theme import router as theme_router
+from .memory.capture import assistant_turn_summary, capture_assistant_reply, capture_user_message
+from .memory.commands import maybe_run_command as memory_maybe_run_command
+from .memory.inject import build_memory_block as memory_build_memory_block
+from .memory.scheduler import MemoryScheduler
+from .memory.store import Store as MemoryStore
 
 router = APIRouter(prefix="/api")
+
+# Cross-session memory worker (started in lifespan; None when disabled).
+memory_worker: Optional[MemoryScheduler] = None
 
 
 def get_active_provider_configs():
@@ -90,7 +98,30 @@ async def lifespan(app: FastAPI):
                 logger.warning(f"Whisper warmup failed: {e}")
         asyncio.create_task(_warmup_whisper())
 
+    # Cross-session memory: background extraction + consolidation worker.
+    global memory_worker
+    if getattr(app_config.settings, "memory_enabled", True):
+        try:
+            memory_worker = MemoryScheduler(MemoryStore(app_config.settings.memory_dir), enabled=True)
+            memory_worker.start()
+            logger.info("memory worker started (dir=%s)", app_config.settings.memory_dir)
+        except Exception as e:
+            logger.warning(f"memory worker startup failed: {e}")
+            memory_worker = None
+
     yield
+
+    # Session-end memory flush: distill any pending transcripts.
+    if memory_worker is not None:
+        try:
+            await memory_worker.flush_all()
+        except Exception as e:
+            logger.warning(f"memory flush failed: {e}")
+        try:
+            await memory_worker.stop()
+        except Exception:
+            pass
+        memory_worker = None
 
     if sweep_task is not None:
         sweep_task.cancel()
@@ -1207,7 +1238,31 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
 
     messages = _repair_tool_history(messages)
 
-    system_prompt = build_system_prompt(model.name)
+    # --- Cross-session memory: inject a [MEMORY] block into the system prompt.
+    memory_block = None
+    if memory_worker is not None:
+        try:
+            cmd_report = await memory_maybe_run_command(
+                MemoryStore(app_config.settings.memory_dir), current_user["user_id"], req.message or ""
+            )
+        except Exception as exc:
+            logger.warning(f"memory: chat command failed: {exc}")
+            cmd_report = None
+        if cmd_report:
+            memory_block = cmd_report
+        else:
+            try:
+                memory_block = await asyncio.to_thread(
+                    memory_build_memory_block,
+                    MemoryStore(app_config.settings.memory_dir),
+                    current_user["user_id"],
+                    query=req.message or "",
+                )
+            except Exception as exc:
+                logger.warning(f"memory: injection failed: {exc}")
+                memory_block = None
+
+    system_prompt = build_system_prompt(model.name, memory_block=memory_block)
     messages.insert(0, {"role": "system", "content": system_prompt})
 
     user_content = req.message or ""
@@ -1383,6 +1438,17 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
         db.add(user_msg)
         await db.commit()
 
+        if memory_worker is not None:
+            await asyncio.to_thread(
+                capture_user_message,
+                MemoryStore(app_config.settings.memory_dir),
+                current_user["user_id"],
+                message=req.message or "",
+                conversation_id=req.conversation_id,
+                model=model.name,
+                attachments=req.attachments,
+            )
+
         if has_multimodal:
             user_msg_entry = {"role": "user", "content": content_parts}
         else:
@@ -1392,6 +1458,17 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
         user_msg = Message(conversation_id=req.conversation_id, role="user", content=req.message)
         db.add(user_msg)
         await db.commit()
+
+        if memory_worker is not None:
+            await asyncio.to_thread(
+                capture_user_message,
+                MemoryStore(app_config.settings.memory_dir),
+                current_user["user_id"],
+                message=req.message or "",
+                conversation_id=req.conversation_id,
+                model=model.name,
+                attachments=req.attachments,
+            )
         messages.append({"role": "user", "content": req.message})
 
     if getattr(model, "tools_enabled", True):
@@ -1405,6 +1482,8 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
     async def run_ai_chat():
         async with async_session() as sess:
             streaming_msg_id = None
+            assistant_outcome = "done"  # for memory capture: done|error|cancelled
+            all_tool_calls: list[dict] = []  # executed tool calls (any round)
             try:
                 accumulated_content = ""
                 accumulated_reasoning = ""
@@ -1744,6 +1823,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                     print(f"Token usage recording failed: {exc}", flush=True)
 
             except asyncio.CancelledError:
+                assistant_outcome = "cancelled"
                 try:
                     if streaming_msg_id is not None:
                         draft.content = accumulated_content
@@ -1754,6 +1834,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                     pass
                 raise
             except Exception as e:
+                assistant_outcome = "error"
                 error_msg = f"Error: {str(e)}"
                 try:
                     await push_event("error", error=str(e))
@@ -1768,6 +1849,33 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                 except Exception:
                     pass
             finally:
+                # Cross-session memory: capture the assistant reply (whatever
+                # the model produced, even on error/cancel) and nudge the
+                # extraction scheduler. Runs BEFORE [DONE] so the client can
+                # never observe an uncaptured turn.
+                if memory_worker is not None:
+                    try:
+                        _capture_content = assistant_turn_summary(
+                            accumulated_content or "",
+                            getattr(draft, "content", "") or "" if streaming_msg_id is not None else "",
+                            all_tool_calls,
+                        )
+                        if _capture_content:
+                            await asyncio.to_thread(
+                                capture_assistant_reply,
+                                MemoryStore(app_config.settings.memory_dir),
+                                current_user["user_id"],
+                                content=_capture_content,
+                                conversation_id=req.conversation_id,
+                                model=model.name,
+                                status=assistant_outcome,
+                            )
+                    except Exception as exc:
+                        logger.warning(f"memory: assistant capture failed: {exc}")
+                    try:
+                        memory_worker.on_chat_finished(current_user["user_id"])
+                    except Exception:
+                        pass
                 cleanup_generation(req.conversation_id)
 
     my_queue_final = my_queue

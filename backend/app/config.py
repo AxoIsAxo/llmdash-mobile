@@ -29,6 +29,13 @@ class Settings(BaseSettings):
     whisper_provider: str = "local"
     whisper_openrouter_model: str = "openai/whisper-1"
 
+    # Cross-session memory
+    memory_dir: str = "data/memory"
+    memory_enabled: bool = True
+    memory_extract_model: str = ""  # empty = auto (user's most recent model)
+    memory_extract_min_turns: int = 10
+    memory_extract_batch_chars: int = 40000
+
     model_config = {"env_file": "data/.env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
@@ -53,6 +60,11 @@ ENV_VAR_MAP = {
     "WHISPER_BEAM_SIZE": "whisper_beam_size",
     "WHISPER_PROVIDER": "whisper_provider",
     "WHISPER_OPENROUTER_MODEL": "whisper_openrouter_model",
+    "MEMORY_DIR": "memory_dir",
+    "MEMORY_ENABLED": "memory_enabled",
+    "MEMORY_EXTRACT_MODEL": "memory_extract_model",
+    "MEMORY_EXTRACT_MIN_TURNS": "memory_extract_min_turns",
+    "MEMORY_EXTRACT_BATCH_CHARS": "memory_extract_batch_chars",
 }
 
 

@@ -203,6 +203,58 @@ AI models have access to these tools during chat:
 
 ---
 
+## Cross-Session Memory
+
+LLMDash keeps a **per-user, LLM-wiki-style memory** in plain markdown under `data/memory/<user_id>/` — open that folder as an Obsidian vault to browse it (it contains only the wiki, no code). Memory is **automatic**: the model never decides to save anything, and nothing is lost between sessions.
+
+```
+data/memory/<user_id>/
+├── index.md      # catalog: one line per page
+├── log.md        # append-only "## [YYYY-MM-DD] action | title"
+├── schema.md     # conventions doc (bootstrap)
+├── scores.json   # disposable retrieval index (rebuilt from pages)
+├── pages/        # persona.md, active.md, entities/*.md, scenarios/*.md
+├── inbox/        # L0 raw transcripts (one file per message)
+└── archive/      # processed transcripts
+```
+
+How the pieces wire together in this tool:
+
+1. **Capture (L0)** — `backend/app/memory/capture.py`. The chat request path itself writes every user message (right after it is persisted, before the model call) and every assistant reply (in the finalize path, before the SSE stream ends) to `inbox/` as timestamped transcripts. Capture is deterministic plumbing: it works even if the model errors, refuses, or is cancelled, and it never blocks or breaks chat (`data/memory/` is gitignored).
+2. **Extraction** — `backend/app/memory/extract.py` + `scheduler.py`. A runtime scheduler (turn threshold ≥10, ~5 min idle, 10-min background loop, and a bounded flush at shutdown) distills new inbox items into **L1 atoms** (single facts), **L2 scenarios** (reusable knowledge blocks) and **L3 persona deltas**. It uses your configured providers in one batched call per ~40 KB of transcript (strict extraction-only prompt, every atom carries `source`, `timestamp`, `salience`, `confidence`, `tags`), with a zero-dependency rule-based fallback. Low-confidence atoms are stored but excluded from injection until restated.
+3. **Storage** — `backend/app/memory/store.py`. Markdown is canonical; `scores.json` is a cache that consolidation rebuilds from the pages, so manual Obsidian edits fold back in. An inner git repo keeps history of the compiled wiki only — `inbox/` and `archive/` (raw transcripts) are excluded from even that.
+4. **Injection** — `backend/app/memory/inject.py`. Before every reply the runtime scores atoms against the current message and appends a `[MEMORY]` block to the system prompt. **Hard caps**: working set (L3 persona/active + 2 recent scenarios) ≤500 chars always injected, scored atoms ≤1400 chars, ≤8 items, total data ≤2000 chars, protocol block ≤600 — context grows by ≤ ~2.6k chars from memory. Scoring is `recency × frequency × importance × link_strength` with recall-overlap keyword matching; every retrieval boosts the atom (spaced repetition); injected items pull 1–2 linked neighbors. No tool call, no model awareness.
+5. **Consolidation + lint** — `backend/app/memory/consolidate.py` + `lint.py`. The "sleep" pass (every ~6h in background, or on demand) dedupes/merges atoms, resolves contradictions (newer wins, older marked `[superseded]`), applies persona deltas, decays stale salience, rebuilds `index.md`/`scores.json`, and appends `log.md`. `lint` checks for orphans, missing cross-links, index drift, stale claims and duplicates.
+
+The model's only memory footprint is a ~20-line `# Memory protocol` block (in `backend/app/memory/config.py`): use injected memories silently, never announce them, never decide to save, and report maintenance results when asked.
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MEMORY_DIR` | `data/memory` | Memory store root (per-user subfolders) |
+| `MEMORY_ENABLED` | `true` | Kill switch for capture/extraction/injection |
+| `MEMORY_EXTRACT_MODEL` | *(empty)* | Model for extraction; empty = auto (user's most recent model, else first enabled) |
+| `MEMORY_EXTRACT_MIN_TURNS` | `10` | Turns before a batch extraction triggers |
+| `MEMORY_EXTRACT_BATCH_CHARS` | `40000` | Max transcript chars per extraction call |
+
+### Manual maintenance (from `backend/`)
+
+```bash
+python -m app.memory.cli status [--user N|--all]
+python -m app.memory.cli consolidate [--user N|--all]
+python -m app.memory.cli lint [--user N|--all]
+python -m app.memory.cli reset --user N --yes   # permanently wipes a user's memory (incl. raw transcripts)
+```
+
+In chat, `consolidate memory` and `lint memory` run the operation and inject the report for the assistant to summarize. The inner git history keeps compiled-wiki history; purging that history after a reset requires manual `git filter-branch` inside `data/memory/`.
+
+### Privacy
+
+Raw transcripts in `inbox/`/`archive/` are excluded from the inner git history and the app repo is gitignored for `data/memory/`. Memory is keyed per user id from the JWT — never by client-supplied paths — so one user's memories can never leak into another user's context. The memory worker runs in-process (single uvicorn worker); with `--workers N`, each worker maintains its own scheduler — extraction may run twice on the same inbox, but consolidation dedupes the result and no data is lost.
+
+---
+
 ## Database
 
 LLMDash uses SQLite with the following tables:

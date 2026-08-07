@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Optional
 
+from ..memory.config import MEMORY_PROTOCOL_BLOCK
 from .registry import skill_registry
 
 
-def build_system_prompt(model_name: str) -> str:
+def build_system_prompt(model_name: str, memory_block: Optional[str] = None) -> str:
     now = datetime.now(timezone.utc)
     return (
         f"You are {model_name}, a helpful AI assistant running on LLMDash.\n"
@@ -108,7 +110,23 @@ def build_system_prompt(model_name: str) -> str:
         "3. Never loop through search → fail → \"Let me try another source\" → search → fail → repeat.\n"
         "4. If a tool error says 'Tool execution error' with a function signature, fix your arguments and retry "
         "ONCE. If it still fails, tell the user what went wrong and move on."
+        + _memory_section(memory_block)
     )
+
+
+def _memory_section(memory_block: Optional[str]) -> str:
+    """Append the memory protocol (+ injected [MEMORY] data) when memory is on.
+
+    ``memory_block is None`` -> no memory section at all.
+    ``memory_block == ""``   -> protocol block only (nothing to inject yet).
+    otherwise                -> protocol block + [MEMORY] data.
+    """
+    if memory_block is None:
+        return ""
+    out = "\n\n" + MEMORY_PROTOCOL_BLOCK
+    if memory_block:
+        out += "\n\n[MEMORY]\n" + memory_block
+    return out
 
 
 def get_tool_definitions() -> list[dict]:

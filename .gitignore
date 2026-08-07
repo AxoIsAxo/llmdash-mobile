@@ -34,7 +34,14 @@ data/documents/charts/
 data/uploads/*
 !data/uploads/.gitkeep
 data/.cache/
+data/memory/
 jwt_secret
+
+# --- Local tooling (venv/uv, not part of the project) ---
+backend/.venv/
+.uv-cache/
+.uv-python/
+.reasonix/
 
 # --- IDE ---
 .vscode/
