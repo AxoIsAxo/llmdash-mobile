@@ -48,6 +48,16 @@ def test_looks_like_deliberation():
         "stylesheet to extract the exact design tokens:"
     )
     assert _looks_like_deliberation(long_plan) is True
+    # Second reported failure: another long narration that never acts.
+    long_plan_2 = (
+        "I'll do both: first grab your current theme so I can save it, and check out that "
+        "site's design.The site only exposed a login page to the scraper, so let me pull "
+        "its actual HTML/CSS directly to read the design tokens:curl isn't available in "
+        "this sandbox — I'll use python instead:Odd — the sandbox is missing its usual "
+        "tools. Let me check what's available:It's a minimal Alpine box — wget is there. "
+        "Fetching the site now:"
+    )
+    assert _looks_like_deliberation(long_plan_2) is True
     # Long real answers must NOT be flagged.
     long_answer = (
         "I'll explain the architecture: the backend is FastAPI with an async SQLAlchemy "
@@ -191,6 +201,85 @@ def test_classify_no_action_turn():
     # Budget exhaustion with no substance is a budget cutoff.
     assert _classify_no_action_turn("", "", "length") == "budget"
     assert _classify_no_action_turn("Let me try another query.", "", "max_tokens") == "budget"
+
+
+def test_registry_passes_conversation_context():
+    """Skills that declare _conversation_id / _current_user receive them; skills
+    that don't declare them get them filtered out (so no signature errors)."""
+    import asyncio
+
+    from app.skills.base import Skill
+    from app.skills.registry import SkillRegistry
+
+    seen = {}
+
+    class WithCtx(Skill):
+        name = "with_ctx"
+        description = "d"
+        input_schema = {"type": "object", "properties": {}, "required": []}
+
+        async def execute(self, arguments: dict, _conversation_id: int = 0, _current_user: dict = None) -> str:
+            seen["conv"] = _conversation_id
+            seen["user"] = _current_user
+            return "ok"
+
+    class NoCtx(Skill):
+        name = "no_ctx"
+        description = "d"
+        input_schema = {"type": "object", "properties": {}, "required": []}
+
+        async def execute(self, arguments: dict) -> str:
+            seen["no_ctx"] = True
+            return "ok"
+
+    reg = SkillRegistry()
+    reg.register(WithCtx())
+    reg.register(NoCtx())
+
+    async def run():
+        await reg.execute("with_ctx", {}, _current_user={"user_id": 7}, _conversation_id=42)
+        await reg.execute("no_ctx", {}, _current_user={"user_id": 7}, _conversation_id=42)
+
+    asyncio.run(run())
+    assert seen["conv"] == 42
+    assert seen["user"] == {"user_id": 7}
+    assert seen["no_ctx"] is True
+
+
+def test_sandbox_pool_eviction_and_names(monkeypatch):
+    import asyncio
+
+    import app.sandbox as sb
+
+    assert sb._container_name(42) == "llmdash-sandbox-42"
+
+    calls = []
+
+    async def fake_docker(*args, timeout=60.0):
+        calls.append(args)
+        return 0, "", ""
+
+    monkeypatch.setattr(sb, "_docker", fake_docker)
+    sb._sandboxes.clear()
+    sb._sandboxes[1] = {"container": "c1", "last_used": 0.0}          # stale
+    sb._sandboxes[2] = {"container": "c2", "last_used": 999999999.0}  # fresh
+    asyncio.run(sb._sweep())
+    assert ("rm", "-f", "c1") in calls
+    assert 1 not in sb._sandboxes
+    assert 2 in sb._sandboxes
+
+    # Pool cap: with a full pool, the least-recently-used one is evicted.
+    import time as _time
+    _now = _time.monotonic()
+    sb._sandboxes.clear()
+    sb._sandboxes.update({
+        i: {"container": f"c{i}", "last_used": _now - i}  # all recent; conv 17 oldest
+        for i in range(1, sb.SANDBOX_MAX_POOL + 2)
+    })
+    asyncio.run(sb._sweep())
+    assert len(sb._sandboxes) <= sb.SANDBOX_MAX_POOL
+    assert (sb.SANDBOX_MAX_POOL + 1) not in sb._sandboxes  # oldest evicted
+    assert 1 in sb._sandboxes                              # most recent kept
 
 
 def test_looks_like_filler():

@@ -6,7 +6,13 @@ from ...sandbox import run_in_alpine
 
 class RunCommandSkill(Skill):
     name = "run_command"
-    description = "Execute Linux commands in a secure ephemeral Alpine Linux sandbox via Docker. Root access, network enabled. Pre-installed: python3, pip, node, npm, git, curl, wget, gcc, build-base. You can apk add or pip install or npm install any additional packages you need."
+    description = (
+        "Execute Linux commands in a secure Alpine Linux sandbox via Docker. Root access, "
+        "network enabled. The sandbox is PERSISTENT for this whole conversation: anything "
+        "you install (apk add, pip install, npm install) and any files you create stay "
+        "available for later commands in this chat. Pre-installed: python3, pip, node, npm, "
+        "git, curl, wget, gcc, build-base."
+    )
     input_schema = {
         "type": "object",
         "properties": {
@@ -16,8 +22,8 @@ class RunCommandSkill(Skill):
         "required": ["command"],
     }
 
-    async def execute(self, arguments: dict) -> str:
+    async def execute(self, arguments: dict, _conversation_id: int = 0) -> str:
         command = arguments.get("command", "")
         timeout = arguments.get("timeout", 30)
-        result = await run_in_alpine(command, timeout=timeout)
+        result = await run_in_alpine(command, timeout=timeout, conversation_id=_conversation_id)
         return result

@@ -16,7 +16,7 @@ LLMDash is a self-hosted AI chat interface that connects to multiple LLM provide
 ## Features
 
 - **Multi-provider AI** — DeepSeek, Claude, MiniMax, OpenRouter, or any OpenAI-compatible API configured via UI
-- **Built-in tools** — AI models can search the web (SearXNG), create/edit .docx/.pdf/.odt documents, render HTML previews, and execute commands in isolated Alpine Docker containers
+- **Built-in tools** — AI models can search the web (SearXNG), create/edit .docx/.pdf/.odt documents, render HTML previews, and execute commands in isolated Alpine Docker containers that **persist for the whole conversation** (installs and files survive between tool calls in a chat)
 - **Real-time streaming** — Server-Sent Events for token-by-token responses with tool call round-trips
 - **Voice input** — Multilingual speech-to-text powered by [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (CTranslate2, 4× faster than the original Whisper), with selectable model size, compute type, and device
 - **Conversation branching** — Fork conversations at any message to explore alternative responses
@@ -199,7 +199,7 @@ AI models have access to these tools during chat:
 | `web_search` | Search the web via SearXNG (Google, DuckDuckGo, Wikipedia, etc.) |
 | `edit_document` | Create or edit documents in .docx, .pdf, or .odt format |
 | `render_html` | Render HTML/CSS/JS and return a preview |
-| `run_command` | Execute shell commands in an ephemeral Alpine Linux Docker container |
+| `run_command` | Execute shell commands in an Alpine Linux sandbox container that persists for the whole conversation (installs and files stay put) |
 
 ---
 
@@ -220,7 +220,7 @@ LLMDash uses SQLite with the following tables:
 
 ## Security
 
-- **Sandboxed execution**: The `run_command` tool executes in ephemeral Alpine Docker containers with no persistence
+- **Sandboxed execution**: The `run_command` tool executes in per-conversation Alpine Docker containers with memory/CPU/PID limits; state persists for the chat and containers are cleaned up when the conversation is deleted, after 30 min idle, or on shutdown
 - **Read-only Docker socket**: The container mounts `/var/run/docker.sock` as read-only
 - **JWT authentication**: All API routes (except login/setup/registration) require Bearer token
 - **Role-based access**: Owner, admin, and user roles with scoped permissions

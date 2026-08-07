@@ -41,7 +41,7 @@ from .skills.integration import build_system_prompt
 from .config_file import ConfigFileManager
 from .sse import active_generations, push_to_queues, cleanup_generation
 from .model_capabilities import detect_audio_enabled
-from .sandbox import is_docker_available
+from .sandbox import is_docker_available, remove_sandbox, cleanup_all, start_sweeper
 from .ocr import process_uploaded_file, is_allowed_file, is_image_file, is_audio_file, ocr_image, is_ocr_available
 from .whisper_stt import transcribe_audio, transcribe_audio_openrouter, VALID_PROVIDERS, DEFAULT_PROVIDER, DEFAULT_OPENROUTER_MODEL, VALID_MODEL_SIZES, VALID_COMPUTE_TYPES, get_model as get_whisper_model
 from .audio_convert import prepare_audio_for_provider
@@ -70,6 +70,16 @@ async def lifespan(app: FastAPI):
         if stuck:
             await sess.commit()
 
+    # Sandbox lifecycle: clear leftovers of a crashed run, then sweep idle
+    # per-conversation containers periodically; stop them all on shutdown.
+    sweep_task = None
+    if is_docker_available():
+        try:
+            await cleanup_all()
+            sweep_task = start_sweeper()
+        except Exception as e:
+            logger.warning(f"sandbox startup cleanup failed: {e}")
+
     # Warm up the local Whisper model in the background so the first voice
     # message doesn't block on a multi-hundred-MB download mid-request.
     if (getattr(app_config.settings, "whisper_provider", "local") or "local").lower() == "local":
@@ -81,6 +91,13 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_warmup_whisper())
 
     yield
+
+    if sweep_task is not None:
+        sweep_task.cancel()
+    try:
+        await cleanup_all()
+    except Exception as e:
+        logger.warning(f"sandbox shutdown cleanup failed: {e}")
 
 
 app = FastAPI(title="LLMDash", version="1.0.0", lifespan=lifespan)
@@ -536,6 +553,10 @@ async def delete_conversation(conv_id: int, current_user: dict = Depends(get_cur
     await db.execute(delete(Message).where(Message.conversation_id == conv_id))
     await db.delete(conv)
     await db.commit()
+    try:
+        await remove_sandbox(conv_id)
+    except Exception:
+        pass
     return {"status": "deleted"}
 
 
@@ -1596,7 +1617,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                     tool_results = []
                     for tc in final_tool_calls:
                         await push_event("tool_start", name=tc["name"], id=tc["id"])
-                        result = await skill_registry.execute(tc["name"], tc["arguments"], _current_user=current_user)
+                        result = await skill_registry.execute(tc["name"], tc["arguments"], _current_user=current_user, _conversation_id=req.conversation_id)
                         tool_results.append({"tool_call_id": tc["id"], "tool_name": tc["name"], "content": result})
                         await push_event("tool_result", name=tc["name"], id=tc["id"], result=result)
 
