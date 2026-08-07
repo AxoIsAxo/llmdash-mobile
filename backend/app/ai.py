@@ -746,15 +746,13 @@ class OpenAICompatibleProvider(AIProvider):
             reasoning_content=getattr(msg, "reasoning_content", "") or getattr(msg, "reasoning", "") or "",
         )
 
-    async def generate_image(self, prompt: str, model_config, size: str = "1024x1024", n: int = 1) -> ImageGenerationResult:
-        client = await self._get_client(model_config)
-        base_url = (model_config.base_url or "").lower()
+    def _extract_tool_calls(self, msg) -> tuple[list[dict], str]:
         """Pull tool calls out of an OpenAI message, falling back to inline
         `<tool_call>...</tool_call>` text for models that don't use the
         tool_calls API (e.g. mimo v2.5). Returns (tool_calls, cleaned_content).
         """
         tool_calls: list[dict] = []
-        if msg.tool_calls:
+        if getattr(msg, "tool_calls", None):
             for tc in msg.tool_calls:
                 try:
                     args = json.loads(tc.function.arguments) if tc.function.arguments else {}
@@ -965,6 +963,7 @@ class OpenAICompatibleProvider(AIProvider):
             )
         if hasattr(response, "data"):
             images = []
+            revised = None
             for img in response.data:
                 if img.url:
                     images.append(img.url)
@@ -976,7 +975,10 @@ class OpenAICompatibleProvider(AIProvider):
                         images.append(f"data:image/png;base64,{b64}")
                 else:
                     images.append("")
-            revised = getattr(response, "revised_prompt", None) or None
+                if revised is None:
+                    revised = getattr(img, "revised_prompt", None)
+            if revised is None:
+                revised = getattr(response, "revised_prompt", None)
             return ImageGenerationResult(images=images, revised_prompt=revised)
         msg = response.choices[0].message
         images = []

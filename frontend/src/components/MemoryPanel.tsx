@@ -173,16 +173,25 @@ function MemoryPanel({ currentUser, onClose }: Props) {
               <span className="text-sm">Loading your memory…</span>
             </div>
           ) : status && status.atoms_count === 0 && status.scenarios_count === 0 && status.inbox_pending === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
-              <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-theme-accent/15 text-theme-accent-text">
-                <Sparkles className="w-7 h-7" />
+            <>
+              <div className="flex flex-col items-center justify-center py-14 text-center gap-3">
+                <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-theme-accent/15 text-theme-accent-text">
+                  <Sparkles className="w-7 h-7" />
+                </div>
+                <div className="text-sm text-theme-text-secondary max-w-sm">
+                  Nothing stored yet. Things you tell the AI — your name, preferences, decisions —
+                  are distilled here automatically after each reply.
+                </div>
               </div>
-              <div className="text-sm text-theme-text-secondary max-w-sm">
-                Nothing stored yet. Say something like{' '}
-                <span className="text-theme-accent-text font-medium">“hi, I'm axo”</span> in a chat —
-                it's distilled into memory automatically right after the reply.
-              </div>
-            </div>
+              {status.log.length > 0 && (
+                <section>
+                  {sectionTitle(<History className="w-4 h-4" />, 'Activity log')}
+                  <pre className="text-xs text-theme-text-secondary whitespace-pre-wrap bg-theme-bg-elevated/50 border border-theme-border rounded-xl p-4 max-h-44 overflow-y-auto leading-relaxed">
+                    {status.log.join('\n')}
+                  </pre>
+                </section>
+              )}
+            </>
           ) : status && (
             <>
               {/* status pills */}

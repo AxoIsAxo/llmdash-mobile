@@ -590,3 +590,85 @@ def client_get_unauth(path, method="GET"):
     with TC(app) as client:
         resp = client.request(method, path)
         return resp.status_code
+
+
+def test_openai_chat_and_image_generation_via_real_provider(tmp_path, monkeypatch):
+    """Regression: non-streaming OpenAICompatibleProvider.chat() must work —
+    it feeds memory extraction (and title generation). This broke silently
+    before (AttributeError -> rule fallback -> 'nothing stored'). Also covers
+    generate_image, which was corrupted by the same code splice."""
+    import asyncio as _asyncio
+    import json as _json
+    import threading as _threading
+    from http.server import BaseHTTPRequestHandler as _H, HTTPServer as _S
+    from types import SimpleNamespace as _NS
+
+    from app.ai import OpenAICompatibleProvider, AIResponse, ImageGenerationResult
+
+    EXTRACT_JSON = (
+        '{"atoms": [{"text": "User is named axo", "entity": "user", "kind": "name", '
+        '"salience": 0.9, "confidence": 0.95, "tags": ["name"], "source_turn": 1}]}'
+    )
+
+    class Handler(_H):
+        def do_POST(self):
+            body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            req = _json.loads(body or b"{}")
+            if self.path.startswith("/v1/images/generations"):
+                data = _json.dumps({
+                    "created": 1,
+                    "data": [{"b64_json": "QUJD", "revised_prompt": "revised"}],
+                })
+            else:
+                Handler.chat_prompt = req.get("messages", [])
+                data = _json.dumps({"choices": [{"message": {"role": "assistant", "content": EXTRACT_JSON}}]})
+            raw = data.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def log_message(self, *a):
+            pass
+
+    srv = _S(("127.0.0.1", 0), Handler)
+    _threading.Thread(target=srv.serve_forever, daemon=True).start()
+    port = srv.server_address[1]
+    monkeypatch.setattr(app_config.settings, "deepseek_api_key", "dummy")
+
+    model = _NS(
+        model_name="deepseek-chat", max_tokens=8192, temperature=0.7, thinking_enabled=False,
+        api_key_env="DEEPSEEK_API_KEY", base_url=f"http://127.0.0.1:{port}/v1",
+        provider="openai_compatible",
+    )
+    provider = OpenAICompatibleProvider()
+
+    async def run():
+        # 1) chat() feeds the per-turn extraction path end-to-end
+        store = Store(tmp_path / "memory")
+        capture_user_message(store, 1, message="Hi, im axo", conversation_id=1, model="deepseek-chat")
+        capture_assistant_reply(store, 1, content="Hey Axo!", conversation_id=1, model="deepseek-chat")
+        sched = MemoryScheduler(store, enabled=True)
+        sched.on_chat_finished(1, provider=provider, model_config=model)
+        await _asyncio.gather(*list(sched._extract_tasks))
+        atoms = store.read_scores(1)["atoms"]
+        assert len(atoms) == 1 and "axo" in next(iter(atoms.values()))["text"]
+        assert store.count_inbox(1) == 0
+        # the extraction prompt carried the transcript
+        assert "Hi, im axo" in Handler.chat_prompt[-1]["content"]
+
+        # 2) chat() itself (title-style) returns a proper AIResponse
+        resp = await provider.chat([{"role": "user", "content": "title me"}], [], model)
+        assert isinstance(resp, AIResponse)
+        assert "User is named axo" in resp.content
+
+        # 3) generate_image() returns a proper result (was corrupted by the
+        #    tool-call code splice and raised AttributeError/returned a tuple)
+        img = await provider.generate_image("a cat", model, "512x512", 1)
+        assert isinstance(img, ImageGenerationResult)
+        assert img.images == ["data:image/png;base64,QUJD"]
+        assert img.revised_prompt == "revised"
+
+    _asyncio.run(run())
+    srv.shutdown()
