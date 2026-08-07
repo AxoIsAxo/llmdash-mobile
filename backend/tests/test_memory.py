@@ -672,3 +672,45 @@ def test_openai_chat_and_image_generation_via_real_provider(tmp_path, monkeypatc
 
     _asyncio.run(run())
     srv.shutdown()
+
+
+def test_chat_stream_emits_memory_saved_pill(monkeypatch):
+    """After a reply, the SSE stream carries a `memory_saved` event (the
+    data behind the tool-pill notification) when extraction saved something."""
+    import json as _json
+    from types import SimpleNamespace as _NS
+
+    EXTRACT = (
+        '{"atoms": [{"text": "User is named axo", "entity": "user", "kind": "name", '
+        '"salience": 0.9, "confidence": 0.95, "tags": ["name"], "source_turn": 1}]}'
+    )
+
+    class MemProvider:
+        def __init__(self):
+            self.turns = [[StreamChunk(content_delta="Hey Axo!"), StreamChunk(finish_reason="stop")]]
+
+        async def stream_chat(self, messages, tools, model_config):
+            for chunk in self.turns.pop(0):
+                yield chunk
+
+        async def chat(self, messages, tools, model_config):
+            return _NS(content=EXTRACT)
+
+    monkeypatch.setattr("app.main.get_provider", lambda provider_type: MemProvider())
+    with TestClient(app) as client:
+        headers = _owner_headers(client)
+        conv_id = _make_conv(client, headers)
+        resp = client.post(
+            "/api/chat/stream",
+            json={"conversation_id": conv_id, "message": "Hi, im axo"},
+            headers=headers,
+        )
+        assert resp.status_code == 200
+        events = [
+            _json.loads(line[len("data: "):])
+            for line in resp.text.splitlines()
+            if line.startswith("data: ") and line.strip() != "data: [DONE]"
+        ]
+        saved = [e for e in events if e.get("type") == "memory_saved"]
+        assert saved, [e.get("type") for e in events]
+        assert saved[0]["items"][0] == {"kind": "atom", "text": "User is named axo"}

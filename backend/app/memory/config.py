@@ -43,6 +43,9 @@ EXTRACT_MIN_TURNS = 10        # backstop threshold for the background loop only
 EXTRACT_IDLE_SECONDS = 300    # backstop: loop extracts after this idle
 EXTRACT_LOOP_SECONDS = 600    # background safety-net loop
 EXTRACT_MAX_TOKENS = 2048     # cap for the per-turn extraction call
+MEMORY_SAVED_WAIT_SECONDS = 20  # how long the chat stream waits for the
+                                # extraction task before showing a "memory
+                                # saved" pill (task keeps running past this)
 MAX_TURN_CHARS = 8000         # per-turn transcript cap (head + tail)
 MAX_BATCH_CHARS = 40000       # per-LLM-call transcript cap (split batches)
 

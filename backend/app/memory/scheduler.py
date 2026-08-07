@@ -179,7 +179,7 @@ class MemoryScheduler:
                 logger.warning("memory: shutdown flush for user %s incomplete — inbox left for next boot", user_id)
 
     # --- triggers ----------------------------------------------------------
-    def on_chat_finished(self, user_id: int, *, provider=None, model_config=None) -> None:
+    def on_chat_finished(self, user_id: int, *, provider=None, model_config=None) -> Optional[asyncio.Task]:
         """Called (fire-and-forget) from the chat finalize path.
 
         Distills the finished turn IMMEDIATELY — no turn-count threshold, no
@@ -187,12 +187,16 @@ class MemoryScheduler:
         Command-Code "taste" pattern). The extraction call is a cheap capped
         variant of the chat model; if nothing extractable was said, the
         extractor returns an empty result and nothing is stored.
+
+        Returns the spawned extraction task (or None when there is nothing to
+        extract), so the caller can await it and surface a "memory saved"
+        notification in the UI.
         """
         if not self.enabled or self._shutdown:
-            return
+            return None
         try:
             if self.store.count_inbox(user_id) == 0:
-                return
+                return None
             extractor = None
             if provider is not None and model_config is not None:
                 extractor = LLMExtractor(
@@ -203,8 +207,10 @@ class MemoryScheduler:
             task = asyncio.create_task(self._extract_user(user_id, extractor=extractor))
             self._extract_tasks.add(task)
             task.add_done_callback(self._extract_tasks.discard)
+            return task
         except Exception as exc:
             logger.warning("memory: extraction trigger failed: %s", exc)
+            return None
 
     async def _background_loop(self) -> None:
         while not self._shutdown:
@@ -248,42 +254,53 @@ class MemoryScheduler:
                 logger.warning("memory: consolidate user %s failed: %s", user_id, exc)
 
     # --- extraction --------------------------------------------------------
-    async def _extract_user(self, user_id: int, extractor: Optional[Extractor] = None) -> None:
+    async def _extract_user(self, user_id: int, extractor: Optional[Extractor] = None) -> Optional[dict]:
         """Extract every pending inbox turn for a user.
 
         Loops (bounded) so turns that arrived while an earlier extraction was
         running are still consumed in the same pass; anything left over is
         picked up by the background loop on the next restart anyway.
+        Returns a summary of what was saved (atoms/scenarios/persona), or
+        None when nothing ran or nothing was saved.
         """
         if user_id in self._running:
-            return
+            return None
         self._running.add(user_id)
+        saved: dict = {"atoms": [], "scenarios": [], "persona": [], "turns": 0}
         try:
             for _ in range(5):
                 files = self.store.list_inbox(user_id)
                 if not files:
-                    return
+                    break
                 turns = [t for t in (_read_turn_file(f) for f in files) if t is not None]
                 if not turns:
                     self.store.archive_inbox(user_id, files)
-                    return
+                    break
                 if extractor is None:
                     extractor = await self._make_extractor(user_id)
                 results: list[ExtractionResult] = []
                 for batch in chunk_turns(turns):
                     results.append(await extractor.extract(user_id, batch))
-                report = apply_extraction(self.store, user_id, results, turns)
-                self.store.append_log(user_id, "extract", report)
+                summary = apply_extraction(self.store, user_id, results, turns)
+                for key in ("atoms", "scenarios", "persona"):
+                    saved[key].extend(summary.get(key, []))
+                saved["turns"] += summary.get("turns", 0)
+                log_line = (
+                    f"extracted {len(saved['atoms'])} atoms, {len(saved['scenarios'])} scenarios, "
+                    f"{len(saved['persona'])} persona deltas from {saved['turns']} turns"
+                )
+                self.store.append_log(user_id, "extract", log_line)
                 self.store.archive_inbox(user_id, files)
-                logger.info("memory: user %s — %s", user_id, report)
+                logger.info("memory: user %s — %s", user_id, log_line)
                 if self.store.count_inbox(user_id) == 0:
-                    return
+                    break
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             logger.warning("memory: extraction for user %s failed: %s", user_id, exc)
         finally:
             self._running.discard(user_id)
+        return saved if (saved["atoms"] or saved["scenarios"] or saved["persona"]) else None
 
     async def _make_extractor(self, user_id: int) -> Extractor:
         try:
@@ -315,12 +332,14 @@ def _apply_extraction_locked(
     user_id: int,
     results: list[ExtractionResult],
     turns: list[Turn],
-) -> str:
+) -> dict:
     scores = store.read_scores(user_id)
     now = datetime.now(timezone.utc)
     today = now.strftime("%Y-%m-%d")
 
     n_atoms = n_scenarios = n_deltas = 0
+    saved_atom_texts: list[str] = []
+    saved_scenario_titles: list[str] = []
 
     # --- atoms: dedupe by normalized text, append new bullets to pages ------
     existing = {normalize_atom_text(a.get("text", "")): (aid, a) for aid, a in scores.get("atoms", {}).items()}
@@ -371,6 +390,7 @@ def _apply_extraction_locked(
             existing[norm] = (aid, entry)
             by_entity.setdefault(entity, []).append((aid, entry))
             n_atoms += 1
+            saved_atom_texts.append(entry["text"])
 
     # append new bullets to entity pages (existing pages keep their bullets)
     for entity, entries in by_entity.items():
@@ -417,17 +437,25 @@ def _apply_extraction_locked(
             if norm:
                 existing_sc[norm] = sid
             n_scenarios += 1
+            saved_scenario_titles.append(sc.get("title", ""))
 
     # --- persona deltas: queue only (consolidation applies them) -------------
+    saved_persona: list[str] = []
     for result in results:
         for pd in result.persona_deltas:
             scores.setdefault("persona_deltas", []).append(
                 {"text": pd.get("text", ""), "kind": pd.get("kind", "preference"), "salience": float(pd.get("salience", 0.5)), "ts": now.isoformat()}
             )
             n_deltas += 1
+            saved_persona.append(pd.get("text", ""))
 
     store.write_scores(user_id, scores)
-    return f"extracted {n_atoms} atoms, {n_scenarios} scenarios, {n_deltas} persona deltas from {len(turns)} turns"
+    return {
+        "atoms": saved_atom_texts,
+        "scenarios": saved_scenario_titles,
+        "persona": saved_persona,
+        "turns": len(turns),
+    }
 
 
 def _new_entity_page(entity: str, today: str) -> str:

@@ -61,6 +61,7 @@ export interface Message {
   reasoning_content?: string | null;
   status?: string;
   created_at: string;
+  memory_saved?: MemorySavedItem[] | null;
 }
 
 export interface GenerateStatus {
@@ -78,8 +79,13 @@ export interface ToolCall {
   arguments: Record<string, unknown>;
 }
 
+export interface MemorySavedItem {
+  kind: string;
+  text: string;
+}
+
 export interface StreamEvent {
-  type: 'content' | 'content_delta' | 'reasoning_delta' | 'tool_calls' | 'tool_start' | 'tool_result' | 'error' | 'image_result';
+  type: 'content' | 'content_delta' | 'reasoning_delta' | 'tool_calls' | 'tool_start' | 'tool_result' | 'error' | 'image_result' | 'memory_saved';
   content?: string;
   reasoning_content_delta?: string;
   reasoning_content?: string;
@@ -92,6 +98,7 @@ export interface StreamEvent {
   revised_prompt?: string;
   prompt?: string;
   size?: string;
+  items?: MemorySavedItem[];
 }
 
 export interface ConfigStatus {

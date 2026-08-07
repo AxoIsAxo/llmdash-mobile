@@ -50,6 +50,7 @@ from .routers.subscriptions import router as subscriptions_router
 from .routers.theme import router as theme_router
 from .routers.memory import router as memory_router
 from .memory.capture import assistant_turn_summary, capture_assistant_reply, capture_user_message
+from .memory import config as mem_cfg
 from .memory.commands import maybe_run_command as memory_maybe_run_command
 from .memory.inject import build_memory_block as memory_build_memory_block
 from .memory.scheduler import MemoryScheduler
@@ -1875,13 +1876,35 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                     except Exception as exc:
                         logger.warning(f"memory: assistant capture failed: {exc}")
                     try:
-                        memory_worker.on_chat_finished(
+                        _extract_task = memory_worker.on_chat_finished(
                             current_user["user_id"],
                             provider=provider,
                             model_config=model,
                         )
-                    except Exception:
-                        pass
+                        # Wait (bounded, non-cancelling) for extraction so the
+                        # client can see a "memory saved" pill for this turn.
+                        if _extract_task is not None:
+                            _done, _ = await asyncio.wait(
+                                {_extract_task},
+                                timeout=mem_cfg.MEMORY_SAVED_WAIT_SECONDS,
+                            )
+                            if _done:
+                                _saved = _extract_task.result()
+                                if _saved:
+                                    _items = [
+                                        {"kind": "atom", "text": t}
+                                        for t in _saved.get("atoms", [])
+                                    ] + [
+                                        {"kind": "scenario", "text": t}
+                                        for t in _saved.get("scenarios", [])
+                                    ] + [
+                                        {"kind": "persona", "text": t}
+                                        for t in _saved.get("persona", [])
+                                    ]
+                                    if _items:
+                                        await push_event("memory_saved", items=_items[:6])
+                    except Exception as exc:
+                        logger.warning(f"memory: memory_saved notification failed: {exc}")
                 cleanup_generation(req.conversation_id)
 
     my_queue_final = my_queue

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { api } from './api'
-import type { ModelConfig, Conversation, Message, StreamEvent, ToolCall, User, AuthStatus, GenerateStatus, AttachmentRecord } from './types'
+import type { ModelConfig, Conversation, Message, StreamEvent, ToolCall, User, AuthStatus, GenerateStatus, AttachmentRecord, MemorySavedItem } from './types'
 
 const LAST_ACTIVE_CONV_KEY = 'llmdash_active_conv'
 
@@ -462,6 +462,19 @@ function App() {
             tool_calls_json: null, tool_call_id: event.id || null,
             tool_name: event.name || null, created_at: new Date().toISOString()
           }])
+        } else if (event.type === 'memory_saved') {
+          const memItems = (event as any).items || []
+          if (memItems.length > 0) {
+            setMessages(prev => {
+              const rev = [...prev].reverse().findIndex(m => m.role === 'assistant')
+              if (rev < 0) return prev
+              const idx = prev.length - 1 - rev
+              const updated = [...prev]
+              updated[idx] = { ...updated[idx], memory_saved: memItems }
+              return updated
+            })
+          }
+
         } else if (event.type === 'error') {
           setMessages(prev => [...prev, {
             id: Date.now(), role: 'assistant' as const,
@@ -690,6 +703,19 @@ function App() {
               tool_calls_json: null, tool_call_id: event.id || null,
               tool_name: event.name || null, created_at: new Date().toISOString()
             }])
+          } else if (event.type === 'memory_saved') {
+            const memItems = (event as any).items || []
+            if (memItems.length > 0) {
+              setMessages(prev => {
+                const rev = [...prev].reverse().findIndex(m => m.role === 'assistant')
+                if (rev < 0) return prev
+                const idx = prev.length - 1 - rev
+                const updated = [...prev]
+                updated[idx] = { ...updated[idx], memory_saved: memItems }
+                return updated
+              })
+            }
+
           } else if (event.type === 'error') {
             setMessages(prev => [...prev, {
               id: Date.now(), role: 'assistant' as const,
@@ -986,6 +1012,19 @@ function App() {
               tool_calls_json: null, tool_call_id: event.id || null,
               tool_name: event.name || null, created_at: new Date().toISOString()
             }])
+          } else if (event.type === 'memory_saved') {
+            const memItems = (event as any).items || []
+            if (memItems.length > 0) {
+              setMessages(prev => {
+                const rev = [...prev].reverse().findIndex(m => m.role === 'assistant')
+                if (rev < 0) return prev
+                const idx = prev.length - 1 - rev
+                const updated = [...prev]
+                updated[idx] = { ...updated[idx], memory_saved: memItems }
+                return updated
+              })
+            }
+
           } else if (event.type === 'error') {
             setMessages(prev => [...prev, {
               id: Date.now(), role: 'assistant' as const,
@@ -1458,6 +1497,21 @@ function App() {
 
 // --- Tool Result Content ---
 
+function MemoryPills({ items }: { items: MemorySavedItem[] }) {
+  if (!items || items.length === 0) return null
+  return (
+    <div className="flex flex-wrap gap-2 mt-2">
+      {items.map((mem, i) => (
+        <div key={i} className="llm-tool-pill flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium bg-theme-bg-elevated border-theme-border-light">
+          <Brain className="w-3.5 h-3.5 text-theme-accent-text shrink-0" />
+          <span className="font-mono text-theme-accent-text">remember</span>
+          <span className="text-theme-muted truncate max-w-[320px]">{mem.text}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function ToolResultContent({ content, toolCall, setSidePanel }: {
   content: string
   toolCall: ToolCall
@@ -1740,6 +1794,7 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
                 <MarkdownRenderer content={message.content} />
               </div>
             )}
+            <MemoryPills items={message.memory_saved || []} />
           </div>
         </div>
       </div>
@@ -1950,6 +2005,9 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
         <div className={`llm-bubble ${isUser ? 'llm-bubble-user' : 'llm-bubble-assistant'} max-w-[var(--theme-bubble-max-width)] ${isUser ? 'bg-theme-msg-user' : 'bg-theme-bg-elevated'} rounded-xl px-4 py-2.5`}>
           <MarkdownRenderer content={content} />
         </div>
+        {isAssistant && message.memory_saved && message.memory_saved.length > 0 && (
+          <MemoryPills items={message.memory_saved} />
+        )}
         {isUser && (
           <div className="llm-avatar w-[var(--theme-avatar-size)] h-[var(--theme-avatar-size)] rounded-full bg-theme-icon-user flex items-center justify-center ml-2 mt-0.5 shrink-0">
             <span className="text-xs font-bold">U</span>
