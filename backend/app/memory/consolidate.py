@@ -242,6 +242,39 @@ def _consolidate_locked(store: Store, user_id: int, report: dict[str, Any]) -> N
 
 # --- helpers ---------------------------------------------------------------
 
+def delete_atom(store: Store, user_id: int, atom_id: str) -> bool:
+    """Permanently delete one atom (scores + its bullet on the entity page).
+
+    User-facing deletion from the memory panel — the bullet is removed from
+    the canonical page and the atom dropped from the scores cache; links
+    pointing at it are cleaned. Returns False when the atom does not exist.
+    """
+    with store.scores_lock(user_id):
+        scores = store.read_scores(user_id)
+        atom = scores.get("atoms", {}).pop(atom_id, None)
+        if atom is None:
+            return False
+        for other in scores.get("atoms", {}).values():
+            links = other.get("links", []) or []
+            if atom_id in links:
+                other["links"] = [l for l in links if l != atom_id]
+        store.write_scores(user_id, scores)
+        rel = atom.get("page")
+        if rel and ".." not in rel and str(rel).startswith("pages/"):
+            page = store.read_page(user_id, rel)
+            if page:
+                marker = f"- `{atom_id}`"
+                lines = page.splitlines()
+                kept = [
+                    ln for ln in lines
+                    if not (ln.strip() == marker or ln.strip().startswith(marker + " "))
+                ]
+                if len(kept) != len(lines):
+                    store.write_page(user_id, rel, "\n".join(kept) + "\n")
+        store.append_log(user_id, "delete", f"atom {atom_id}: {(atom.get('text') or '')[:80]}")
+        return True
+
+
 def _merge_atoms(target: dict[str, Any], other: dict[str, Any]) -> None:
     target["source_ids"] = sorted(set(target.get("source_ids", []) or []) | set(other.get("source_ids", []) or []))
     target["confidence"] = max(float(target.get("confidence", 0.5)), float(other.get("confidence", 0.5)))

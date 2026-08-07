@@ -39,9 +39,10 @@ CONFIDENCE_PROMOTE = 0.7      # atoms at/above this may be promoted
 PROMOTE_MIN_TURNS = 2         # ...if stated in >= this many distinct turns
 
 # --- Extraction ------------------------------------------------------------
-EXTRACT_MIN_TURNS = 10        # trigger extraction at >= this many new turns
-EXTRACT_IDLE_SECONDS = 300    # ...or after this idle with >= 1 new turn
+EXTRACT_MIN_TURNS = 10        # backstop threshold for the background loop only
+EXTRACT_IDLE_SECONDS = 300    # backstop: loop extracts after this idle
 EXTRACT_LOOP_SECONDS = 600    # background safety-net loop
+EXTRACT_MAX_TOKENS = 2048     # cap for the per-turn extraction call
 MAX_TURN_CHARS = 8000         # per-turn transcript cap (head + tail)
 MAX_BATCH_CHARS = 40000       # per-LLM-call transcript cap (split batches)
 

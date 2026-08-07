@@ -405,4 +405,14 @@ export const api = {
       return response.json() as Promise<import('./types').UploadResponse>;
     },
   },
+
+  memory: {
+    status: () => request<import('./types').MemoryStatus>('/memory/status'),
+    deleteAtom: (atomId: string) =>
+      request<{ status: string; atom_id: string }>(`/memory/atoms/${encodeURIComponent(atomId)}`, { method: 'DELETE' }),
+    extract: () => request<{ processed: number; pending: number }>('/memory/extract', { method: 'POST' }),
+    consolidate: () => request<Record<string, unknown>>('/memory/consolidate', { method: 'POST' }),
+    lint: () => request<{ findings: import('./types').LintFinding[] }>('/memory/lint', { method: 'POST' }),
+    reset: () => request<{ status: string; user: number }>('/memory', { method: 'DELETE' }),
+  },
 };

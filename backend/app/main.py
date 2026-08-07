@@ -48,6 +48,7 @@ from .audio_convert import prepare_audio_for_provider
 from .routers.auth import router as auth_router, get_current_user, require_role, load_provider_configs
 from .routers.subscriptions import router as subscriptions_router
 from .routers.theme import router as theme_router
+from .routers.memory import router as memory_router
 from .memory.capture import assistant_turn_summary, capture_assistant_reply, capture_user_message
 from .memory.commands import maybe_run_command as memory_maybe_run_command
 from .memory.inject import build_memory_block as memory_build_memory_block
@@ -156,6 +157,7 @@ async def coi_middleware(request: Request, call_next):
 app.include_router(auth_router)
 app.include_router(subscriptions_router)
 app.include_router(theme_router)
+app.include_router(memory_router)
 from .skills.router import router as skills_router
 app.include_router(skills_router)
 
@@ -1873,7 +1875,11 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                     except Exception as exc:
                         logger.warning(f"memory: assistant capture failed: {exc}")
                     try:
-                        memory_worker.on_chat_finished(current_user["user_id"])
+                        memory_worker.on_chat_finished(
+                            current_user["user_id"],
+                            provider=provider,
+                            model_config=model,
+                        )
                     except Exception:
                         pass
                 cleanup_generation(req.conversation_id)

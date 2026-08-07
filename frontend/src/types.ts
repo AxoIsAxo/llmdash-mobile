@@ -255,3 +255,42 @@ export interface ThemeHistoryEntry {
   spec: ThemeSpec | null;
   css: string | null;
 }
+
+export interface MemoryAtom {
+  id: string;
+  text: string;
+  entity: string;
+  kind: string;
+  tags: string[];
+  confidence?: number;
+  confirmed: boolean;
+  salience?: number;
+  created?: string;
+  superseded?: string | null;
+}
+
+export interface MemoryScenario {
+  id: string;
+  title: string;
+  summary: string;
+  tags: string[];
+}
+
+export interface MemoryStatus {
+  atoms_count: number;
+  confirmed_count: number;
+  scenarios_count: number;
+  pages_count: number;
+  inbox_pending: number;
+  persona: string[];
+  active: string[];
+  atoms: MemoryAtom[];
+  scenarios: MemoryScenario[];
+  log: string[];
+}
+
+export interface LintFinding {
+  severity: string;
+  check: string;
+  detail: string;
+}

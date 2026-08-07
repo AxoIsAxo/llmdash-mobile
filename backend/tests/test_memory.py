@@ -174,6 +174,9 @@ def test_capture_failure_is_isolated(tmp_path, monkeypatch):
 def test_chat_endpoint_captures_full_transcript_automatically(monkeypatch):
     """DoD: a session with zero user/model memory actions still lands the
     full transcript in inbox/ — capture is plumbing, not a model decision."""
+    # Capture tests prove the WRITE; per-turn extraction is exercised by its
+    # own test, so keep the async extraction from consuming inbox here.
+    monkeypatch.setattr("app.memory.scheduler.MemoryScheduler.on_chat_finished", lambda self, *a, **k: None)
     fake = ScriptedProvider([[StreamChunk(content_delta="The answer is 42."), StreamChunk(finish_reason="stop")]])
     monkeypatch.setattr("app.main.get_provider", lambda provider_type: fake)
 
@@ -204,6 +207,7 @@ def test_chat_endpoint_captures_even_when_model_errors(monkeypatch):
             return SimpleNamespace(content="title")
 
     monkeypatch.setattr("app.main.get_provider", lambda provider_type: FailingProvider())
+    monkeypatch.setattr("app.memory.scheduler.MemoryScheduler.on_chat_finished", lambda self, *a, **k: None)
     with TestClient(app) as client:
         headers = _owner_headers(client)
         conv_id = _make_conv(client, headers)
@@ -275,6 +279,55 @@ async def test_llm_extractor_falls_back_to_rules_on_garbage():
     extractor = LLMExtractor(GarbageProvider(), SimpleNamespace(model_name="m"), "m")
     result = await extractor.extract(1, [Turn(source_id="a1", ts="t", role="user", content="My name is Bob")])
     assert any("bob" in a["text"].lower() for a in result.atoms)
+
+
+async def test_per_turn_extraction_uses_chat_model_immediately(tmp_path):
+    """Command-Code-style path: a single 'Hi, im axo' turn is distilled
+    immediately after the response by the SAME model that just answered —
+    no turn-count threshold, no debounce, no pattern list."""
+    import asyncio as _asyncio
+
+    store = Store(tmp_path / "memory")
+    capture_user_message(store, 1, message="Hi, im axo", conversation_id=1, model="deepseek-chat")
+    capture_assistant_reply(store, 1, content="Nice to meet you, axo!", conversation_id=1, model="deepseek-chat")
+
+    payload = (
+        '{"atoms": [{"text": "User is named axo", "entity": "user", "kind": "name", '
+        '"salience": 0.9, "confidence": 0.95, "tags": ["name"], "source_turn": 1}]}'
+    )
+
+    class ChatModelProvider:
+        def __init__(self):
+            self.calls = []
+
+        async def chat(self, messages, tools, model_config):
+            self.calls.append((messages, model_config))
+            return SimpleNamespace(content=payload)
+
+    fake = ChatModelProvider()
+    model_cfg = SimpleNamespace(
+        model_name="deepseek-chat", max_tokens=8192, temperature=0.7, thinking_enabled=True,
+        api_key_env="DEEPSEEK_API_KEY", base_url="http://x", provider="openai_compatible",
+    )
+    scheduler = MemoryScheduler(store, enabled=True)
+    scheduler.on_chat_finished(1, provider=fake, model_config=model_cfg)
+    await _asyncio.gather(*list(scheduler._extract_tasks))
+
+    scores = store.read_scores(1)
+    atoms = scores["atoms"]
+    assert len(atoms) == 1
+    atom = next(iter(atoms.values()))
+    assert "axo" in atom["text"] and atom["kind"] == "name" and atom["confirmed"] is True
+    assert store.count_inbox(1) == 0  # consumed immediately
+    assert "extract" in store.read_log(1)
+
+    # the extraction call used the chat's own model, capped for speed
+    used = fake.calls[0][1]
+    assert used.model_name == "deepseek-chat"
+    assert used.max_tokens == mem_cfg.EXTRACT_MAX_TOKENS
+    assert used.thinking_enabled is False
+    # and the extraction prompt carried the actual transcript
+    assert "Hi, im axo" in fake.calls[0][0][-1]["content"]
 
 
 async def test_extraction_produces_atoms_and_queues_persona(monkeypatch, tmp_path):
@@ -462,7 +515,6 @@ def test_chat_command_anchoring():
 
 
 async def test_cli_status_lint_and_reset(tmp_path):
-    # unit: reset_user wipes a store
     store = Store(tmp_path / "memory")
     store.ensure_user(5)
     assert store.reset_user(5) is True
@@ -472,3 +524,69 @@ async def test_cli_status_lint_and_reset(tmp_path):
     assert await cli_run(["status", "--user", "1"]) == 0
     assert await cli_run(["lint", "--user", "1"]) == 0
     assert await cli_run(["reset", "--user", "99999", "--yes"]) == 0  # no store: harmless
+
+
+def test_memory_api_status_and_actions(monkeypatch):
+    """The Memory panel endpoints: status, delete atom, extract, consolidate,
+    lint, reset — all per-user, any authenticated user."""
+    monkeypatch.setattr("app.memory.scheduler.MemoryScheduler.on_chat_finished", lambda self, *a, **k: None)
+
+    store = _store()
+    store.reset_user(1)  # deterministic start for user 1 (owner)
+    _seed_atom(store, 1, text="User is named axo", entity="user")
+    capture_user_message(store, 1, message="pending message", conversation_id=9, model="m")
+
+    with TestClient(app) as client:
+        headers = _owner_headers(client)
+
+        # status
+        status = client.get("/api/memory/status", headers=headers)
+        assert status.status_code == 200
+        body = status.json()
+        assert body["atoms_count"] == 1 and body["confirmed_count"] == 1
+        assert body["inbox_pending"] == 1
+        assert body["atoms"][0]["text"] == "User is named axo"
+        assert body["atoms"][0]["confirmed"] is True
+        assert isinstance(body["log"], list)
+
+        # lint
+        lint_res = client.post("/api/memory/lint", headers=headers)
+        assert lint_res.status_code == 200
+        assert isinstance(lint_res.json()["findings"], list)
+
+        # extract the pending turn (rule fallback: "pending message" -> no atoms)
+        ext = client.post("/api/memory/extract", headers=headers)
+        assert ext.status_code == 200
+        assert ext.json()["processed"] == 1 and ext.json()["pending"] == 0
+
+        # delete the atom
+        atom_id = body["atoms"][0]["id"]
+        dele = client.delete(f"/api/memory/atoms/{atom_id}", headers=headers)
+        assert dele.status_code == 200
+        assert client.get("/api/memory/status", headers=headers).json()["atoms_count"] == 0
+        assert client.delete(f"/api/memory/atoms/{atom_id}", headers=headers).status_code == 404
+
+        # consolidate
+        cons = client.post("/api/memory/consolidate", headers=headers)
+        assert cons.status_code == 200
+        assert "atoms_before" in cons.json()
+
+        # reset wipes everything
+        reset = client.delete("/api/memory", headers=headers)
+        assert reset.status_code == 200 and reset.json()["status"] == "reset"
+        empty = client.get("/api/memory/status", headers=headers).json()
+        assert empty["atoms_count"] == 0 and empty["inbox_pending"] == 0 and empty["log"] == []
+
+
+def test_memory_api_requires_auth():
+    assert client_get_unauth("/api/memory/status") == 401
+    assert client_get_unauth("/api/memory", method="DELETE") == 401
+
+
+def client_get_unauth(path, method="GET"):
+    import httpx
+    from fastapi.testclient import TestClient as TC
+
+    with TC(app) as client:
+        resp = client.request(method, path)
+        return resp.status_code

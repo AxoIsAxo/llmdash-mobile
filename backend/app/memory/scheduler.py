@@ -21,6 +21,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any, Optional
 
 import yaml
@@ -117,6 +118,24 @@ async def resolve_extract_model(user_id: int):
         return provider, mc
 
 
+def _cap_extraction_model(model_config):
+    """A cheap variant of the chat's model for extraction calls.
+
+    Same provider/model as the conversation (per the per-turn extraction
+    design), but: thinking off, a small max_tokens cap, and a low temperature
+    so a JSON extraction response is fast and deterministic. Preserves every
+    other attribute the provider reads (api_key_env, base_url, ...).
+    """
+    attrs = dict(getattr(model_config, "__dict__", {}) or {})
+    attrs.update(
+        max_tokens=mem_cfg.EXTRACT_MAX_TOKENS,
+        thinking_enabled=False,
+        thinking_budget_tokens=None,
+        temperature=0.2,
+    )
+    return SimpleNamespace(**attrs)
+
+
 class MemoryScheduler:
     """Per-process orchestrator; single instance started in the app lifespan."""
 
@@ -124,6 +143,7 @@ class MemoryScheduler:
         self.store = store
         self.enabled = enabled
         self._running: set[int] = set()
+        self._extract_tasks: set[asyncio.Task] = set()
         self._last_consolidate: dict[int, float] = {}
         self._loop_task: Optional[asyncio.Task] = None
         self._shutdown = False
@@ -136,6 +156,8 @@ class MemoryScheduler:
 
     async def stop(self) -> None:
         self._shutdown = True
+        for task in list(self._extract_tasks):
+            task.cancel()
         if self._loop_task is not None:
             self._loop_task.cancel()
             try:
@@ -157,13 +179,30 @@ class MemoryScheduler:
                 logger.warning("memory: shutdown flush for user %s incomplete — inbox left for next boot", user_id)
 
     # --- triggers ----------------------------------------------------------
-    def on_chat_finished(self, user_id: int) -> None:
-        """Called (fire-and-forget) from the chat finalize path."""
+    def on_chat_finished(self, user_id: int, *, provider=None, model_config=None) -> None:
+        """Called (fire-and-forget) from the chat finalize path.
+
+        Distills the finished turn IMMEDIATELY — no turn-count threshold, no
+        debounce — using the SAME provider+model that just answered (the
+        Command-Code "taste" pattern). The extraction call is a cheap capped
+        variant of the chat model; if nothing extractable was said, the
+        extractor returns an empty result and nothing is stored.
+        """
         if not self.enabled or self._shutdown:
             return
         try:
-            if self.store.count_inbox(user_id) >= mem_cfg.EXTRACT_MIN_TURNS:
-                asyncio.create_task(self._extract_user(user_id))
+            if self.store.count_inbox(user_id) == 0:
+                return
+            extractor = None
+            if provider is not None and model_config is not None:
+                extractor = LLMExtractor(
+                    provider,
+                    _cap_extraction_model(model_config),
+                    getattr(model_config, "model_name", "") or "",
+                )
+            task = asyncio.create_task(self._extract_user(user_id, extractor=extractor))
+            self._extract_tasks.add(task)
+            task.add_done_callback(self._extract_tasks.discard)
         except Exception as exc:
             logger.warning("memory: extraction trigger failed: %s", exc)
 
@@ -209,26 +248,36 @@ class MemoryScheduler:
                 logger.warning("memory: consolidate user %s failed: %s", user_id, exc)
 
     # --- extraction --------------------------------------------------------
-    async def _extract_user(self, user_id: int) -> None:
+    async def _extract_user(self, user_id: int, extractor: Optional[Extractor] = None) -> None:
+        """Extract every pending inbox turn for a user.
+
+        Loops (bounded) so turns that arrived while an earlier extraction was
+        running are still consumed in the same pass; anything left over is
+        picked up by the background loop on the next restart anyway.
+        """
         if user_id in self._running:
             return
         self._running.add(user_id)
         try:
-            files = self.store.list_inbox(user_id)
-            if not files:
-                return
-            turns = [t for t in (_read_turn_file(f) for f in files) if t is not None]
-            if not turns:
+            for _ in range(5):
+                files = self.store.list_inbox(user_id)
+                if not files:
+                    return
+                turns = [t for t in (_read_turn_file(f) for f in files) if t is not None]
+                if not turns:
+                    self.store.archive_inbox(user_id, files)
+                    return
+                if extractor is None:
+                    extractor = await self._make_extractor(user_id)
+                results: list[ExtractionResult] = []
+                for batch in chunk_turns(turns):
+                    results.append(await extractor.extract(user_id, batch))
+                report = apply_extraction(self.store, user_id, results, turns)
+                self.store.append_log(user_id, "extract", report)
                 self.store.archive_inbox(user_id, files)
-                return
-            extractor = await self._make_extractor(user_id)
-            results: list[ExtractionResult] = []
-            for batch in chunk_turns(turns):
-                results.append(await extractor.extract(user_id, batch))
-            report = apply_extraction(self.store, user_id, results, turns)
-            self.store.append_log(user_id, "extract", report)
-            self.store.archive_inbox(user_id, files)
-            logger.info("memory: user %s — %s", user_id, report)
+                logger.info("memory: user %s — %s", user_id, report)
+                if self.store.count_inbox(user_id) == 0:
+                    return
         except asyncio.CancelledError:
             raise
         except Exception as exc:
