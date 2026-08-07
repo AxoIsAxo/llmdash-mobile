@@ -1043,6 +1043,11 @@ ANSWER_NUDGE = (
     "calling more tools and give the user the final answer NOW, based on the "
     "results you already gathered.]"
 )
+FINAL_ANSWER_NUDGE = (
+    "[Your tool rounds are done. Stop using tools and write your final answer "
+    "to the user now. If part of the task failed, explain clearly what failed "
+    "and what you did manage to accomplish.]"
+)
 NO_ANSWER_NOTE = (
     "*(The model did not produce a final answer — it kept planning without "
     "acting. Try asking again or use a different model.)*"
@@ -1588,6 +1593,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                 tool_round = 0
                 no_action_turns = 0
                 bailed_no_action = False
+                has_final_answer = False  # a real (text) answer was produced
                 finish_reason = None
                 last_tool_signature = None
                 consecutive_search_failures = 0
@@ -1638,6 +1644,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                             # A real answer — the ONLY text that reaches the
                             # client. Flush the buffered turn now.
                             if turn_text:
+                                has_final_answer = True
                                 accumulated_content += turn_text
                                 await push_event("content_delta", content=turn_text)
                                 await save_draft_progress(force=True)
@@ -1752,8 +1759,29 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                     final_tool_calls = []
                     last_save_len = 0
 
+                # --- Final answer round: never end on tool pills alone. -----
+                # If the model burned its tool rounds (cap reached) or was
+                # aborted without ever writing a real answer, force one final
+                # text-only turn so the user gets a finished answer instead of
+                # silence. This is what previously looked like "the AI just
+                # stopped".
+                if not has_final_answer and all_tool_calls:
+                    messages.append({"role": "user", "content": FINAL_ANSWER_NUDGE})
+                    turn_content.clear()
+                    try:
+                        final_iter = provider.stream_chat(messages, [], effective_model)
+                        await drain_turn(final_iter)
+                    except Exception as exc:
+                        logger.warning(f"conv {req.conversation_id}: final answer round failed: {exc}")
+                    final_text = "".join(turn_content)
+                    if final_text:
+                        has_final_answer = True
+                        accumulated_content += final_text
+                        await push_event("content_delta", content=final_text)
+                        await save_draft_progress(force=True)
+
                 if streaming_msg_id is not None:
-                    draft.content = accumulated_content or draft.content
+                    draft.content = accumulated_content
                     draft.reasoning_content = accumulated_reasoning or None
                     draft.status = "done"
                     draft.created_at = datetime.now(timezone.utc)
@@ -1781,13 +1809,15 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                     await sess.commit()
                     await push_event("content", done=True, content=NO_ANSWER_NOTE, reasoning_content=accumulated_reasoning or None)
                 elif all_tool_calls:
-                    # The model acted (tool rounds ran) but produced no closing
-                    # text — the executed tool pills are the answer.
-                    await push_event("content", done=True, content=draft.content or "", reasoning_content=accumulated_reasoning or None)
+                    # The model acted (tool rounds ran) but the final answer
+                    # round produced no closing text — the executed tool pills
+                    # are the answer. Never fall back to provisional draft
+                    # content (that may hold discarded narration).
+                    await push_event("content", done=True, content=accumulated_content, reasoning_content=accumulated_reasoning or None)
                 elif not final_tool_calls:
                     await push_event("error", error="Received an empty response from the model. Please verify your API key and model configuration.")
                 else:
-                    await push_event("content", done=True, content=draft.content or accumulated_content or "", reasoning_content=accumulated_reasoning or None)
+                    await push_event("content", done=True, content=accumulated_content, reasoning_content=accumulated_reasoning or None)
 
                 if not db_messages and accumulated_content:
                     try:

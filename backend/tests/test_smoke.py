@@ -19,6 +19,7 @@ from app.ai import StreamChunk  # noqa: E402
 from app.main import (  # noqa: E402
     NO_ACTION_NUDGE,
     NO_ANSWER_NOTE,
+    FINAL_ANSWER_NUDGE,
     _bump_model_max_tokens,
     _classify_no_action_turn,
     _looks_like_deliberation,
@@ -279,7 +280,10 @@ def test_sandbox_pool_eviction_and_names(monkeypatch):
 
     monkeypatch.setattr(sb, "_docker", fake_docker)
     sb._sandboxes.clear()
-    sb._sandboxes[1] = {"container": "c1", "last_used": 0.0}          # stale
+    import time as _t
+    # `last_used: 0.0` would only be stale once the process has run > TTL;
+    # make it stale relative to the current monotonic clock instead.
+    sb._sandboxes[1] = {"container": "c1", "last_used": _t.monotonic() - sb.SANDBOX_IDLE_TTL - 60}  # stale
     sb._sandboxes[2] = {"container": "c2", "last_used": 999999999.0}  # fresh
     asyncio.run(sb._sweep())
     assert ("rm", "-f", "c1") in calls
@@ -341,6 +345,7 @@ class ScriptedProvider:
         self.turns = list(turns)
         self.calls: list[list[dict]] = []
         self.model_configs = []
+        self.tools_list: list[list] = []
 
     def _next(self, messages, model_config):
         self.calls.append(list(messages))
@@ -349,6 +354,7 @@ class ScriptedProvider:
         return turn(messages) if callable(turn) else turn
 
     async def stream_chat(self, messages, tools, model_config):
+        self.tools_list.append(list(tools))
         for chunk in self._next(messages, model_config):
             yield chunk
 
@@ -662,3 +668,36 @@ def test_no_narration_in_stream(monkeypatch):
         assert "The final answer." in deltas
         last = _last_assistant(client, headers, conv_id)
         assert last["content"] == "The final answer."
+
+
+def test_agent_finishes_with_answer_after_tool_cap(monkeypatch):
+    """When the model burns every tool round without ever writing an answer,
+    the runtime forces one final text-only round so the user gets a finished
+    reply instead of tool pills and silence ('the AI just stopped')."""
+    turns = []
+    for i in range(5):
+        turns.append([
+            StreamChunk(tool_calls=[{"id": f"c{i}", "name": "no_such_tool", "arguments": {"q": str(i)}}], finish_reason="tool_calls"),
+        ])
+    turns.append([StreamChunk(content_delta="Here is the finished answer."), StreamChunk(finish_reason="stop")])
+    fake = ScriptedProvider(turns)
+    monkeypatch.setattr("app.main.get_provider", lambda provider_type: fake)
+
+    with TestClient(app) as client:
+        headers = _owner_headers(client)
+        conv_id, _ = _make_conv(client, headers, "Cap")
+
+        resp = client.post(
+            "/api/chat/stream",
+            json={"conversation_id": conv_id, "message": "do it"},
+            headers=headers,
+        )
+        assert resp.status_code == 200
+        last = _last_assistant(client, headers, conv_id)
+        assert last["content"] == "Here is the finished answer."
+        assert "Aborted" not in last["content"]
+        events = _sse_events(resp.text)
+        assert any(e["type"] == "tool_calls" for e in events)
+        # the forced final round was the last stream call, with tools disabled
+        assert fake.tools_list[-1] == []  # tools list empty on the final round
+        assert FINAL_ANSWER_NUDGE in fake.calls[-1][-1]["content"]
