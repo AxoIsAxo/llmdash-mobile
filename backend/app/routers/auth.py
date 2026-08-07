@@ -72,6 +72,7 @@ def _user_dict(user) -> dict:
         "id": user.id, "username": user.username, "role": user.role,
         "token_usage": user.token_usage or 0, "token_limit": user.token_limit,
         "image_usage": getattr(user, "image_usage", 0) or 0, "image_limit": getattr(user, "image_limit", None),
+        "extrovert_linked": bool(getattr(user, "oauth_sub", None)),
     }
 
 
@@ -95,6 +96,7 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
         "user_id": user.id, "username": user.username, "role": user.role,
         "token_usage": user.token_usage or 0, "token_limit": user.token_limit,
         "image_usage": getattr(user, "image_usage", 0) or 0, "image_limit": getattr(user, "image_limit", None),
+        "extrovert_linked": bool(getattr(user, "oauth_sub", None)),
         "token_usage_by_model": usage_by_model,
     }
 
@@ -118,22 +120,62 @@ async def auth_status(db: AsyncSession = Depends(get_db)):
     }
 
 
+async def _optional_user(request: Request, db: AsyncSession = Depends(get_db)):
+    """Like get_current_user but returns None instead of 401 (for /start?mode=link)."""
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return None
+    try:
+        payload = decode_token(auth[7:])
+    except Exception:
+        return None
+    return (await db.execute(select(User).where(User.id == payload.get("user_id")))).scalar_one_or_none()
+
+
+async def _extrovert_username(base: str, db) -> str:
+    """Namespaced username for Extrovert-auth accounts: '@' + preferred_username.
+    The '@' prefix keeps Extrovert usernames distinct from normal password
+    accounts, so 'userA' (normal) and 'userA' (Extrovert -> '@userA') can both
+    exist; collisions get a numeric suffix."""
+    base = "".join(ch for ch in (base or "").strip() if ch.isalnum() or ch in "._-")[:60] or "extrovert-user"
+    return await _unique_username(f"@{base}", db)
+
+
 @router.get("/extrovert/start")
-async def extrovert_start(request: Request):
-    """Begin Extrovert OIDC login — returns the authorize URL (PKCE S256)."""
+async def extrovert_start(request: Request, mode: str = "login", user: User | None = Depends(_optional_user)):
+    """Begin Extrovert OIDC login — returns the authorize URL (PKCE S256).
+
+    mode=login  : the callback logs in an existing linked account or creates
+                  a new @-namespaced account (no username matching).
+    mode=link   : requires an authenticated user; the callback links THEIR
+                  account to the Extrovert identity (renaming it to the
+                  Extrovert username) — the explicit account-conversion path.
+    """
     if not extrovert_auth._enabled():
         raise HTTPException(404, "Extrovert login is not configured")
+    if mode == "link" and user is None:
+        raise HTTPException(401, "Log in to link your Extrovert account")
     try:
         url, session = await extrovert_auth.build_authorize_url(_oauth_redirect_uri(request))
     except Exception as e:
         raise HTTPException(502, f"Could not reach Extrovert: {e}")
+    if mode == "link":
+        session["link_user_id"] = user.id
     _pending_oauth[session["state"]] = session
     return {"url": url}
 
 
 @router.get("/extrovert/callback")
 async def extrovert_callback(state: str, code: str, request: Request, db: AsyncSession = Depends(get_db)):
-    """OIDC callback — verifies the ID token, then logs in / links / signs up."""
+    """OIDC callback — verifies the ID token, then logs in / links / signs up.
+
+    Identity resolution is ONLY by oauth_sub (never by username):
+    1. an account already linked to this Extrovert identity  -> log in;
+    2. mode=link was used (authenticated user)               -> link THAT
+       account and rename it to the @-namespaced Extrovert username;
+    3. otherwise                                             -> create a new
+       @-namespaced account.
+    """
     session = _pending_oauth.pop(state, None)
     if session is None:
         return HTMLResponse(_oauth_html("Login expired. Please try again."))
@@ -147,23 +189,25 @@ async def extrovert_callback(state: str, code: str, request: Request, db: AsyncS
         return HTMLResponse(_oauth_html(f"Extrovert login failed: {e}"))
 
     sub = str(id_claims.get("sub") or info.get("sub") or "")
-    username = str(info.get("preferred_username") or id_claims.get("preferred_username") or info.get("name") or "extrovert-user")[:64]
+    username = str(info.get("preferred_username") or id_claims.get("preferred_username") or info.get("name") or "extrovert-user")
 
     user = (await db.execute(select(User).where(User.oauth_sub == sub))).scalar_one_or_none()
-    if user is None and app_config.settings.extrovert_auto_link:
-        # Convert an existing password account: same username, not claimed yet.
-        user = (await db.execute(
-            select(User).where(User.username == username, User.oauth_sub.is_(None))
-        )).scalar_one_or_none()
-        if user is not None:
+
+    if user is None and session.get("link_user_id"):
+        # Explicit conversion: link the authenticated account to this identity.
+        user = (await db.execute(select(User).where(User.id == session["link_user_id"]))).scalar_one_or_none()
+        if user is not None and not user.oauth_sub:
             user.oauth_sub = sub
+            user.username = await _extrovert_username(username, db)
             await db.commit()
+        else:
+            user = None  # account vanished or already linked to another identity
+
     if user is None:
         if not app_config.settings.extrovert_allow_signup:
-            return HTMLResponse(_oauth_html("No LLMDash account matches this Extrovert account, and new signups are disabled."))
-        username = await _unique_username(username, db)
+            return HTMLResponse(_oauth_html("No LLMDash account is linked to this Extrovert account, and new signups are disabled."))
         user = User(
-            username=username,
+            username=await _extrovert_username(username, db),
             password_hash=secrets.token_hex(32),  # OAuth-only account, no usable password
             role="user",
             oauth_sub=sub,

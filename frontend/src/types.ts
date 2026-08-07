@@ -8,6 +8,7 @@ export interface User {
   image_usage: number;
   token_usage_by_model?: Record<number, { token_usage: number; image_usage: number }>;
   created_at: string;
+  extrovert_linked?: boolean;
 }
 
 export interface AuthStatus {

@@ -240,7 +240,13 @@ The model's only memory footprint is a ~20-line `# Memory protocol` block (in `b
 
 ### Extrovert login (OIDC)
 
-Let users register / log in with their Extrovert account, and convert an existing password account by logging in with a matching Extrovert username. Register an OAuth app in Extrovert (`/settings/developers`) with:
+Users can register/log in with their Extrovert account, and an existing account can be **explicitly converted** — there is **no username matching**:
+
+- **First Extrovert login** (no linked account) creates a new account whose username is the Extrovert `preferred_username` prefixed with `@` (e.g. `@userA`) — so a normal `userA` and an Extrovert `@userA` can both exist.
+- **Conversion:** logged in? Open **sidebar → Account → Connect with Extrovert** (requires an authenticated user). The callback links *that* account to your Extrovert identity and renames it to `@<extrovert-username>`. From then on, Extrovert login resolves purely by the OIDC `sub` — no usernames involved.
+- **Logging in via Extrovert** always resolves by the stored `sub`; a never-linked Extrovert identity creates a new `@`-account (when signup is allowed).
+
+Register an OAuth app in Extrovert (`/settings/developers`) with:
 
 | Field | Value |
 |-------|-------|
@@ -255,10 +261,9 @@ Then set the env vars:
 | `EXTROVERT_CLIENT_SECRET` | Optional — Extrovert supports public clients (`none` auth); PKCE S256 secures the exchange either way. Recommended for a web app, but omit it to use the public-client flow |
 | `EXTROVERT_ISSUER` | `https://extrovert.redforged.eu` (default) |
 | `EXTROVERT_REDIRECT_URI` | Optional override for the auto-derived callback URL |
-| `EXTROVERT_AUTO_LINK` | `true` (default) — a matching existing username is linked (converted) on first login |
 | `EXTROVERT_ALLOW_SIGNUP` | `true` (default) — first-time Extrovert logins create a new account |
 
-A "Continue with Extrovert" button appears on the login page. Note: auto-linking matches by username — if your LLMDash instance is multi-user and untrusted, disable `EXTROVERT_AUTO_LINK` so only pre-linked accounts can log in.
+A "Continue with Extrovert" button appears on the login page.
 
 ### Manual maintenance (from `backend/`)
 

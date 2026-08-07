@@ -101,7 +101,6 @@ def _enable_extrovert(monkeypatch, issuer):
     monkeypatch.setattr(app_config.settings, "extrovert_client_id", "llmdash-client")
     monkeypatch.setattr(app_config.settings, "extrovert_client_secret", "super-secret")
     monkeypatch.setattr(app_config.settings, "extrovert_issuer", issuer)
-    monkeypatch.setattr(app_config.settings, "extrovert_auto_link", True)
     monkeypatch.setattr(app_config.settings, "extrovert_allow_signup", True)
     monkeypatch.setattr(app_config.settings, "extrovert_redirect_uri", "http://testserver/api/auth/extrovert/callback")
 
@@ -149,38 +148,80 @@ def test_extrovert_login_creates_new_account(monkeypatch):
         token = _run_oauth(client, issuer, sub="sub-new", username="newperson")
         me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
         assert me.status_code == 200
-        assert me.json()["username"] == "newperson"
+        assert me.json()["username"] == "@newperson"  # namespaced
         assert me.json()["role"] == "user"
     srv.shutdown()
 
 
-def test_extrovert_login_converts_existing_account(monkeypatch):
+def test_no_username_matching_and_creation_is_namespaced(monkeypatch):
+    """Extrovert usernames are @-namespaced and NEVER match normal accounts:
+    a normal 'axo' account stays untouched when an Extrovert 'axo' signs up —
+    both can exist ('axo' and '@axo')."""
     srv, issuer = _start_provider()
     _enable_extrovert(monkeypatch, issuer)
     monkeypatch.setattr(app_config.settings, "registration_enabled", True)
     with TestClient(app) as client:
         headers = _owner_headers(client)
-        # existing normal account "axo" with a password
-        reg = client.post(
-            "/api/auth/register",
-            json={"username": "axo", "password": "pw12345678"},
-            headers=headers,
-        )
+        reg = client.post("/api/auth/register", json={"username": "axo", "password": "pw12345678"}, headers=headers)
         assert reg.status_code == 200, reg.text
-        before = client.get("/api/auth/users", headers=headers).json()
-        axo_id = next(u["id"] for u in before if u["username"] == "axo")
 
-        # log in via Extrovert with the same username -> converted, same account
+        # Extrovert user with the SAME username signs up -> new @axo account
         token = _run_oauth(client, issuer, sub="sub-123", username="axo")
         me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
         assert me.status_code == 200
-        assert me.json()["user_id"] == axo_id  # same account, not a new one
-        assert me.json()["username"] == "axo"
+        assert me.json()["username"] == "@axo"  # namespaced, not the normal account
+        assert me.json()["extrovert_linked"] is True
 
-        # the same Extrovert identity logs straight back in
-        token2 = _run_oauth(client, issuer, sub="sub-123", username="axo")
-        me2 = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token2}"})
-        assert me2.json()["user_id"] == axo_id
+        users = client.get("/api/auth/users", headers=headers).json()
+        names = sorted(u["username"] for u in users)
+        assert "axo" in names and "@axo" in names  # both exist, distinct
+    srv.shutdown()
+
+
+def test_extrovert_login_links_existing_account(monkeypatch):
+    """The explicit conversion path: an authenticated user starts mode=link,
+    the callback links THAT account (oauth_sub set) and renames it to the
+    @-namespaced Extrovert username. No username matching involved."""
+    srv, issuer = _start_provider()
+    _enable_extrovert(monkeypatch, issuer)
+    monkeypatch.setattr(app_config.settings, "registration_enabled", True)
+    with TestClient(app) as client:
+        headers = _owner_headers(client)
+        reg = client.post("/api/auth/register", json={"username": "existing", "password": "pw12345678"}, headers=headers)
+        assert reg.status_code == 200, reg.text
+        user_headers = {"Authorization": f"Bearer {reg.json()['token']}"}
+        before = client.get("/api/auth/users", headers=headers).json()
+        existing_id = next(u["id"] for u in before if u["username"] == "existing")
+
+        # start in link mode AS the existing user (their own token)
+        start = client.get("/api/auth/extrovert/start?mode=link", headers=user_headers)
+        assert start.status_code == 200
+        url = start.json()["url"]
+        q = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+        state, nonce = q["state"][0], q["nonce"][0]
+        Handler.id_token = _id_token(issuer, nonce, sub="sub-link-99", username="newname")
+        Handler.userinfo = {"sub": "sub-link-99", "preferred_username": "newname"}
+        resp = client.get(f"/api/auth/extrovert/callback?state={state}&code=abc")
+        assert resp.status_code == 200
+        assert "Signed in via Extrovert" in resp.text
+
+        # the SAME account was linked and renamed
+        after = client.get("/api/auth/users", headers=headers).json()
+        linked = next(u for u in after if u["id"] == existing_id)
+        assert linked["username"] == "@newname"
+
+        # and Extrovert login now hits that account (by sub, not username)
+        token = _run_oauth(client, issuer, sub="sub-link-99", username="newname")
+        me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+        assert me.json()["user_id"] == existing_id
+    srv.shutdown()
+
+
+def test_extrovert_link_requires_auth(monkeypatch):
+    srv, issuer = _start_provider()
+    _enable_extrovert(monkeypatch, issuer)
+    with TestClient(app) as client:
+        assert client.get("/api/auth/extrovert/start?mode=link").status_code == 401
     srv.shutdown()
 
 
@@ -205,6 +246,6 @@ def test_extrovert_login_works_without_client_secret(monkeypatch):
         token = _run_oauth(client, issuer, sub="sub-pub", username="pubperson")
         me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
         assert me.status_code == 200
-        assert me.json()["username"] == "pubperson"
+        assert me.json()["username"] == "@pubperson"  # namespaced
     assert "client_secret" not in Handler.token_body, Handler.token_body
     srv.shutdown()
