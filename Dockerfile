@@ -1,8 +1,9 @@
 # Stage 1: Build frontend
 FROM node:22-alpine AS frontend-builder
 WORKDIR /app
-# Install deps FIRST (only invalidated when package files change), with a
-# persistent npm cache mount so rebuilds skip the network entirely.
+# Install deps FIRST (only invalidated when package files change), so a
+# frontend source edit rebuilds just the fast vite step — npm ci (the slow
+# network step) is cached until package.json / package-lock.json change.
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 # Then copy the source and build (vite is fast; npm ci is the slow part).
