@@ -106,6 +106,7 @@ export interface StreamEvent {
   prompt?: string;
   size?: string;
   items?: MemorySavedItem[];
+  thinking_json?: ThinkingEntry[] | null;
 }
 
 export interface ConfigStatus {

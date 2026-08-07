@@ -763,3 +763,8 @@ def test_thinking_timeline_is_chronological(monkeypatch):
         assert tl[0]["text"] == "I should search the web first."
         assert tl[1]["id"] == "c1"
         assert tl[2]["text"] == "The result is clear now."
+        # the live SSE content event carries the timeline, so the UI
+        # interleaves without needing a reload
+        content_events = [e for e in _sse_events(resp.text) if e["type"] == "content"]
+        assert content_events and content_events[-1].get("thinking_json")
+        assert [e["type"] for e in content_events[-1]["thinking_json"]] == ["reasoning", "tool", "reasoning"]

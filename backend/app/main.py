@@ -1833,23 +1833,23 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                     ))
                     await sess.commit()
                 if accumulated_content:
-                    await push_event("content", done=True, content=accumulated_content, reasoning_content=accumulated_reasoning or None)
+                    await push_event("content", done=True, content=accumulated_content, reasoning_content=accumulated_reasoning or None, thinking_json=(thinking_timeline or None))
                 elif bailed_no_action or accumulated_reasoning:
                     # The model only deliberated (or burned its budget) and never
                     # produced a real answer — keep the thinking, say so plainly.
                     draft.content = NO_ANSWER_NOTE
                     await sess.commit()
-                    await push_event("content", done=True, content=NO_ANSWER_NOTE, reasoning_content=accumulated_reasoning or None)
+                    await push_event("content", done=True, content=NO_ANSWER_NOTE, reasoning_content=accumulated_reasoning or None, thinking_json=(thinking_timeline or None))
                 elif all_tool_calls:
                     # The model acted (tool rounds ran) but the final answer
                     # round produced no closing text — the executed tool pills
                     # are the answer. Never fall back to provisional draft
                     # content (that may hold discarded narration).
-                    await push_event("content", done=True, content=accumulated_content, reasoning_content=accumulated_reasoning or None)
+                    await push_event("content", done=True, content=accumulated_content, reasoning_content=accumulated_reasoning or None, thinking_json=(thinking_timeline or None))
                 elif not final_tool_calls:
                     await push_event("error", error="Received an empty response from the model. Please verify your API key and model configuration.")
                 else:
-                    await push_event("content", done=True, content=accumulated_content, reasoning_content=accumulated_reasoning or None)
+                    await push_event("content", done=True, content=accumulated_content, reasoning_content=accumulated_reasoning or None, thinking_json=(thinking_timeline or None))
 
                 if not db_messages and accumulated_content:
                     try:

@@ -370,6 +370,7 @@ function App() {
                 content,
                 reasoning_content: reasoning || updated[idx].reasoning_content,
                 ...(event.tool_calls ? { tool_calls_json: event.tool_calls } : {}),
+                ...(event.thinking_json ? { thinking_json: event.thinking_json } : {}),
                 ...(isFinal ? { status: 'done' as const } : {}),
               }
               return updated
@@ -624,6 +625,7 @@ function App() {
                   content: assistantContent,
                   reasoning_content: assistantReasoning || updated[idx].reasoning_content,
                   ...(event.tool_calls ? { tool_calls_json: event.tool_calls } : {}),
+                  ...(event.thinking_json ? { thinking_json: event.thinking_json } : {}),
                   ...(isFinal ? { status: 'done' as const } : {}),
                 }
                 return updated
@@ -631,6 +633,7 @@ function App() {
               return [...prev, {
                 id: (conv?.id || 0) * -1, role: 'assistant' as const,
                 content: assistantContent, reasoning_content: assistantReasoning, tool_calls_json: event.tool_calls || null,
+                thinking_json: (event as any).thinking_json || null,
                 tool_call_id: null, tool_name: null, status: isFinal ? 'done' as const : 'generating' as const, created_at: new Date().toISOString()
               }]
             })
