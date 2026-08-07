@@ -432,3 +432,73 @@ def test_thinking_model_gets_headroom_upfront(monkeypatch):
         assert fake.model_configs[0].max_tokens == 8192
         last = _last_assistant(client, headers, conv.json()["id"])
         assert last["content"] == "Done."
+
+
+def test_reasoning_survives_tool_rounds(monkeypatch):
+    """The exact reported regression: the model thinks (STEP1), calls a tool,
+    then thinks again (STEP2) and answers. The FULL reasoning must be present
+    in the stored message and in the final content event — earlier turns'
+    thinking must not vanish after the tool round."""
+    fake = ScriptedProvider([
+        # Turn 1: deep thinking, then a tool call.
+        [StreamChunk(reasoning_content_delta="STEP1: I must find the theme colors..."),
+         StreamChunk(tool_calls=[{"id": "c1", "name": "no_such_tool", "arguments": {}}], finish_reason="tool_calls")],
+        # Turn 2: final answer with its own reasoning.
+        [StreamChunk(reasoning_content_delta="STEP2: the results are in, I can answer."),
+         StreamChunk(content_delta="Here is the answer."),
+         StreamChunk(finish_reason="stop")],
+    ])
+    monkeypatch.setattr("app.main.get_provider", lambda provider_type: fake)
+
+    with TestClient(app) as client:
+        headers = _owner_headers(client)
+        conv_id, _ = _make_conv(client, headers, "Reasoning")
+
+        resp = client.post(
+            "/api/chat/stream",
+            json={"conversation_id": conv_id, "message": "redesign ui"},
+            headers=headers,
+        )
+        assert resp.status_code == 200
+        events = _sse_events(resp.text)
+
+        final = [e for e in events if e["type"] == "content"][-1]
+        assert final.get("done") is True, f"final content event not marked done: {final}"
+        assert "STEP1" in (final.get("reasoning_content") or ""), f"STEP1 missing from final event: {final.get('reasoning_content')!r}"
+        assert "STEP2" in (final.get("reasoning_content") or ""), f"STEP2 missing from final event: {final.get('reasoning_content')!r}"
+
+        last = _last_assistant(client, headers, conv_id)
+        assert "STEP1" in (last["reasoning_content"] or ""), f"STEP1 missing from stored message: {last['reasoning_content']!r}"
+        assert "STEP2" in (last["reasoning_content"] or ""), f"STEP2 missing from stored message: {last['reasoning_content']!r}"
+        assert last["content"] == "Here is the answer."
+
+
+def test_after_tools_silent_turn_gets_answer_nudge(monkeypatch):
+    """Once tools have executed, a silent follow-up turn must be nudged to
+    ANSWER (not to call more tools), and the final answer must arrive."""
+    from app.main import ANSWER_NUDGE
+    fake = ScriptedProvider([
+        # Turn 1: act — call a tool.
+        [StreamChunk(tool_calls=[{"id": "c1", "name": "no_such_tool", "arguments": {}}], finish_reason="tool_calls")],
+        # Turn 2: silence after the tool round (no content, no tool call).
+        [StreamChunk(finish_reason="stop")],
+        # Turn 3: after the ANSWER nudge, the model finally answers.
+        [StreamChunk(content_delta="OK here is the summary of what I found."), StreamChunk(finish_reason="stop")],
+    ])
+    monkeypatch.setattr("app.main.get_provider", lambda provider_type: fake)
+
+    with TestClient(app) as client:
+        headers = _owner_headers(client)
+        conv_id, _ = _make_conv(client, headers, "AnswerNudge")
+
+        resp = client.post(
+            "/api/chat/stream",
+            json={"conversation_id": conv_id, "message": "research then answer"},
+            headers=headers,
+        )
+        assert resp.status_code == 200
+
+        # The nudge for turn 3 was the ANSWER nudge (tools had already run).
+        assert any(m["role"] == "user" and m["content"] == ANSWER_NUDGE for m in fake.calls[2])
+        last = _last_assistant(client, headers, conv_id)
+        assert last["content"] == "OK here is the summary of what I found."

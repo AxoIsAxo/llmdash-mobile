@@ -956,6 +956,11 @@ NO_ACTION_NUDGE = (
     "a tool, call it immediately as your first output; otherwise give the final "
     "answer directly.]"
 )
+ANSWER_NUDGE = (
+    "[You already have everything you need from the tool results above. Stop "
+    "calling more tools and give the user the final answer NOW, based on the "
+    "results you already gathered.]"
+)
 NO_ANSWER_NOTE = (
     "*(The model did not produce a final answer — it kept planning without "
     "acting. Try asking again or use a different model.)*"
@@ -1420,7 +1425,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                 async def drain_turn(stream_iter) -> None:
                     """Drain one provider stream into the shared accumulators."""
                     nonlocal final_tool_calls, finish_reason
-                    nonlocal accumulated_content, accumulated_reasoning
+                    nonlocal accumulated_content, accumulated_reasoning, round_reasoning
                     nonlocal total_prompt_tokens, total_completion_tokens, total_total_tokens, total_reasoning_tokens
                     async for chunk in stream_iter:
                         if chunk.content_delta:
@@ -1429,6 +1434,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                             await save_draft_progress()
                         if chunk.reasoning_content_delta:
                             accumulated_reasoning += chunk.reasoning_content_delta
+                            round_reasoning += chunk.reasoning_content_delta
                             await push_event("reasoning_delta", content=chunk.reasoning_content_delta)
                         if chunk.tool_calls is not None:
                             final_tool_calls = chunk.tool_calls
@@ -1446,6 +1452,10 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                 finish_reason = None
                 last_tool_signature = None
                 consecutive_search_failures = 0
+                # Thinking for the CURRENT tool round only (for the provider's
+                # assistant history); `accumulated_reasoning` keeps ALL rounds'
+                # thinking for the stored message and final event.
+                round_reasoning = ""
                 # Every tool call that is actually EXECUTED, across all rounds.
                 # The DB assistant message must list ALL of them so every stored
                 # 'tool' result message has a matching tool_call_id.
@@ -1508,7 +1518,8 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                             f"conv {req.conversation_id}: no-action turn ({no_action}); "
                             f"nudging ({no_action_turns}/{MAX_NO_ACTION_TURNS})"
                         )
-                        messages.append({"role": "user", "content": NO_ACTION_NUDGE})
+                        nudge = ANSWER_NUDGE if all_tool_calls else NO_ACTION_NUDGE
+                        messages.append({"role": "user", "content": nudge})
                         if no_action == "budget" and not budget_bumped:
                             budget_bumped = True
                             base = getattr(effective_model, "max_tokens", None) or 4096
@@ -1578,8 +1589,8 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                             for tc in final_tool_calls
                         ]),
                     }
-                    if accumulated_reasoning:
-                        assistant_entry["reasoning_content"] = accumulated_reasoning
+                    if round_reasoning:
+                        assistant_entry["reasoning_content"] = round_reasoning
                     messages.append(assistant_entry)
                     for tr in tool_results:
                         tool_msg = Message(
@@ -1593,9 +1604,11 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                         await sess.commit()
                         messages.append({"role": "tool", "tool_call_id": tr["tool_call_id"], "tool_name": tr["tool_name"], "content": tr["content"]})
 
-                    # This round is fully captured in `assistant_entry`; the next
-                    # turn starts fresh (thinking and text below this point).
-                    accumulated_reasoning = ""
+                    # This round's turn is fully captured in `assistant_entry`;
+                    # the next turn starts fresh, but ALL thinking stays in
+                    # `accumulated_reasoning` so nothing vanishes from the
+                    # stored message.
+                    round_reasoning = ""
                     final_tool_calls = []
                     last_save_len = 0
 
@@ -1620,21 +1633,21 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                     ))
                     await sess.commit()
                 if accumulated_content:
-                    await push_event("content", content=accumulated_content, reasoning_content=accumulated_reasoning or None)
+                    await push_event("content", done=True, content=accumulated_content, reasoning_content=accumulated_reasoning or None)
                 elif bailed_no_action or accumulated_reasoning:
                     # The model only deliberated (or burned its budget) and never
                     # produced a real answer — keep the thinking, say so plainly.
                     draft.content = NO_ANSWER_NOTE
                     await sess.commit()
-                    await push_event("content", content=NO_ANSWER_NOTE, reasoning_content=accumulated_reasoning or None)
+                    await push_event("content", done=True, content=NO_ANSWER_NOTE, reasoning_content=accumulated_reasoning or None)
                 elif all_tool_calls:
                     # The model acted (tool rounds ran) but produced no closing
                     # text — the executed tool pills are the answer.
-                    await push_event("content", content=draft.content or "", reasoning_content=accumulated_reasoning or None)
+                    await push_event("content", done=True, content=draft.content or "", reasoning_content=accumulated_reasoning or None)
                 elif not final_tool_calls:
                     await push_event("error", error="Received an empty response from the model. Please verify your API key and model configuration.")
                 else:
-                    await push_event("content", content=draft.content or accumulated_content or "", reasoning_content=accumulated_reasoning or None)
+                    await push_event("content", done=True, content=draft.content or accumulated_content or "", reasoning_content=accumulated_reasoning or None)
 
                 if not db_messages and accumulated_content:
                     try:
@@ -1749,7 +1762,7 @@ async def chat_resume(conv_id: int, current_user: dict = Depends(get_current_use
         if draft:
             draft.status = "interrupted"
             await db.commit()
-            content_event: dict = {"type": "content", "content": draft.content or ""}
+            content_event: dict = {"type": "content", "content": draft.content or "", "done": True}
             if draft.tool_calls_json:
                 content_event["tool_calls"] = json.loads(draft.tool_calls_json)
             if draft.reasoning_content:

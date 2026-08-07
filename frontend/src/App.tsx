@@ -358,11 +358,18 @@ function App() {
         if (event.type === 'content') {
           const content = event.content || ''
           const reasoning = event.reasoning_content || null
+          const isFinal = !!(event as any).done
           setMessages(prev => {
             const idx = prev.findIndex(m => m.role === 'assistant' && m.status === 'generating')
             if (idx >= 0) {
               const updated = [...prev]
-              updated[idx] = { ...updated[idx], content, reasoning_content: reasoning || updated[idx].reasoning_content, tool_calls_json: event.tool_calls || null }
+              updated[idx] = {
+                ...updated[idx],
+                content,
+                reasoning_content: reasoning || updated[idx].reasoning_content,
+                ...(event.tool_calls ? { tool_calls_json: event.tool_calls } : {}),
+                ...(isFinal ? { status: 'done' as const } : {}),
+              }
               return updated
             }
             return prev
@@ -592,17 +599,24 @@ function App() {
           } else if (event.type === 'content') {
             assistantContent = event.content || assistantContent
             assistantReasoning = event.reasoning_content || assistantReasoning
+            const isFinal = !!(event as any).done
             setMessages(prev => {
               const idx = prev.findIndex(m => m.id === (conv?.id || 0) * -1)
               if (idx >= 0) {
                 const updated = [...prev]
-                updated[idx] = { ...updated[idx], content: assistantContent, reasoning_content: assistantReasoning || updated[idx].reasoning_content }
+                updated[idx] = {
+                  ...updated[idx],
+                  content: assistantContent,
+                  reasoning_content: assistantReasoning || updated[idx].reasoning_content,
+                  ...(event.tool_calls ? { tool_calls_json: event.tool_calls } : {}),
+                  ...(isFinal ? { status: 'done' as const } : {}),
+                }
                 return updated
               }
               return [...prev, {
                 id: (conv?.id || 0) * -1, role: 'assistant' as const,
-                content: assistantContent, reasoning_content: assistantReasoning, tool_calls_json: null,
-                tool_call_id: null, tool_name: null, status: 'generating', created_at: new Date().toISOString()
+                content: assistantContent, reasoning_content: assistantReasoning, tool_calls_json: event.tool_calls || null,
+                tool_call_id: null, tool_name: null, status: isFinal ? 'done' as const : 'generating' as const, created_at: new Date().toISOString()
               }]
             })
           } else if (event.type === 'tool_calls') {
