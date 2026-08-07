@@ -871,6 +871,24 @@ _DELIBERATION_PATTERNS = (
 _DELIBERATION_ANSWER_KEYWORDS = ("result", "found", "here is", "here are", "answer is",
                                  "answered", "done", "completed", "finished", "finally")
 
+# Plan/narration phrasing. Start-anchored patterns above catch short
+# deliberation ("Let me check..."); this marker list catches LONG narration
+# that never acts ("I'll do both... let me gather everything in parallel...
+# let me dig into the actual HTML... let me grab the stylesheet..."), which
+# models produce when they plan out loud and then stop.
+_DELIBERATION_PLAN_MARKERS = (
+    "let me ", "let's ", "lets ", "i'll ", "i will ", "i'm going to ",
+    "i am going to ", "i need to ", "i should ", "i can try ", "i want to ",
+    "first, ", "next, ", "then i ", "now i ", "my plan", "i plan to ",
+    "start by ", "begin by ", "going to ",
+)
+_DELIBERATION_LAST_SENTENCE_MARKERS = (
+    "let me", "let's", "i'll", "i will", "i'm going to", "i need to",
+    "i should", "first", "next", "now i", "then i", "fetch", "grab",
+    "dig", "check", "look", "search", "find", "analyze", "inspect",
+    "examine", "take a look", "start", "begin",
+)
+
 
 def _looks_like_deliberation(text: str) -> bool:
     """True if the reply is only a plan/deliberation with no action taken and no
@@ -878,11 +896,20 @@ def _looks_like_deliberation(text: str) -> bool:
     if not text:
         return False
     stripped = text.strip().lower()
-    if not stripped or len(stripped) > 160:
+    if not stripped:
         return False
     if any(kw in stripped for kw in _DELIBERATION_ANSWER_KEYWORDS):
         return False
-    return any(re.match(p, stripped) for p in _DELIBERATION_PATTERNS)
+    # Fast path: short plan-only replies ("Let me check...", "First, I'll look...").
+    if len(stripped) <= 160 and any(re.match(p, stripped) for p in _DELIBERATION_PATTERNS):
+        return True
+    # Long narration: several plan phrases, no answer substance, and the last
+    # sentence is still a promise to do something rather than a statement.
+    if sum(1 for m in _DELIBERATION_PLAN_MARKERS if m in stripped) >= 2:
+        last_sentence = re.split(r"(?<=[.!?])\s+", stripped)[-1].strip(" :")
+        if any(m in last_sentence for m in _DELIBERATION_LAST_SENTENCE_MARKERS):
+            return True
+    return False
 
 
 def _looks_like_filler(text: str) -> bool:

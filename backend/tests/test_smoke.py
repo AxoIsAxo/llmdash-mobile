@@ -38,6 +38,25 @@ def test_looks_like_deliberation():
     assert _looks_like_deliberation("Sure! Here's the result: the theme is dark.") is False
     assert _looks_like_deliberation("") is False
     assert _looks_like_deliberation("Hello! How can I help you today?") is False
+    # Long narration that never acts — the exact failure the user reported.
+    long_plan = (
+        "I'll do both: capture the current Telegram design into a file, and check out "
+        "extrovert.redforged.eu for the new design. Let me gather everything in parallel: "
+        "The login page text is minimal — let me dig into the actual HTML/CSS of "
+        "extrovert.redforged.eu to extract its design tokens: The page uses CSS variables "
+        "(--primary, --secondary, etc.) with a dark theme. Let me grab the actual "
+        "stylesheet to extract the exact design tokens:"
+    )
+    assert _looks_like_deliberation(long_plan) is True
+    # Long real answers must NOT be flagged.
+    long_answer = (
+        "I'll explain the architecture: the backend is FastAPI with an async SQLAlchemy "
+        "session, and the frontend is React 19 with Vite. Messages stream over SSE "
+        "endpoints, and tool calls round-trip through the same channel. The database is "
+        "SQLite with aiosqlite, and the whole thing runs in Docker with a SearXNG "
+        "sidecar for web search."
+    )
+    assert _looks_like_deliberation(long_answer) is False
 
 
 def test_repair_tool_history_drops_orphan_tool_messages():
