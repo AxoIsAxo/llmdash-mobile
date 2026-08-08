@@ -28,9 +28,9 @@ import com.getcapacitor.BridgeWebViewClient;
  *
  * Instead the frontend (frontend/src/oauth.ts) routes the flow through the
  * custom `llmdash-oauth://start?target=...&server=...` scheme. This
- * WebViewClient intercepts it, keeps every navigation of the round-trip
- * inside the WebView, then reads the JWT from the server callback page's
- * localStorage and stores it under the same SharedPreferences group
+ * WebViewClient intercepts it and keeps every navigation of the round-trip
+ * inside the WebView; the OIDC callback itself is fetched natively (the JWT
+ * is inlined in its HTML), stored under the same SharedPreferences group
  * (@capacitor/preferences default: "CapacitorStorage") that the app's
  * storage.ts reads, before returning to the bundled app UI.
  */
@@ -67,7 +67,8 @@ public class MainActivity extends BridgeActivity {
             + "var form=findForm();"
             + "if(!form)return;"
             + "var input=form.querySelector('input[name=\"_csrf\"]');"
-            + "if(!input||input.value)return;"
+            + "if(!input)return;"
+            + "var submitting=false;"
             + "function fill(){"
             + "if(input.value)return Promise.resolve();"
             + "return fetch('/',{credentials:'include'})"
@@ -78,11 +79,12 @@ public class MainActivity extends BridgeActivity {
             + "})"
             + ".catch(function(){});"
             + "}"
-            + "fill();"
-            + "var submitting=false;"
             + "form.addEventListener('submit',function(e){"
+            + "var btns=form.querySelectorAll('button[type=\"submit\"],input[type=\"submit\"]');"
+            + "for(var i=0;i<btns.length;i++){btns[i].disabled=true;}"
             + "if(!input.value){e.preventDefault();if(submitting)return;submitting=true;fill().then(function(){form.submit();});}"
             + "});"
+            + "if(!input.value)fill();"
             + "})();";
 
     private LlmdashWebViewClient webViewClient;
@@ -96,13 +98,31 @@ public class MainActivity extends BridgeActivity {
 
     private final class LlmdashWebViewClient extends BridgeWebViewClient {
 
-        private boolean oauthMode = false;
-        private String oauthServerHost = null;
-        private String oauthProviderHost = null;
-        private long oauthStartedAt = 0L;
+        private volatile boolean oauthMode = false;
+        private volatile String oauthServerHost = null;
+        private volatile String oauthProviderHost = null;
+        private volatile long oauthStartedAt = 0L;
 
         LlmdashWebViewClient() {
             super(getBridge());
+        }
+
+        @Override
+        public android.webkit.WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+            // The OIDC callback must be fetched EXACTLY once (the server pops the
+            // one-time state on first request). Intercept it before the WebView
+            // sends it: fetch it natively, extract the JWT the server inlines in
+            // the HTML, store it in the app's prefs, and return a placeholder
+            // page so the WebView never renders the callback / its "/" redirect.
+            if (oauthMode && oauthServerHost != null && oauthServerHost.equals(request.getUrl().getHost())
+                    && request.getUrl().toString().contains("/api/auth/extrovert/callback")
+                    && request.isForMainFrame()) {
+                final String callbackUrl = request.getUrl().toString();
+                view.post(() -> handleCallbackNatively(view, callbackUrl));
+                return new android.webkit.WebResourceResponse("text/html", "UTF-8",
+                        new java.io.ByteArrayInputStream("<html><body>Loading…</body></html>".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            }
+            return super.shouldInterceptRequest(view, request);
         }
 
         @Override
@@ -118,9 +138,11 @@ public class MainActivity extends BridgeActivity {
                 return true;
             }
             if (oauthMode && isHttp(url)) {
-                // Keep the whole OIDC round-trip inside the WebView so the
-                // callback page's localStorage (where the JWT lands) stays
-                // readable from native code.
+                // Keep the whole OIDC round-trip inside the WebView. The
+                // callback itself is intercepted in shouldInterceptRequest and
+                // fetched natively; if that interception is unavailable, the
+                // callback page loads here and its localStorage JWT is picked
+                // up in onPageFinished as a fallback.
                 return false;
             }
             return super.shouldOverrideUrlLoading(view, request);
@@ -161,10 +183,16 @@ public class MainActivity extends BridgeActivity {
                 }
             }
             String target = url.getQueryParameter("target");
-            if (target == null || !isHttp(Uri.parse(target))) {
-                return;
+            if (target == null || !"https".equals(Uri.parse(target).getScheme())) {
+                return; // only https authorize URLs are routed through the WebView
             }
             oauthProviderHost = Uri.parse(target).getHost();
+
+            // Derive the LLMDash server host from the authorize URL's own
+            // redirect_uri (where the JWT will land) — never trust a client
+            // supplied server= param for deciding which host to fetch.
+            String redirectUri = Uri.parse(target).getQueryParameter("redirect_uri");
+            oauthServerHost = redirectUri != null ? Uri.parse(redirectUri).getHost() : null;
 
             // Start from a clean slate. The provider's session cookie
             // (connect.sid) persists in the WebView across app restarts and
@@ -176,10 +204,8 @@ public class MainActivity extends BridgeActivity {
             // the LLMDash server origin forces every attempt through the login
             // form again, so the CSRF pairing is always intact.
             clearCookiesFor(target);
-            String server = url.getQueryParameter("server");
-            oauthServerHost = server != null ? Uri.parse(server).getHost() : null;
-            if (server != null && isHttp(Uri.parse(server))) {
-                clearCookiesFor(server);
+            if (oauthServerHost != null) {
+                clearCookiesFor("https://" + oauthServerHost + "/");
             }
 
             oauthMode = true;
@@ -192,6 +218,7 @@ public class MainActivity extends BridgeActivity {
         public void onPageStarted(WebView view, String url, Bitmap favicon) {
             super.onPageStarted(view, url, favicon);
             Log.d(LOG_TAG, "onPageStarted " + url + " host=" + safeHost(url) + " oauthMode=" + oauthMode);
+
             // If the user backs out of the login flow, we land back on the
             // app's own origin — stop treating the WebView as an OAuth shell.
             String appHost = appHost();
@@ -201,6 +228,74 @@ public class MainActivity extends BridgeActivity {
                 oauthProviderHost = null;
                 oauthStartedAt = 0L;
             }
+        }
+
+        /**
+         * Fetch the OIDC callback URL from native code, extract the JWT the
+         * server inlines into the page HTML, store it in the same prefs the
+         * app reads, and return to the bundled app UI. No WebView JS needed.
+         */
+        private void handleCallbackNatively(WebView view, String callbackUrl) {
+            Log.d(LOG_TAG, "handling callback natively: " + callbackUrl);
+            oauthMode = false; // flow is being finished here — ignore further WebView events
+            oauthServerHost = null;
+            oauthProviderHost = null;
+            oauthStartedAt = 0L;
+            view.stopLoading();
+            new Thread(() -> {
+                final String token = fetchCallbackToken(callbackUrl);
+                runOnUiThread(() -> {
+                    if (token != null && !token.isEmpty()) {
+                        Log.d(LOG_TAG, "callback token len " + token.length());
+                        storeToken(token);
+                    } else {
+                        Log.d(LOG_TAG, "callback returned no token (error/expired page)");
+                    }
+                    try {
+                        view.loadUrl(homeUrl());
+                    } catch (Exception e) {
+                        Log.d(LOG_TAG, "reload home failed: " + e);
+                    }
+                });
+            }).start();
+        }
+
+        /** GET the callback URL and pull the JWT out of its HTML (or null). */
+        private String fetchCallbackToken(String callbackUrl) {
+            try {
+                java.net.URL u = new java.net.URL(callbackUrl);
+                java.net.HttpURLConnection conn = (java.net.HttpURLConnection) u.openConnection();
+                conn.setInstanceFollowRedirects(true);
+                conn.setConnectTimeout(15000);
+                conn.setReadTimeout(15000);
+                String cookies = CookieManager.getInstance().getCookie(callbackUrl);
+                if (cookies != null && !cookies.isEmpty()) {
+                    conn.setRequestProperty("Cookie", cookies);
+                }
+                int code = conn.getResponseCode();
+                java.io.InputStream is = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
+                String body = readFully(is);
+                java.util.regex.Matcher m = java.util.regex.Pattern
+                        .compile("setItem\\('llmdash_token', \"([^\"]+)\"\\)")
+                        .matcher(body);
+                if (!m.find()) return null;
+                String token = m.group(1);
+                // Only accept a well-formed JWT (header.payload.signature).
+                return token.split("\\.").length == 3 ? token : null;
+            } catch (Exception e) {
+                Log.d(LOG_TAG, "callback fetch failed: " + e);
+                return null;
+            }
+        }
+
+        /** Read an InputStream to a UTF-8 string (works on API 23+, unlike readAllBytes). */
+        private static String readFully(java.io.InputStream is) throws java.io.IOException {
+            if (is == null) return "";
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = is.read(buf)) != -1) bos.write(buf, 0, n);
+            return new String(bos.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);
         }
 
         @Override
