@@ -33,6 +33,7 @@ class User(Base):
     ip_address = Column(String(45), nullable=True)
     custom_css = Column(Text, nullable=True)
     theme_spec = Column(Text, nullable=True)
+    auto_scroll = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     @staticmethod
@@ -301,6 +302,9 @@ def _migrate(conn):
 
     if "theme_spec" not in existing:
         conn.exec_driver_sql("ALTER TABLE users ADD COLUMN theme_spec TEXT")
+
+    if "auto_scroll" not in existing:
+        conn.exec_driver_sql("ALTER TABLE users ADD COLUMN auto_scroll BOOLEAN NOT NULL DEFAULT 1")
 
     msg_result = conn.exec_driver_sql("PRAGMA table_info(messages)")
     msg_cols = {row[1] for row in msg_result}

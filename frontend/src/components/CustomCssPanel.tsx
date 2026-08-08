@@ -19,9 +19,11 @@ interface Props {
   onClose: () => void
   onSaved: (css: string) => void
   embedded?: boolean
+  autoScroll?: boolean
+  onAutoScrollChange?: (v: boolean) => void
 }
 
-export default function CustomCssPanel({ currentCss, onClose, onSaved, embedded }: Props) {
+export default function CustomCssPanel({ currentCss, onClose, onSaved, embedded, autoScroll, onAutoScrollChange }: Props) {
   const [css, setCss] = useState(currentCss || DEFAULT_CSS)
   const [fullscreen, setFullscreen] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -176,6 +178,33 @@ export default function CustomCssPanel({ currentCss, onClose, onSaved, embedded 
             Customize the appearance of LLMDash. Changes apply immediately on preview or save.
             The default CSS is used as fallback.
           </p>
+
+          {typeof autoScroll === 'boolean' && onAutoScrollChange && (
+            <div className="flex items-center justify-between gap-4 bg-theme-bg-elevated/40 border border-theme-border-light rounded-lg px-4 py-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">Auto-scroll to latest</p>
+                <p className="text-xs text-theme-muted mt-0.5">
+                  Keep the view pinned to the newest reply while it generates. Turn off to stay
+                  where you are when you scroll up to read — a "Latest" button jumps back down.
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={autoScroll}
+                onClick={() => onAutoScrollChange(!autoScroll)}
+                className={`relative w-10 h-6 rounded-full transition-colors shrink-0 ${
+                  autoScroll ? 'bg-theme-accent' : 'bg-theme-bg-active border border-theme-border-light'
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
+                    autoScroll ? 'translate-x-4' : ''
+                  }`}
+                />
+              </button>
+            </div>
+          )}
 
           {presets.length > 0 && (
             <div className="flex flex-wrap items-center gap-2">

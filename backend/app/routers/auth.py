@@ -17,7 +17,7 @@ from ..models import (
     UserResponse, UserUpdateRequest, RegistrationToggleRequest,
     ProviderConfig, ProviderConfigUpdate,
     IpLimitResponse, IpLimitUpdateRequest,
-    CssUpdateRequest,
+    CssUpdateRequest, AutoScrollUpdateRequest,
 )
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -534,6 +534,25 @@ async def save_user_css(req: CssUpdateRequest, current_user: dict = Depends(get_
     user.custom_css = req.css or None
     await db.commit()
     return {"status": "saved"}
+
+
+@router.get("/auto-scroll")
+async def get_auto_scroll(current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.id == current_user["user_id"]))
+    user = result.scalar_one_or_none()
+    value = user.auto_scroll if user and user.auto_scroll is not None else True
+    return {"auto_scroll": value}
+
+
+@router.put("/auto-scroll")
+async def set_auto_scroll(req: AutoScrollUpdateRequest, current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.id == current_user["user_id"]))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(404, "User not found")
+    user.auto_scroll = req.auto_scroll
+    await db.commit()
+    return {"status": "saved", "auto_scroll": req.auto_scroll}
 
 
 import os

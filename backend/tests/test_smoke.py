@@ -143,6 +143,15 @@ def test_full_flow():
         me = client.get("/api/auth/me", headers=headers)
         assert me.status_code == 200 and me.json()["role"] == "owner"
 
+        # --- per-user auto-scroll setting (P5) ---
+        assert client.get("/api/auth/auto-scroll", headers=headers).json() == {"auto_scroll": True}
+        put = client.put("/api/auth/auto-scroll", json={"auto_scroll": False}, headers=headers)
+        assert put.status_code == 200 and put.json()["auto_scroll"] is False
+        assert client.get("/api/auth/auto-scroll", headers=headers).json() == {"auto_scroll": False}
+        client.put("/api/auth/auto-scroll", json={"auto_scroll": True}, headers=headers)
+        assert client.put("/api/auth/auto-scroll", json={"auto_scroll": "nope"}, headers=headers).status_code == 422
+        assert client.get("/api/auth/auto-scroll").status_code == 401
+
         again = client.post("/api/auth/setup", json={"username": "owner2", "password": "test1234"})
         assert again.status_code == 400
 

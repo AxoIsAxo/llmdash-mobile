@@ -122,7 +122,7 @@ especially when the user has scrolled up to read earlier messages or review tool
 **Safety:** none — pure viewport behavior. Must not interfere with the SSE stream handling
 (`sse.py` / `chat.send` in `api.ts`).
 
-**Effort:** 🔲 ~½ day (scroll-threshold logic + toggle + floating button).
+**Effort:** 🟢 implemented.
 
 ---
 
@@ -334,6 +334,13 @@ review gate).
 
 ## Status notes
 
+- **P5 shipped as:** smart auto-scroll — the viewport only follows the newest content while
+  the user is already at the bottom (100px threshold); if the user has scrolled up, the
+  viewport is left alone mid-generation. A sticky "Latest" button appears whenever the user
+  is not at the bottom while a generation is active or has just finished, and jumps back
+  down on click. The behavior is controlled by a per-user `auto-scroll` setting
+  (`users.auto_scroll`, default on) toggled in Agent → Appearance and persisted via
+  `/api/auth/auto-scroll` (same pattern as theme/css).
 - **P4 shipped as:** `git_repos` / `git_action_log` / `git_credential_history` tables (migrated
   at boot), `backend/app/git_tools.py` (engine: clone/status/diff/commit/push/PR in the
   per-conversation sandbox worktree, credential redaction, author enforcement, remote

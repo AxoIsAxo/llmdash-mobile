@@ -147,6 +147,15 @@ export const api = {
         }),
     },
 
+    autoScroll: {
+      get: () => request<{ auto_scroll: boolean }>('/auth/auto-scroll'),
+      put: (autoScroll: boolean) =>
+        request<{ status: string; auto_scroll: boolean }>('/auth/auto-scroll', {
+          method: 'PUT',
+          body: JSON.stringify({ auto_scroll: autoScroll }),
+        }),
+    },
+
     providers: {
       list: () => request<import('./types').ProviderConfig[]>('/auth/providers'),
       update: (key: string, data: { name?: string; base_url?: string }) =>

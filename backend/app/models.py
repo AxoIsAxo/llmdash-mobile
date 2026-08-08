@@ -248,6 +248,10 @@ class CssUpdateRequest(BaseModel):
     css: str
 
 
+class AutoScrollUpdateRequest(BaseModel):
+    auto_scroll: bool
+
+
 class SubscriptionPlanCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=64)
     price_sats: int = Field(..., ge=0)

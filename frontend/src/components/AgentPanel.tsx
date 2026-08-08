@@ -11,11 +11,13 @@ interface Props {
   onClose: () => void
   currentCss: string
   onCssSaved: (css: string) => void
+  autoScroll?: boolean
+  onAutoScrollChange?: (v: boolean) => void
 }
 
 type AgentTab = 'documents' | 'memory' | 'css' | 'git'
 
-export default function AgentPanel({ currentUser, onClose, currentCss, onCssSaved }: Props) {
+export default function AgentPanel({ currentUser, onClose, currentCss, onCssSaved, autoScroll, onAutoScrollChange }: Props) {
   const [tab, setTab] = useState<AgentTab>('documents')
   const isAdmin = currentUser.role === 'owner' || currentUser.role === 'admin'
 
@@ -51,7 +53,7 @@ export default function AgentPanel({ currentUser, onClose, currentCss, onCssSave
         <div className="flex-1 overflow-y-auto p-4">
           {tab === 'documents' && <DocumentManager currentUser={currentUser} onClose={onClose} embedded />}
           {tab === 'memory' && <MemoryPanel currentUser={currentUser} onClose={onClose} embedded />}
-          {tab === 'css' && <CustomCssPanel currentCss={currentCss} onClose={onClose} onSaved={onCssSaved} embedded />}
+          {tab === 'css' && <CustomCssPanel currentCss={currentCss} onClose={onClose} onSaved={onCssSaved} embedded autoScroll={autoScroll} onAutoScrollChange={onAutoScrollChange} />}
           {tab === 'git' && <GitPanel isAdmin={isAdmin} />}
         </div>
       </div>

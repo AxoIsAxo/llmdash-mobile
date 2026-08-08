@@ -181,7 +181,56 @@ function App() {
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const messagesEndRef = useRef<HTMLDivElement>(null)
+  // P5 — smart auto-scroll: only follow the newest content while the user is
+  // already at the bottom; a floating "jump to latest" button appears otherwise.
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const [autoScroll, setAutoScroll] = useState(true)
+  const autoScrollRef = useRef(true)
+  const [atBottom, setAtBottom] = useState(true)
+  const atBottomRef = useRef(true)
+  // "A generation finished since the user was last at the bottom" — keeps the
+  // jump button visible after streaming stops, until the user returns to bottom.
+  const [justFinished, setJustFinished] = useState(false)
+  // Guards the async auto-scroll prefetch from clobbering a user toggle.
+  const autoScrollTouchedRef = useRef(false)
+
+  useEffect(() => { autoScrollRef.current = autoScroll }, [autoScroll])
+
+  useEffect(() => {
+    // A freshly opened conversation starts "at the bottom".
+    atBottomRef.current = true
+    setAtBottom(true)
+    setJustFinished(false)
+  }, [activeConv?.id])
+
+  const handleScroll = useCallback(() => {
+    const el = scrollContainerRef.current
+    if (!el) return
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 100
+    atBottomRef.current = nearBottom
+    setAtBottom(nearBottom)
+    if (nearBottom) setJustFinished(false)
+  }, [])
+
+  const scrollToLatest = useCallback(() => {
+    const el = scrollContainerRef.current
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    atBottomRef.current = true
+    setAtBottom(true)
+    setJustFinished(false)
+  }, [])
+
+  const handleAutoScrollChange = (v: boolean) => {
+    autoScrollTouchedRef.current = true
+    setAutoScroll(v)
+    api.auth.autoScroll.put(v)
+      .then(() => { if (v) scrollToLatest() })
+      .catch(() => {
+        // Persist failed — revert the optimistic toggle so the UI matches the server.
+        setAutoScroll(!v)
+      })
+  }
 
   const loadConversations = useCallback(async () => {
     try {
@@ -251,11 +300,31 @@ function App() {
           cssPreviousRef.current = res.css
         }
       }).catch(() => {})
+      api.auth.autoScroll.get().then(res => {
+        if (!autoScrollTouchedRef.current) setAutoScroll(res.auto_scroll !== false)
+      }).catch(() => {})
     }
   }, [currentUser, loadConversations, loadModels])  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const el = scrollContainerRef.current
+    if (!el) return
+    // Follow the stream only while the user is already at the bottom (and
+    // hasn't disabled auto-scroll). If they scrolled up, leave the viewport
+    // alone — the "jump to latest" button is the escape hatch.
+    if (autoScrollRef.current && atBottomRef.current) {
+      el.scrollTop = el.scrollHeight
+      atBottomRef.current = true
+      setAtBottom(true)
+      return
+    }
+    // Not following: content may have grown below the fold (e.g. auto-scroll
+    // is off), so refresh the at-bottom state without moving the viewport.
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 100
+    if (nearBottom !== atBottomRef.current) {
+      atBottomRef.current = nearBottom
+      setAtBottom(nearBottom)
+    }
   }, [messages])
 
   useEffect(() => {
@@ -298,6 +367,8 @@ function App() {
     setConversations([])
     setActiveConv(null)
     setMessages([])
+    autoScrollTouchedRef.current = false
+    setAutoScroll(true)
     localStorage.removeItem(LAST_ACTIVE_CONV_KEY)
     try {
       const status = await api.auth.status()
@@ -488,6 +559,7 @@ function App() {
     } finally {
       setExecutingTools(new Set())
       setStreaming(false)
+      setJustFinished(true)
       setAbortController(null)
       loadConversations()
       if (currentUser) {
@@ -542,6 +614,7 @@ function App() {
         }])
       } finally {
         setStreaming(false)
+        setJustFinished(true)
         setAbortController(null)
         loadConversations()
         if (currentUser) {
@@ -745,6 +818,7 @@ function App() {
     } finally {
       setExecutingTools(new Set())
       setStreaming(false)
+      setJustFinished(true)
       setAbortController(null)
       loadConversations()
       if (currentUser) {
@@ -764,6 +838,7 @@ function App() {
           if (convId === activeConv?.id) {
             setStreaming(false)
             setExecutingTools(new Set())
+            setJustFinished(true)
           }
           const full = await api.conversations.messages(convId)
           setMessages(prev => mergeMessages(prev, full))
@@ -1053,6 +1128,7 @@ function App() {
       } finally {
         setExecutingTools(new Set())
         setStreaming(false)
+        setJustFinished(true)
         setAbortController(null)
         loadConversations()
       }
@@ -1183,7 +1259,7 @@ function App() {
         )}
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto">
+        <div ref={scrollContainerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto relative">
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-theme-muted p-8">
               <Bot className="w-16 h-16 mb-4 text-theme-icon-muted" />
@@ -1260,7 +1336,17 @@ function App() {
                   </div>
                 )
               })}
-              <div ref={messagesEndRef} />
+            </div>
+          )}
+          {!atBottom && (streaming || justFinished) && (
+            <div className="sticky bottom-4 flex justify-end px-4 pointer-events-none">
+              <button
+                onClick={scrollToLatest}
+                className="pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-theme-accent hover:bg-theme-accent-hover text-theme-accent-text text-xs font-medium shadow-lg transition-colors"
+                title="Jump to latest"
+              >
+                <ChevronDown className="w-3.5 h-3.5" /> Latest
+              </button>
             </div>
           )}
         </div>
@@ -1437,6 +1523,8 @@ function App() {
           onClose={() => setShowAgent(false)}
           currentCss={cssPreviousRef.current}
           onCssSaved={(css) => { cssPreviousRef.current = css }}
+          autoScroll={autoScroll}
+          onAutoScrollChange={handleAutoScrollChange}
         />
       )}
 
