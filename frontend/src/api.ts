@@ -418,4 +418,42 @@ export const api = {
     lint: () => request<{ findings: import('./types').LintFinding[] }>('/memory/lint', { method: 'POST' }),
     reset: () => request<{ status: string; user: number }>('/memory', { method: 'DELETE' }),
   },
+
+  git: {
+    info: () => request<import('./types').GitInfo>('/git/info'),
+    repos: {
+      list: () => request<import('./types').GitRepo[]>('/git/repos'),
+      create: (data: {
+        name: string;
+        clone_url: string;
+        access: string;
+        auth_type: string;
+        credential?: string;
+        default_branch?: string;
+        pr_preferred?: boolean;
+        enabled?: boolean;
+      }) =>
+        request<import('./types').GitRepo>('/git/repos', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }),
+      update: (id: number, data: {
+        clone_url?: string;
+        access?: string;
+        auth_type?: string;
+        credential?: string;
+        clear_credential?: boolean;
+        default_branch?: string;
+        pr_preferred?: boolean;
+        enabled?: boolean;
+      }) =>
+        request<import('./types').GitRepo>(`/git/repos/${id}`, {
+          method: 'PUT',
+          body: JSON.stringify(data),
+        }),
+      delete: (id: number) =>
+        request<{ status: string }>(`/git/repos/${id}`, { method: 'DELETE' }),
+    },
+    audit: () => request<import('./types').GitAuditEntry[]>('/git/audit'),
+  },
 };

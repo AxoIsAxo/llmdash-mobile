@@ -5,6 +5,7 @@ from .builtins.sandbox import RunCommandSkill
 from .builtins.css_tools import GetUserCssSkill, PatchUserCssSkill, AppendUserCssSkill, SetUserCssSkill, GetThemeSkill, PatchThemeSkill, ResetThemeSkill
 from .builtins.document import EditDocumentSkill
 from .builtins.hyperframes import RenderVideoSkill
+from .builtins.git import GitCloneSkill, GitStatusSkill, GitDiffSkill, GitCommitSkill, GitPushSkill, GitPrSkill
 
 
 def register_builtins():
@@ -23,6 +24,12 @@ def register_builtins():
         ResetThemeSkill(),
         EditDocumentSkill(),
         RenderVideoSkill(),
+        GitCloneSkill(),
+        GitStatusSkill(),
+        GitDiffSkill(),
+        GitCommitSkill(),
+        GitPushSkill(),
+        GitPrSkill(),
     ]
     for skill in builtins:
         skill_registry.register(skill)

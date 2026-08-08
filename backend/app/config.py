@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     extrovert_redirect_uri: str = ""  # override the auto-derived callback URL
     extrovert_allow_signup: bool = True  # create new accounts on first login
 
+    # P4 agentic git: fixed commit author (never the user's git identity)
+    git_bot_name: str = "LLMDash"
+    git_bot_email: str = ""  # empty -> llmdash@<clone host> fallback
+
     model_config = {"env_file": "data/.env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
@@ -77,6 +81,8 @@ ENV_VAR_MAP = {
     "EXTROVERT_ISSUER": "extrovert_issuer",
     "EXTROVERT_REDIRECT_URI": "extrovert_redirect_uri",
     "EXTROVERT_ALLOW_SIGNUP": "extrovert_allow_signup",
+    "GIT_BOT_NAME": "git_bot_name",
+    "GIT_BOT_EMAIL": "git_bot_email",
 }
 
 

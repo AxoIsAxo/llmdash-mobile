@@ -49,6 +49,7 @@ from .routers.auth import router as auth_router, get_current_user, require_role,
 from .routers.subscriptions import router as subscriptions_router
 from .routers.theme import router as theme_router
 from .routers.memory import router as memory_router
+from .routers.git import router as git_router
 from .memory.capture import assistant_turn_summary, capture_assistant_reply, capture_user_message
 from .memory import config as mem_cfg
 from .memory.commands import maybe_run_command as memory_maybe_run_command
@@ -159,6 +160,7 @@ app.include_router(auth_router)
 app.include_router(subscriptions_router)
 app.include_router(theme_router)
 app.include_router(memory_router)
+app.include_router(git_router)
 from .skills.router import router as skills_router
 app.include_router(skills_router)
 
@@ -712,6 +714,7 @@ async def config_status(current_user: dict = Depends(get_current_user)):
             "document_editor": doc_ok,
             "render_html": True,
             "sandbox": docker_ok,
+            "git_access": True,
         },
         "providers": {
             "deepseek": bool(app_config.settings.deepseek_api_key),

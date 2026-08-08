@@ -311,3 +311,35 @@ export interface LintFinding {
   check: string;
   detail: string;
 }
+
+export interface GitRepo {
+  id: number;
+  name: string;
+  clone_url: string;
+  host: string;
+  access: 'read' | 'write';
+  auth_type: 'none' | 'ssh_key' | 'token';
+  credential_set: boolean;
+  default_branch: string;
+  pr_preferred: boolean;
+  enabled: boolean;
+  created_at: string;
+}
+
+export interface GitInfo {
+  bot_name: string;
+  bot_email: string;
+  git_bot_name_env: string;
+  git_bot_email_env: string;
+  note: string;
+}
+
+export interface GitAuditEntry {
+  id: number;
+  user_id: number | null;
+  repo_id: number | null;
+  action: string;
+  detail: string | null;
+  success: boolean;
+  created_at: string;
+}

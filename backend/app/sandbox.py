@@ -13,6 +13,7 @@ discover missing curl/python/node on every fresh container.
 """
 
 import asyncio
+import logging
 import os
 import shutil
 import subprocess
@@ -44,6 +45,10 @@ SANDBOX_MAX_POOL = 16       # hard cap on live sandboxes
 
 # conversation_id -> {"container": str, "last_used": float (monotonic)}
 _sandboxes: dict[int, dict] = {}
+
+# Serializes container creation so concurrent first tool calls in one round
+# (tools run via asyncio.gather) can't both `docker create` the same name.
+_create_lock = asyncio.Lock()
 
 
 def is_docker_available() -> bool:
@@ -118,26 +123,27 @@ async def _ensure_sandbox_image() -> str | None:
 
 async def _get_or_create_container(conversation_id: int) -> str | None:
     """Return the running container for a conversation, creating it if needed."""
-    name = _container_name(conversation_id)
-    rc, _, _ = await _docker("inspect", name)
-    if rc == 0:
-        await _docker("start", name)  # no-op if already running
+    async with _create_lock:
+        name = _container_name(conversation_id)
+        rc, _, _ = await _docker("inspect", name)
+        if rc == 0:
+            await _docker("start", name)  # no-op if already running
+            return name
+        rc, _, _ = await _docker(
+            "create",
+            "--name", name,
+            "--memory", "512m",
+            "--memory-swap", "1g",
+            "--cpus", "1",
+            "--pids-limit", "64",
+            "--label", "llmdash=sandbox",
+            SANDBOX_IMAGE,
+            "tail", "-f", "/dev/null",
+        )
+        if rc != 0:
+            return None
+        await _docker("start", name)
         return name
-    rc, _, _ = await _docker(
-        "create",
-        "--name", name,
-        "--memory", "512m",
-        "--memory-swap", "1g",
-        "--cpus", "1",
-        "--pids-limit", "64",
-        "--label", "llmdash=sandbox",
-        SANDBOX_IMAGE,
-        "tail", "-f", "/dev/null",
-    )
-    if rc != 0:
-        return None
-    await _docker("start", name)
-    return name
 
 
 async def _sweep() -> None:
@@ -156,6 +162,11 @@ async def _sweep() -> None:
 async def remove_sandbox(conversation_id: int) -> None:
     """Stop and remove a conversation's sandbox (e.g. conversation deleted)."""
     _sandboxes.pop(conversation_id, None)
+    try:
+        from .git_tools import _locks
+        _locks.pop(conversation_id, None)
+    except Exception:
+        pass
     name = _container_name(conversation_id)
     rc, _, _ = await _docker("inspect", name)
     if rc == 0:
@@ -186,6 +197,8 @@ def start_sweeper() -> asyncio.Task:
 
 
 def _format_result(rc: int, stdout: str, stderr: str) -> str:
+    """Join command output WITHOUT capping — redaction must run first so a
+    credential split at the truncation boundary can't leak its prefix."""
     if rc == -1 and "timed out" in stderr:
         return "Error: Command timed out"
     output = stdout
@@ -195,7 +208,22 @@ def _format_result(rc: int, stdout: str, stderr: str) -> str:
         output += stderr
     if not output.strip():
         output = "(no output)"
-    return _cap_output(output)
+    return output
+
+
+async def _redact_credentials(text: str) -> str:
+    """Scrub every configured git credential (deploy keys, bot tokens) from
+    sandbox output, so run_command can never leak them into the chat."""
+    try:
+        from .git_tools import all_credentials
+        secrets = await all_credentials()
+    except Exception:
+        logging.getLogger(__name__).warning("credential redaction failed; output not scrubbed", exc_info=True)
+        return text
+    for s in secrets:
+        if s and len(s) >= 6:
+            text = text.replace(s, "***")
+    return text
 
 
 async def run_in_alpine(command: str, timeout: int = 30, conversation_id: int = 0) -> str:
@@ -216,7 +244,7 @@ async def run_in_alpine(command: str, timeout: int = 30, conversation_id: int = 
             "alpine:latest", "sh", "-c", command,
             timeout=timeout,
         )
-        return _format_result(rc, out, err)
+        return _cap_output(await _redact_credentials(_format_result(rc, out, err)))
 
     err = await _ensure_sandbox_image()
     if err:
@@ -227,4 +255,4 @@ async def run_in_alpine(command: str, timeout: int = 30, conversation_id: int = 
     _sandboxes[conversation_id] = {"container": container, "last_used": time.monotonic()}
 
     rc, out, err = await _docker("exec", container, "sh", "-c", command, timeout=timeout)
-    return _format_result(rc, out, err)
+    return _cap_output(await _redact_credentials(_format_result(rc, out, err)))

@@ -100,7 +100,28 @@ MRs/PRs — and every commit is authored by a dedicated bot identity, **never by
 **Safety:** repo allowlist, author-enforcement check on every push, and a "read-only repos"
 default — write access is per-repo opt-in.
 
-**Effort:** 🔲 ~1 week (git skills + credential store + author enforcement + push review).
+**Effort:** 🟢 implemented.
+
+---
+
+## Status notes
+
+- **P4 shipped as:** `git_repos` / `git_action_log` / `git_credential_history` tables (migrated
+  at boot), `backend/app/git_tools.py` (engine: clone/status/diff/commit/push/PR in the
+  per-conversation sandbox worktree, credential redaction, author enforcement, remote
+  verification, force-push refusal, branch-name validation), six builtin skills registered via
+  the existing skill system, admin allowlist CRUD + audit API under `/api/git` (owner/admin),
+  and an Admin Panel → Git tab. Commit author is configurable via `GIT_BOT_NAME` /
+  `GIT_BOT_EMAIL` (Admin Panel → API Keys). PRs are created through the GitHub / GitLab /
+  Gitea-Forgejo (incl. Codeberg) APIs when a bot token is configured, otherwise the model
+  returns a manual compare URL.
+- Credential handling: tokens/deploy keys are stored server-side, never returned by the API;
+  auth flows through `http.extraHeader` + a path-scoped `credential.useHttpPath` store file
+  (remote URLs stay clean); every git-tool output AND `run_command` output is scrubbed against
+  current + historical credentials, so secrets cannot reach the chat; rotated/cleared/revoked
+  credentials are re-provisioned or purged in live sandboxes.
+- Remaining follow-ups (not blockers): SSH host-key pinning instead of `accept-new`,
+  approval-gated destructive ops, self-hosted-GitLab API detection.
 
 ---
 

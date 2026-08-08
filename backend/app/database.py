@@ -204,6 +204,55 @@ class ThemeHistory(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class GitRepo(Base):
+    """P4 agentic-git allowlist entry.
+
+    One row per repository the AI may work in. Credentials are stored
+    server-side (deploy key PEM or HTTP token), scoped to this single
+    remote — never the user's own SSH keys. ``access`` is "read" by
+    default; write access is an explicit per-repo opt-in.
+    """
+
+    __tablename__ = "git_repos"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(128), nullable=False, unique=True)
+    clone_url = Column(String(512), nullable=False)
+    access = Column(String(16), nullable=False, default="read")  # read | write
+    auth_type = Column(String(16), nullable=False, default="none")  # none | ssh_key | token
+    # Deploy key PEM (ssh_key) or "<user>:<token>" / "<token>" (token). Never returned by the API.
+    credential = Column(Text, nullable=True)
+    default_branch = Column(String(64), nullable=True)  # e.g. "main"
+    pr_preferred = Column(Boolean, nullable=False, default=True)
+    enabled = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class GitActionLog(Base):
+    """Audit trail for agentic git actions (P4)."""
+
+    __tablename__ = "git_action_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    repo_id = Column(Integer, ForeignKey("git_repos.id", ondelete="SET NULL"), nullable=True)
+    action = Column(String(64), nullable=False)
+    detail = Column(Text, nullable=True)
+    success = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class GitCredentialHistory(Base):
+    """Deprecated git credentials kept ONLY so output scrubbing keeps masking
+    them after rotation/clear/delete. Never exposed by any API."""
+
+    __tablename__ = "git_credential_history"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    secret = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -389,6 +438,41 @@ def _migrate(conn):
                     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                     spec_json TEXT,
                     css TEXT,
+                    created_at DATETIME
+                )
+            """)
+        if "git_repos" not in existing_tables:
+            conn.exec_driver_sql("""
+                CREATE TABLE IF NOT EXISTS git_repos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name VARCHAR(128) NOT NULL UNIQUE,
+                    clone_url VARCHAR(512) NOT NULL,
+                    access VARCHAR(16) NOT NULL DEFAULT 'read',
+                    auth_type VARCHAR(16) NOT NULL DEFAULT 'none',
+                    credential TEXT,
+                    default_branch VARCHAR(64),
+                    pr_preferred BOOLEAN NOT NULL DEFAULT 1,
+                    enabled BOOLEAN NOT NULL DEFAULT 1,
+                    created_at DATETIME
+                )
+            """)
+        if "git_action_log" not in existing_tables:
+            conn.exec_driver_sql("""
+                CREATE TABLE IF NOT EXISTS git_action_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    repo_id INTEGER REFERENCES git_repos(id) ON DELETE SET NULL,
+                    action VARCHAR(64) NOT NULL,
+                    detail TEXT,
+                    success BOOLEAN NOT NULL DEFAULT 1,
+                    created_at DATETIME
+                )
+            """)
+        if "git_credential_history" not in existing_tables:
+            conn.exec_driver_sql("""
+                CREATE TABLE IF NOT EXISTS git_credential_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    secret TEXT NOT NULL,
                     created_at DATETIME
                 )
             """)

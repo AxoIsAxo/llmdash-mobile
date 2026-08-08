@@ -17,6 +17,7 @@ LLMDash is a self-hosted AI chat interface that connects to multiple LLM provide
 
 - **Multi-provider AI** — DeepSeek, Claude, MiniMax, OpenRouter, or any OpenAI-compatible API configured via UI
 - **Built-in tools** — AI models can search the web (SearXNG), create/edit .docx/.pdf/.odt documents, render HTML previews, and execute commands in isolated Alpine Docker containers that **persist for the whole conversation** (installs and files survive between tool calls in a chat)
+- **Agentic Git access** — the AI can clone, commit, push, and open PRs in allowlisted repositories, always authored as a fixed bot identity (`LLMDash <llmdash@…>`, never the user's git identity), with per-repo deploy keys/bot tokens, author-enforced pushes, read-only-by-default access, and PRs preferred over direct pushes to `main`
 - **Real-time streaming** — Server-Sent Events for token-by-token responses with tool call round-trips
 - **Voice input** — Multilingual speech-to-text powered by [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (CTranslate2, 4× faster than the original Whisper), with selectable model size, compute type, and device
 - **Conversation branching** — Fork conversations at any message to explore alternative responses
