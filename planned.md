@@ -7,32 +7,7 @@ Status legend: 🔲 planned · 🟡 in design · 🟢 implemented
 
 ---
 
-## P1 · Bots (Discord / Telegram style)
-
-**Goal:** Let anyone run **bots** on LLMDash — standalone agents that live on chat platforms
-(Discord, Telegram, Matrix, IRC, …) and use LLMDash as their brain: the same multi-model
-pipeline, memory, and tool ecosystem (web search, documents, sandbox, Extrovert, Git, …).
-
-- Bots are **normally written in Rust**, but the design must be **language-agnostic** — a bot
-  is just a small program that speaks HTTP to LLMDash, so it can be written in Rust, Python,
-  Node, Go, or anything else.
-- **Ingestion:** platform adapters (webhooks for Discord/Telegram, polling for IRC/Matrix).
-  Events are normalized into `ChatRequest`-shaped payloads (`backend/app/main.py` chat path).
-- **Dispatch:** a bot has its own conversation per channel/user; reuse the existing SSE stream
-  endpoint with a bot token instead of a user token.
-- **Identity:** bot accounts (role `bot`) that cannot log into the web UI; per-bot API tokens.
-- **Lifecycle:** register bots via UI/API, per-bot model + tools + system-prompt override,
-  rate limits, kill switch.
-
-**Safety:** bots only get the tools their owner grants; `run_command` and other write tools are
-opt-in per bot; per-bot daily token budget (reuse `token_usage_log`); bots can never act on
-account endpoints (no `/api/auth`, no user management).
-
-**Effort:** 🔲 ~2–3 weeks (platform adapters + bot accounts + dispatch).
-
----
-
-## P2 · Agentic capabilities over Extrovert
+## P1 · Agentic capabilities over Extrovert
 
 **Goal:** The AI can **act on your Extrovert account** — post, reply, like, follow, DM — not
 just log in with it (current integration is OIDC login only, `backend/app/extrovert_auth.py`).
@@ -56,7 +31,7 @@ confirmation for posts/DMs, rate limits, and a kill switch that revokes the toke
 
 ---
 
-## P3 · Agentic capabilities over Obsidian
+## P2 · Agentic capabilities over Obsidian
 
 **Goal:** The AI can **read and write your Obsidian vault** — create/edit notes, link and tag,
 query by content, maintain MOCs — with the vault as a first-class tool.
@@ -80,7 +55,7 @@ vault" toggle.
 
 ---
 
-## P4 · Agentic capabilities on your VPS (safe remote ops)
+## P3 · Agentic capabilities on your VPS (safe remote ops)
 
 **Goal:** Let the AI **operate the server safely** — inspect, deploy, restart, read logs,
 manage containers/files — without handing it a root shell.
@@ -105,7 +80,7 @@ token). The existing sandbox stays for throwaway work; this is for *real* infras
 
 ---
 
-## P5 · Agentic Git access (always as "LLMDash")
+## P4 · Agentic Git access (always as "LLMDash")
 
 **Goal:** The AI can **work in Git repositories** — clone, branch, commit, push, open
 MRs/PRs — and every commit is authored by a dedicated bot identity, **never by you**.
@@ -131,13 +106,10 @@ default — write access is per-repo opt-in.
 
 ## Dependencies & sequencing
 
-- **P1 (Bots)** is the natural next layer: once bot accounts exist, P2–P5 capabilities become
-  grantable *to bots*, not just to chat users — bots on Discord that can post to Extrovert,
-  write to your vault, or open a PR as LLMDash.
-- **P2 (Extrovert)** is blocked on confirming the write API; everything else is unblocked.
-- **P3 (Obsidian)** and **P5 (Git)** both depend on a generic "external repo/volume" sync
+- **P1 (Extrovert)** is blocked on confirming the write API; everything else is unblocked.
+- **P2 (Obsidian)** and **P4 (Git)** both depend on a generic "external repo/volume" sync
   helper — worth building once, sharing between them.
-- **P4 (VPS agent)** is the most invasive; design its protocol first so P1 bots can reuse it
-  for long-running bot processes.
+- **P3 (VPS agent)** is the most invasive; design its protocol first so it can later host
+  long-running agents.
 
 No dates attached; this is the backlog, not a commitment.
