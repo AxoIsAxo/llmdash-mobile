@@ -60,44 +60,53 @@ public class MainActivity extends BridgeActivity {
 
         @Override
         public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-            return handleNavigation(view, request.getUrl());
-        }
-
-        @Override
-        public boolean shouldOverrideUrlLoading(WebView view, String url) {
-            return handleNavigation(view, Uri.parse(url));
-        }
-
-        private boolean handleNavigation(WebView view, Uri url) {
+            Uri url = request.getUrl();
             if (OAUTH_SCHEME.equals(url.getScheme())) {
-                // llmdash-oauth://start?target=<extrovert authorize url>&server=<server origin>
-                String target = url.getQueryParameter("target");
-                if (target != null && isHttp(Uri.parse(target))) {
-                    oauthMode = true;
-                    oauthStartedAt = System.currentTimeMillis();
-                    String server = url.getQueryParameter("server");
-                    oauthServerHost = server != null ? Uri.parse(server).getHost() : null;
-                    final String finalTarget = target;
-                    view.post(() -> view.loadUrl(finalTarget));
-                }
-                return true; // handled here; WebView must not act on the scheme URL
+                startOAuthFlow(view, url);
+                return true;
             }
-
             if (oauthMode && isExpired()) {
                 endOAuthFlow(view);
                 return true;
             }
-
             if (oauthMode && isHttp(url)) {
                 // Keep the whole OIDC round-trip inside the WebView so the
                 // callback page's localStorage (where the JWT lands) stays
                 // readable from native code.
                 return false;
             }
+            return super.shouldOverrideUrlLoading(view, request);
+        }
 
-            // Default: app-host URLs load in the WebView, everything else goes
-            // to the OS browser (Capacitor's standard behavior).
-            return super.shouldOverrideUrlLoading(view, url);
+        @Override
+        @SuppressWarnings("deprecation")
+        public boolean shouldOverrideUrlLoading(WebView view, String urlString) {
+            Uri url = Uri.parse(urlString);
+            if (OAUTH_SCHEME.equals(url.getScheme())) {
+                startOAuthFlow(view, url);
+                return true;
+            }
+            if (oauthMode && isExpired()) {
+                endOAuthFlow(view);
+                return true;
+            }
+            if (oauthMode && isHttp(url)) {
+                return false;
+            }
+            return super.shouldOverrideUrlLoading(view, urlString);
+        }
+
+        private void startOAuthFlow(WebView view, Uri url) {
+            // llmdash-oauth://start?target=<extrovert authorize url>&server=<server origin>
+            String target = url.getQueryParameter("target");
+            if (target != null && isHttp(Uri.parse(target))) {
+                oauthMode = true;
+                oauthStartedAt = System.currentTimeMillis();
+                String server = url.getQueryParameter("server");
+                oauthServerHost = server != null ? Uri.parse(server).getHost() : null;
+                final String finalTarget = target;
+                view.post(() -> view.loadUrl(finalTarget));
+            }
         }
 
         @Override
