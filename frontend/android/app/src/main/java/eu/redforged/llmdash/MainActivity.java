@@ -52,6 +52,7 @@ public class MainActivity extends BridgeActivity {
      */
     private static final String CONSENT_CSRF_JS =
             "(function(){"
+            + "if(window.__llmdashCsrfPrimed)return;window.__llmdashCsrfPrimed=true;"
             + "function findForm(){"
             + "var f=document.querySelector('form[action=\"/api/v1/oauth/authorize\"]');"
             + "if(f)return f;"
@@ -76,8 +77,9 @@ public class MainActivity extends BridgeActivity {
             + ".catch(function(){});"
             + "}"
             + "fill();"
+            + "var submitting=false;"
             + "form.addEventListener('submit',function(e){"
-            + "if(!input.value){e.preventDefault();fill().then(function(){form.submit();});}"
+            + "if(!input.value){e.preventDefault();if(submitting)return;submitting=true;fill().then(function(){form.submit();});}"
             + "});"
             + "})();";
 
