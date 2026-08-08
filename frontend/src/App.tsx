@@ -13,15 +13,13 @@ import {
   Send, Plus, Key, MessageSquare, Trash2, ChevronLeft,
   ChevronRight, Wrench, Bot, Loader2, Terminal, Globe, FileText, Eye, Search,
   Copy, Check, RefreshCw, Square, ChevronUp, ChevronDown, Download,
-  Shield, LogOut, Settings, Minus, CreditCard, Brain, Image, Paperclip, X, File as FileIcon, Palette, Mic, UserRound
+  Shield, LogOut, Settings, Minus, CreditCard, Brain, Image, Paperclip, X, File as FileIcon, Mic, UserRound, Sparkles
 } from 'lucide-react'
 import MarkdownRenderer from './components/MarkdownRenderer'
 import SetupWizard from './components/SetupWizard'
 import LoginPage from './components/LoginPage'
 import AdminPanel from './components/AdminPanel'
-import CustomCssPanel from './components/CustomCssPanel'
-import DocumentManager from './components/DocumentManager'
-import MemoryPanel from './components/MemoryPanel'
+import AgentPanel from './components/AgentPanel'
 import AccountPanel from './components/AccountPanel'
 import VoiceButton from './components/VoiceButton'
 import DOMPurify from 'dompurify'
@@ -150,9 +148,7 @@ function App() {
   const [imageGenSize, setImageGenSize] = useState('1024x1024')
   const [showSidebar, setShowSidebar] = useState(true)
   const [showAdmin, setShowAdmin] = useState(false)
-  const [showCustomCss, setShowCustomCss] = useState(false)
-  const [showDocuments, setShowDocuments] = useState(false)
-  const [showMemory, setShowMemory] = useState(false)
+  const [showAgent, setShowAgent] = useState(false)
   const [showAccount, setShowAccount] = useState(false)
   const [cssUndoToast, setCssUndoToast] = useState<{ previousCss: string } | null>(null)
   const cssPreviousRef = useRef<string>(DEFAULT_CSS)
@@ -1134,17 +1130,11 @@ function App() {
               <Shield className="w-4 h-4 text-theme-accent-text" /> Admin Panel
             </button>
           )}
-          <button onClick={() => setShowDocuments(true)} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-theme-bg-elevated rounded-lg text-sm">
-            <FileText className="w-4 h-4 text-theme-accent-text" /> Documents
-          </button>
-          <button onClick={() => setShowMemory(true)} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-theme-bg-elevated rounded-lg text-sm">
-            <Brain className="w-4 h-4 text-theme-accent-text" /> Memory
+          <button onClick={() => setShowAgent(true)} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-theme-bg-elevated rounded-lg text-sm">
+            <Sparkles className="w-4 h-4 text-theme-accent-text" /> Agent
           </button>
           <button onClick={() => setShowAccount(true)} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-theme-bg-elevated rounded-lg text-sm">
             <UserRound className="w-4 h-4 text-theme-accent-text" /> Account
-          </button>
-          <button onClick={() => setShowCustomCss(true)} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-theme-bg-elevated rounded-lg text-sm">
-            <Palette className="w-4 h-4 text-theme-accent-text" /> Custom CSS
           </button>
           <div className="flex items-center gap-2 px-3 py-2 text-xs text-theme-muted">
             <span className="truncate flex-1">
@@ -1440,28 +1430,13 @@ function App() {
         />
       )}
 
-      {/* Custom CSS Modal */}
-      {showCustomCss && (
-        <CustomCssPanel
+      {/* Agent Modal — Documents, Memory, Appearance, Git */}
+      {showAgent && (
+        <AgentPanel
+          currentUser={currentUser}
+          onClose={() => setShowAgent(false)}
           currentCss={cssPreviousRef.current}
-          onClose={() => setShowCustomCss(false)}
-          onSaved={(css) => { cssPreviousRef.current = css }}
-        />
-      )}
-
-      {/* Document Manager Modal */}
-      {showDocuments && (
-        <DocumentManager
-          currentUser={currentUser}
-          onClose={() => setShowDocuments(false)}
-        />
-      )}
-
-      {/* Memory Modal */}
-      {showMemory && (
-        <MemoryPanel
-          currentUser={currentUser}
-          onClose={() => setShowMemory(false)}
+          onCssSaved={(css) => { cssPreviousRef.current = css }}
         />
       )}
 

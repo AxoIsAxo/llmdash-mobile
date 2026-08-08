@@ -9,9 +9,10 @@ import {
 interface Props {
   currentUser: { username: string }
   onClose: () => void
+  embedded?: boolean
 }
 
-function MemoryPanel({ currentUser, onClose }: Props) {
+function MemoryPanel({ currentUser, onClose, embedded }: Props) {
   const [status, setStatus] = useState<MemoryStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null) // which action is running
@@ -116,9 +117,10 @@ function MemoryPanel({ currentUser, onClose }: Props) {
   )
 
   return (
-    <div className="fixed inset-0 bg-theme-overlay/60 backdrop-blur-[2px] flex items-center justify-center z-50 p-4">
-      <div className="llm-modal bg-theme-bg-secondary rounded-2xl w-full max-w-3xl max-h-[88vh] flex flex-col border border-theme-border-light shadow-2xl overflow-hidden">
+    <div className={embedded ? 'flex-1 flex flex-col min-h-0 overflow-hidden' : 'fixed inset-0 bg-theme-overlay/60 backdrop-blur-[2px] flex items-center justify-center z-50 p-4'}>
+      <div className={embedded ? 'flex-1 flex flex-col min-h-0' : 'llm-modal bg-theme-bg-secondary rounded-2xl w-full max-w-3xl max-h-[88vh] flex flex-col border border-theme-border-light shadow-2xl overflow-hidden'}>
         {/* header */}
+        {!embedded && (
         <div className="flex items-center gap-3 px-6 py-4 border-b border-theme-border bg-theme-bg-elevated/30">
           <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-theme-accent/20 text-theme-accent-text">
             <Brain className="w-5 h-5" />
@@ -137,6 +139,7 @@ function MemoryPanel({ currentUser, onClose }: Props) {
             <X className="w-5 h-5" />
           </button>
         </div>
+        )}
 
         {/* actions */}
         <div className="flex items-center gap-2 px-6 py-3 border-b border-theme-border flex-wrap">

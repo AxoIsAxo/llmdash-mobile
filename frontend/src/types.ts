@@ -323,6 +323,8 @@ export interface GitRepo {
   default_branch: string;
   pr_preferred: boolean;
   enabled: boolean;
+  scope: 'global' | 'personal';
+  user_id: number | null;
   created_at: string;
 }
 

@@ -1,9 +1,10 @@
-"""P4 — agentic Git admin API: repo allowlist CRUD + audit log.
+"""Agentic Git API — per-user repo allowlist CRUD + admin audit log.
 
-Repos are added to a global allowlist by owner/admin (like provider API
-keys): the AI may only clone/commit/push repos listed here. Write access is
-a per-repo opt-in (default read-only). Credentials (deploy keys / bot
-tokens) are stored server-side and never returned by this API.
+Every user manages their OWN repositories (the AI may only clone/commit/push
+repos they own, plus admin-shared "global" repos with user_id NULL). Write
+access is a per-repo opt-in (default read-only). Credentials (deploy keys /
+bot tokens) are stored server-side and never returned by this API. Admins
+manage everything and can create shared (global) repos.
 """
 
 from __future__ import annotations
@@ -12,12 +13,12 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, or_
 
 from .. import config as app_config
 from .. import git_tools
 from ..database import async_session, GitRepo, GitActionLog
-from ..routers.auth import require_role
+from ..routers.auth import get_current_user, require_role
 
 router = APIRouter(prefix="/api/git", tags=["git"])
 
@@ -34,6 +35,7 @@ class GitRepoCreate(BaseModel):
     default_branch: str = "main"
     pr_preferred: bool = True
     enabled: bool = True
+    global_scope: bool = False  # admin-only: share with every user (user_id NULL)
 
 
 class GitRepoUpdate(BaseModel):
@@ -72,6 +74,18 @@ def _validate(name: str, clone_url: str, access: str, auth_type: str, credential
         raise HTTPException(400, str(e))
 
 
+def _is_admin(user: dict) -> bool:
+    return user.get("role") in ("owner", "admin")
+
+
+def _can_manage(user: dict, repo: GitRepo) -> bool:
+    """Admin manages everything (global + personal); a user manages their own
+    personal repos; global repos (user_id NULL) are admin-only."""
+    if _is_admin(user):
+        return True
+    return repo.user_id is not None and repo.user_id == user.get("user_id")
+
+
 def _repo_dict(r: GitRepo) -> dict:
     return {
         "id": r.id,
@@ -84,12 +98,14 @@ def _repo_dict(r: GitRepo) -> dict:
         "default_branch": r.default_branch or "main",
         "pr_preferred": bool(r.pr_preferred),
         "enabled": bool(r.enabled),
+        "scope": "global" if r.user_id is None else "personal",
+        "user_id": r.user_id,
         "created_at": r.created_at.isoformat() if r.created_at else "",
     }
 
 
 @router.get("/info")
-async def git_info(current_user: dict = Depends(require_role("owner", "admin"))):
+async def git_info(current_user: dict = Depends(get_current_user)):
     name, email = git_tools.bot_identity()
     return {
         "bot_name": name,
@@ -101,24 +117,41 @@ async def git_info(current_user: dict = Depends(require_role("owner", "admin")))
 
 
 @router.get("/repos")
-async def list_repos(current_user: dict = Depends(require_role("owner", "admin"))):
+async def list_repos(current_user: dict = Depends(get_current_user)):
+    """Users see their own personal repos + admin-shared global repos.
+    Admins see everything."""
     async with async_session() as sess:
-        result = await sess.execute(select(GitRepo).order_by(GitRepo.name))
+        query = select(GitRepo)
+        if not _is_admin(current_user):
+            query = query.where(
+                or_(GitRepo.user_id == current_user["user_id"], GitRepo.user_id.is_(None))
+            )
+        result = await sess.execute(query.order_by(GitRepo.name))
         repos = result.scalars().all()
     return [_repo_dict(r) for r in repos]
 
 
 @router.post("/repos", status_code=201)
-async def create_repo(req: GitRepoCreate, current_user: dict = Depends(require_role("owner", "admin"))):
+async def create_repo(req: GitRepoCreate, current_user: dict = Depends(get_current_user)):
     name = (req.name or "").strip()
     clone_url = (req.clone_url or "").strip()
     _validate(name, clone_url, req.access, req.auth_type, req.credential, req.default_branch)
+
+    global_scope = bool(req.global_scope)
+    if global_scope and not _is_admin(current_user):
+        raise HTTPException(403, "Only admins can create shared (global) repositories")
+
     async with async_session() as sess:
-        existing = await sess.execute(select(GitRepo.id).where(GitRepo.name == name))
+        # Uniqueness is per scope: global names unique among globals, personal
+        # names unique per user (enforced by partial indexes — catch the race).
+        owner_cond = GitRepo.user_id.is_(None) if global_scope else GitRepo.user_id == current_user["user_id"]
+        existing = await sess.execute(select(GitRepo.id).where(GitRepo.name == name, owner_cond))
         if existing.scalar_one_or_none():
-            raise HTTPException(409, f"Repository '{name}' already exists in the allowlist")
+            scope = "shared" if global_scope else "personal"
+            raise HTTPException(409, f"Repository '{name}' already exists in your {scope} allowlist")
         repo = GitRepo(
             name=name,
+            user_id=None if global_scope else current_user["user_id"],
             clone_url=clone_url,
             access=req.access,
             auth_type=req.auth_type,
@@ -128,7 +161,11 @@ async def create_repo(req: GitRepoCreate, current_user: dict = Depends(require_r
             enabled=req.enabled,
         )
         sess.add(repo)
-        await sess.commit()
+        try:
+            await sess.commit()
+        except Exception:
+            await sess.rollback()
+            raise HTTPException(409, f"Repository '{name}' already exists in this scope")
         await sess.refresh(repo)
         git_tools.invalidate_credential_cache()
         await git_tools.log_action(current_user["user_id"], repo.id, "repo_add", name, True)
@@ -136,12 +173,14 @@ async def create_repo(req: GitRepoCreate, current_user: dict = Depends(require_r
 
 
 @router.put("/repos/{repo_id}")
-async def update_repo(repo_id: int, req: GitRepoUpdate, current_user: dict = Depends(require_role("owner", "admin"))):
+async def update_repo(repo_id: int, req: GitRepoUpdate, current_user: dict = Depends(get_current_user)):
     async with async_session() as sess:
         result = await sess.execute(select(GitRepo).where(GitRepo.id == repo_id))
         repo = result.scalar_one_or_none()
         if not repo:
             raise HTTPException(404, "Repository not found")
+        if not _can_manage(current_user, repo):
+            raise HTTPException(403, "You can only manage your own repositories")
 
         new_url = (req.clone_url or "").strip() if req.clone_url is not None else repo.clone_url
         new_access = req.access if req.access is not None else repo.access
@@ -184,12 +223,14 @@ async def update_repo(repo_id: int, req: GitRepoUpdate, current_user: dict = Dep
 
 
 @router.delete("/repos/{repo_id}")
-async def delete_repo(repo_id: int, current_user: dict = Depends(require_role("owner", "admin"))):
+async def delete_repo(repo_id: int, current_user: dict = Depends(get_current_user)):
     async with async_session() as sess:
         result = await sess.execute(select(GitRepo).where(GitRepo.id == repo_id))
         repo = result.scalar_one_or_none()
         if not repo:
             raise HTTPException(404, "Repository not found")
+        if not _can_manage(current_user, repo):
+            raise HTTPException(403, "You can only manage your own repositories")
         name = repo.name
         if repo.credential:
             await git_tools.remember_credential(repo.credential)

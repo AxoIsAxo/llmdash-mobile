@@ -432,6 +432,7 @@ export const api = {
         default_branch?: string;
         pr_preferred?: boolean;
         enabled?: boolean;
+        global_scope?: boolean;
       }) =>
         request<import('./types').GitRepo>('/git/repos', {
           method: 'POST',

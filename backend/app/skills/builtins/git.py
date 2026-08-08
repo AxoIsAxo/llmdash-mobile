@@ -7,25 +7,32 @@ author-enforced, restricted to the allowlisted remote, and refuse force ops.
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import select, or_
 
 from ..base import Skill
 from ...database import async_session, GitRepo
 from ... import git_tools
 
 
-async def _enabled_repos() -> list[GitRepo]:
+async def _enabled_repos(user_id: int | None = None) -> list[GitRepo]:
+    """Repos the user may work in: their own personal repos plus admin-shared
+    global repos (user_id NULL)."""
     async with async_session() as sess:
-        result = await sess.execute(select(GitRepo).where(GitRepo.enabled == True).order_by(GitRepo.name))
+        query = select(GitRepo).where(GitRepo.enabled == True)
+        if user_id:
+            query = query.where(
+                or_(GitRepo.user_id == user_id, GitRepo.user_id.is_(None))
+            )
+        result = await sess.execute(query.order_by(GitRepo.name))
         return list(result.scalars().all())
 
 
-async def _resolve_repo(repo_arg: str | None, conversation_id: int) -> GitRepo:
-    repos = await _enabled_repos()
+async def _resolve_repo(repo_arg: str | None, conversation_id: int, user_id: int | None) -> GitRepo:
+    repos = await _enabled_repos(user_id)
     if not repos:
         raise git_tools.GitToolError(
-            "No Git repositories are configured. An admin must add repositories in "
-            "Admin Panel → Git before I can work in them."
+            "No Git repositories are configured for you. Add your own in the "
+            "Agent tab → Git, or ask an admin to share one."
         )
     if repo_arg:
         wanted = str(repo_arg).strip().lower()
@@ -75,7 +82,7 @@ class GitCloneSkill(Skill):
         user_id = (_current_user or {}).get("user_id")
         repo = None
         try:
-            repo = await _resolve_repo(arguments.get("repo"), _conversation_id)
+            repo = await _resolve_repo(arguments.get("repo"), _conversation_id, user_id)
             result = await git_tools.clone_repo(repo, _conversation_id)
             await git_tools.log_action(user_id, repo.id, "clone", result[:500], True)
             return result
@@ -102,7 +109,7 @@ class GitStatusSkill(Skill):
         user_id = (_current_user or {}).get("user_id")
         try:
             repo_arg = arguments.get("repo")
-            repos = await _enabled_repos()
+            repos = await _enabled_repos(user_id)
             if not repos:
                 raise git_tools.GitToolError("No Git repositories are configured. Admin Panel → Git.")
             if not repo_arg and len(repos) > 1:
@@ -115,13 +122,13 @@ class GitStatusSkill(Skill):
                 header.append("")
                 header.append("Working tree status:")
                 try:
-                    repo = await _resolve_repo(None, _conversation_id)
+                    repo = await _resolve_repo(None, _conversation_id, user_id)
                     body = await git_tools.repo_status(repo, _conversation_id)
                 except git_tools.GitToolError as e:
                     body = f"({e})"
                 await git_tools.log_action(user_id, None, "status", "overview", True)
                 return "\n".join(header) + "\n" + body
-            repo = await _resolve_repo(repo_arg, _conversation_id)
+            repo = await _resolve_repo(repo_arg, _conversation_id, user_id)
             result = await git_tools.repo_status(repo, _conversation_id)
             await git_tools.log_action(user_id, repo.id, "status", "", True)
             return result
@@ -149,7 +156,7 @@ class GitDiffSkill(Skill):
         user_id = (_current_user or {}).get("user_id")
         repo = None
         try:
-            repo = await _resolve_repo(arguments.get("repo"), _conversation_id)
+            repo = await _resolve_repo(arguments.get("repo"), _conversation_id, user_id)
             result = await git_tools.repo_diff(repo, _conversation_id, arguments.get("scope", "unstaged"), arguments.get("path"))
             await git_tools.log_action(user_id, repo.id, "diff", f"scope={arguments.get('scope', 'unstaged')}", True)
             return result
@@ -178,7 +185,7 @@ class GitCommitSkill(Skill):
         user_id = (_current_user or {}).get("user_id")
         repo = None
         try:
-            repo = await _resolve_repo(arguments.get("repo"), _conversation_id)
+            repo = await _resolve_repo(arguments.get("repo"), _conversation_id, user_id)
             result = await git_tools.repo_commit(repo, _conversation_id, arguments.get("message", ""), arguments.get("files"))
             await git_tools.log_action(user_id, repo.id, "commit", result[:500], True)
             return result
@@ -206,7 +213,7 @@ class GitPushSkill(Skill):
         user_id = (_current_user or {}).get("user_id")
         repo = None
         try:
-            repo = await _resolve_repo(arguments.get("repo"), _conversation_id)
+            repo = await _resolve_repo(arguments.get("repo"), _conversation_id, user_id)
             result = await git_tools.repo_push(repo, _conversation_id)
             await git_tools.log_action(user_id, repo.id, "push", result[:500], True)
             return result
@@ -239,7 +246,7 @@ class GitPrSkill(Skill):
         user_id = (_current_user or {}).get("user_id")
         repo = None
         try:
-            repo = await _resolve_repo(arguments.get("repo"), _conversation_id)
+            repo = await _resolve_repo(arguments.get("repo"), _conversation_id, user_id)
             result = await git_tools.repo_pr(
                 repo, _conversation_id,
                 arguments.get("title", ""),

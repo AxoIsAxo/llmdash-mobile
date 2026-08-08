@@ -18,9 +18,10 @@ interface Props {
   currentCss: string
   onClose: () => void
   onSaved: (css: string) => void
+  embedded?: boolean
 }
 
-export default function CustomCssPanel({ currentCss, onClose, onSaved }: Props) {
+export default function CustomCssPanel({ currentCss, onClose, onSaved, embedded }: Props) {
   const [css, setCss] = useState(currentCss || DEFAULT_CSS)
   const [fullscreen, setFullscreen] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -113,13 +114,16 @@ export default function CustomCssPanel({ currentCss, onClose, onSaved }: Props) 
   const previewText = css.slice(0, 60).replace(/\s+/g, ' ')
 
   return (
-    <div className="fixed inset-0 bg-theme-overlay/60 flex items-center justify-center z-50" onClick={onClose}>
+    <div className={embedded ? 'flex-1 flex flex-col min-h-0 overflow-hidden' : 'fixed inset-0 bg-theme-overlay/60 flex items-center justify-center z-50'} onClick={embedded ? undefined : onClose}>
       <div
-        className={`llm-modal bg-theme-bg-secondary rounded-2xl border border-theme-border-light flex flex-col ${
-          fullscreen ? 'fixed inset-4 w-auto h-auto max-w-none max-h-none' : 'w-full max-w-3xl max-h-[85vh]'
-        }`}
+        className={embedded
+          ? 'flex-1 flex flex-col min-h-0'
+          : `llm-modal bg-theme-bg-secondary rounded-2xl border border-theme-border-light flex flex-col ${
+              fullscreen ? 'fixed inset-4 w-auto h-auto max-w-none max-h-none' : 'w-full max-w-3xl max-h-[85vh]'
+            }`}
         onClick={e => e.stopPropagation()}
       >
+        {!embedded && (
         <div className="p-4 border-b border-theme-border flex items-center justify-between shrink-0">
           <h2 className="text-lg font-semibold">Custom CSS & Theme</h2>
           <div className="flex items-center gap-2">
@@ -140,6 +144,7 @@ export default function CustomCssPanel({ currentCss, onClose, onSaved }: Props) 
             <button onClick={onClose} className="px-3 py-1.5 hover:bg-theme-bg-hover rounded-lg text-sm">Close</button>
           </div>
         </div>
+        )}
 
         {historyOpen && (
           <div className="shrink-0 max-h-40 overflow-y-auto border-b border-theme-border bg-theme-bg-elevated/40 px-4 py-3 space-y-1">

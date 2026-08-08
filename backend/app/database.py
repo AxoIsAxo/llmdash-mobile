@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy import Column, Integer, String, Text, Boolean, Float, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Text, Boolean, Float, DateTime, ForeignKey, UniqueConstraint, Index, text
 from datetime import datetime, timezone
 import os
 
@@ -211,12 +211,16 @@ class GitRepo(Base):
     server-side (deploy key PEM or HTTP token), scoped to this single
     remote — never the user's own SSH keys. ``access`` is "read" by
     default; write access is an explicit per-repo opt-in.
+
+    ``user_id`` NULL = a global repo managed by an admin (shared with every
+    user); non-NULL = a personal repo owned by that user.
     """
 
     __tablename__ = "git_repos"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(128), nullable=False, unique=True)
+    name = Column(String(128), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     clone_url = Column(String(512), nullable=False)
     access = Column(String(16), nullable=False, default="read")  # read | write
     auth_type = Column(String(16), nullable=False, default="none")  # none | ssh_key | token
@@ -226,6 +230,13 @@ class GitRepo(Base):
     pr_preferred = Column(Boolean, nullable=False, default=True)
     enabled = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    __table_args__ = (
+        # Global repos (user_id NULL) must have unique names; personal repos
+        # unique per user. Partial indexes handle SQLite's NULL-is-distinct
+        # behavior; the same indexes are (re)created in _migrate for existing DBs.
+        Index("uq_git_repos_global_name", "name", unique=True, sqlite_where=text("user_id IS NULL")),
+        Index("uq_git_repos_user_name", "user_id", "name", unique=True, sqlite_where=text("user_id IS NOT NULL")),
+    )
 
 
 class GitActionLog(Base):
@@ -476,6 +487,20 @@ def _migrate(conn):
                     created_at DATETIME
                 )
             """)
+        # P4 -> per-user git: repos can now be owned by a user (personal) or
+        # shared (user_id NULL, admin-managed). Enforce unique names per scope
+        # with partial indexes (SQLite treats NULLs as distinct in unique idxs).
+        git_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(git_repos)").fetchall()}
+        if "user_id" not in git_cols:
+            conn.exec_driver_sql("ALTER TABLE git_repos ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE")
+        conn.exec_driver_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_git_repos_global_name "
+            "ON git_repos(name) WHERE user_id IS NULL"
+        )
+        conn.exec_driver_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_git_repos_user_name "
+            "ON git_repos(user_id, name) WHERE user_id IS NOT NULL"
+        )
     except Exception:
         pass
 

@@ -271,6 +271,67 @@ audit view).
 
 ---
 
+## P11 · Modular skill system (overviewable, marketplace-ready)
+
+**Goal:** Rework the skill system so skills are **self-contained, inspectable modules** with a
+manifest, per-user scoping, and a proper overview UI — instead of one flat builtins list
+(`backend/app/skills/builtins/`) plus metadata-only DB rows.
+
+- **Skill manifest:** each skill carries `name`, `description`, `input_schema`, `version`,
+  `author`, `source` (builtin / user / marketplace), `category`, and **permission scopes**
+  (which APIs/credentials it may touch — `git`, `web`, `files`, `sandbox`, `proton`, …).
+  `SkillMetadata` in `backend/app/skills/base.py` grows to carry this.
+- **Per-user scoping:** a `user_skills` table (user_id, skill_name, enabled, custom config) so
+  each user can enable/disable/configure skills for their own chats — the model only sees
+  their enabled set (`skill_registry.get_tool_definitions()` in `main.py:1487` filtered per
+  user). Reuses the same migration pattern as `plan_model_limits`.
+- **Registry + loader refactor:** `SkillRegistry` becomes the single overviewable source —
+  listable by category, source, and permission scope; `loader.py` auto-discovers skills from
+  `builtins/` and installed marketplace dirs instead of a hand-maintained list.
+- **Overview UI:** an "Agent → Skills" view (list, manifest details, enable/disable, config
+  forms, permission badges). Replaces the current admin-only `/api/skills` CRUD for
+  DB-metadata-only skills with real per-user skill management.
+- **Isolation & permissions:** skill execution declares the scopes it needs; the runtime
+  enforces them (a skill that declares no `git` scope cannot reach git credentials, no
+  `sandbox` scope cannot run `run_command`). Same discipline as P4's per-repo credentials.
+- **Agent tab:** Documents, Memory, Custom CSS, Git and Skills live under one "Agent" tab in
+  the UI (each user manages their own agentic surface). The Documents/Memory/Custom CSS/Git
+  consolidation is already implemented — Skills lands with P11.
+
+**Safety:** permission scopes enforced server-side at execution, per-user skill allowlist,
+skills can only consume credentials they declared, and marketplace skills are sandboxed by
+scope (never implicit full access).
+
+**Effort:** 🟡 ~1 week (manifest + registry refactor + per-user scoping + Skills UI).
+
+---
+
+## P12 · Skill marketplace
+
+**Goal:** A **browseable, installable skill marketplace** — community skills plug into LLMDash
+without a code change, with review and sandboxing built in.
+
+- **Catalog:** a `skills.marketplace` source — either a bundled curated list or a remote
+  catalog (e.g. a git repo of manifests, mirroring how the sandbox clones repos in P4).
+  Each entry: manifest (name/desc/schema/version/author), install URL (git repo or archive),
+  category, permissions it requests, rating/installs.
+- **Install flow:** Admin (or user, per their permission) installs a skill → cloned/imported
+  into a managed skills dir (`backend/app/skills/marketplace/`), manifest validated, version
+  recorded. Same provenance approach as P4's per-repo allowlist — no arbitrary code at
+  runtime beyond what the manifest declares.
+- **Per-user enablement:** installed marketplace skills appear in the Agent → Skills tab;
+  each user toggles them on for their chats; P9's entitlements gate *who* may install/use
+  paid or privileged skills.
+- **Safety:** manifest validation (schema + declared scopes only), review gate (owner approves
+  before a skill is enabled for everyone), sandboxed execution via declared permission
+  scopes (P11), credentials never implicitly shared, uninstall removes the code + revokes
+  access instantly.
+
+**Effort:** 🔲 ~1 week after P11 (catalog + install/update pipeline + marketplace UI +
+review gate).
+
+---
+
 ## Status notes
 
 - **P4 shipped as:** `git_repos` / `git_action_log` / `git_credential_history` tables (migrated
@@ -314,5 +375,11 @@ audit view).
   provisioning — build it after P4 (which is done) and alongside P9 (token linking should be a
   paid entitlement). The Pass CLI's per-access reason field slots into the same audit
   table design as P3's action log.
+- **P11 (modular skills)** is the foundation for P12 — the manifest/scoping refactor must land
+  before the marketplace can validate and sandbox community skills. Both sit naturally with
+  the "Agent" tab consolidation (Documents/Memory/Custom CSS/Git/Skills under one user-facing
+  surface).
+- **P12 (marketplace)** depends on P11 and on P9's entitlements to gate installs/usage of
+  privileged skills.
 
 No dates attached; this is the backlog, not a commitment.
