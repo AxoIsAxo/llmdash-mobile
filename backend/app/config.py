@@ -29,10 +29,12 @@ class Settings(BaseSettings):
     whisper_provider: str = "local"
     whisper_openrouter_model: str = "openai/whisper-1"
 
-    # P7 text-to-speech (OpenRouter audio output; fish-audio default)
+    # P7 text-to-speech (OpenRouter audio output; gpt-audio-mini default)
     tts_provider: str = "openrouter"
-    tts_openrouter_model: str = "fish-audio/s2.1-pro-free:free"
-    tts_voice: Optional[str] = None  # optional provider voice id
+    # NOTE: fish-audio has no audio-output endpoint on OpenRouter (404), so the
+    # default is OpenAI's cheap audio model; override via TTS_OPENROUTER_MODEL.
+    tts_openrouter_model: str = "openai/gpt-audio-mini"
+    tts_voice: Optional[str] = "alloy"  # OpenAI voice id (alloy/ash/...)
 
     # Cross-session memory
     memory_dir: str = "data/memory"

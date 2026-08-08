@@ -333,10 +333,14 @@ without a code change, with review and sandboxing built in.
 ## Status notes
 
 - **P7 shipped as:** `POST /api/chat/tts` synthesizes a reply through OpenRouter's audio
-  output modality (`modalities: ["audio"]`, `audio: {voice, format}`), default model
-  `fish-audio/s2.1-pro-free:free` — works out of the box with just `OPENROUTER_API_KEY`
-  (config: `TTS_PROVIDER` / `TTS_OPENROUTER_MODEL` / `TTS_VOICE`, same pattern as Whisper
-  STT in `tts.py`). The model id is server-side only (no client-supplied models); an
+  output modality (`modalities: ["audio"]`, `audio: {voice, format}`). Default model
+  `openai/gpt-audio-mini` with voice `alloy` — works out of the box with just
+  `OPENROUTER_API_KEY` (config: `TTS_PROVIDER` / `TTS_OPENROUTER_MODEL` / `TTS_VOICE`, same
+  pattern as Whisper STT in `tts.py`). Note: the originally planned
+  `fish-audio/s2.1-pro-free:free` has NO audio-output endpoint on OpenRouter (404 "No
+  endpoints found that support the requested output modalities: audio"), so the default
+  is OpenAI's cheap audio model; any model with audio output can be set via
+  `TTS_OPENROUTER_MODEL`. The model id is server-side only (no client-supplied models); an
   optional client `voice` is validated. Returns raw `audio/mpeg` bytes; the response parser
   handles both `message.audio.data` and content-part audio shapes. TTS burns the user's
   token budget: an estimated cost (chars/4, min 25) is checked against the effective
@@ -344,7 +348,8 @@ without a code change, with review and sandboxing built in.
   `TokenUsageLog` after success; gated by the `tts` entitlement. Frontend: a voice icon
   under finished assistant messages plays the reply via an inline `Audio` element, with a
   per-session per-message cache (no re-synthesis on replay), in-flight guard, cache cap,
-  and single-playing-audio semantics; icon hidden when the plan locks TTS.
+  and single-playing-audio semantics; icon hidden when the plan locks TTS. The copy/tts/
+  regenerate footer also renders on assistant messages that used tools.
 - **P8 shipped as:** YouTube link previews in `MarkdownRenderer` — `youtube.com/watch?v=`,
   `youtu.be/`, `/shorts/` and `/embed/` links (ids validated to the exact 11-char format)
   render a preview card: client-side oEmbed fetch (6s AbortController timeout, hard-coded

@@ -25,6 +25,14 @@ from fastapi.testclient import TestClient  # noqa: E402
 FAKE_MP3 = b"\xff\xfb\x90\x00fake-mp3-bytes"
 
 
+def test_tts_defaults():
+    """Defaults must point at a working OpenRouter audio-output model + voice."""
+    from app.tts import resolve_default_voice, resolve_model
+
+    assert resolve_model() == "openai/gpt-audio-mini"
+    assert resolve_default_voice() == "alloy"
+
+
 def test_extract_audio_base64_both_shapes():
     """The OpenRouter TTS response parser handles message.audio.data AND
     content-part audio payloads (no HTTP involved)."""

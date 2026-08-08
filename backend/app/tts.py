@@ -2,10 +2,11 @@
 
 Provider-agnostic TTS via OpenRouter's audio output modality
 (``modalities: ["audio"]`` + ``audio: {voice, format}``). Default model is
-``fish-audio/s2.1-pro-free:free`` so the feature works out of the box with
-just OPENROUTER_API_KEY. Mirrors the Whisper STT provider pattern
-(whisper_stt.py): provider + model are server-side settings, the request is a
-plain httpx call, and the response is a base64 audio blob.
+``openai/gpt-audio-mini`` (fish-audio has no audio-output endpoint on
+OpenRouter) so the feature works out of the box with just OPENROUTER_API_KEY.
+Mirrors the Whisper STT provider pattern (whisper_stt.py): provider + model
+are server-side settings, the request is a plain httpx call, and the response
+is a base64 audio blob.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 DEFAULT_PROVIDER = "openrouter"
-DEFAULT_MODEL = "fish-audio/s2.1-pro-free:free"
+DEFAULT_MODEL = "openai/gpt-audio-mini"
 DEFAULT_FORMAT = "mp3"
 VALID_PROVIDERS = ("openrouter",)
 

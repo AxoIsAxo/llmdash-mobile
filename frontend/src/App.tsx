@@ -1979,6 +1979,19 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
             <MemoryPills items={message.memory_saved || []} />
           </div>
         </div>
+        <div className={`flex gap-1 mt-0.5 ${isUser ? 'justify-end mr-10' : 'justify-start ml-10'}`}>
+          {isAssistant && !isGenerating && ttsEnabled && (
+            <TtsPlayButton messageId={message.id} text={message.content || ''} />
+          )}
+          <button onClick={() => onCopy(message.content || '', message.id)} className="p-1 hover:bg-theme-bg-hover rounded transition-colors text-theme-muted hover:text-theme-text" title="Copy">
+            {copiedId === message.id ? <Check className="w-3.5 h-3.5 text-theme-accent-text" /> : <Copy className="w-3.5 h-3.5" />}
+          </button>
+          {isUser && (
+            <button onClick={() => onRegenerate(msgIndex)} className="p-1 hover:bg-theme-bg-hover rounded transition-colors text-theme-muted hover:text-theme-accent-text" title="Regenerate">
+              <RefreshCw className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       </div>
     )
   }
