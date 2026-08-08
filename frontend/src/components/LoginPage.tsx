@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { Bot, Loader2, UserPlus, LogIn } from 'lucide-react'
 import { api } from '../api'
+import { startExtrovertOAuth } from '../oauth'
 import type { AuthResponse, AuthStatus } from '../types'
 
 interface Props {
@@ -19,7 +20,7 @@ export default function LoginPage({ authStatus, onDone }: Props) {
     setError('')
     try {
       const { url } = await api.auth.extrovertStart()
-      window.location.href = url
+      startExtrovertOAuth(url)
     } catch (e: any) {
       setError(e.message || 'Could not start Extrovert login')
       setExtrovertLoading(false)

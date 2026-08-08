@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { api } from '../api'
+import { startExtrovertOAuth } from '../oauth'
 import type { User } from '../types'
 import { X, UserRound, LogIn, Loader2, CheckCircle2, Link2, Trash2, AlertTriangle } from 'lucide-react'
 import SubscriptionSection from './SubscriptionPage'
@@ -22,7 +23,7 @@ function AccountPanel({ currentUser, onClose, onRefreshUser }: Props) {
     setError(null)
     try {
       const { url } = await api.auth.extrovertStart('link')
-      window.location.href = url
+      startExtrovertOAuth(url)
     } catch (e: any) {
       setError(e.message || 'Could not start Extrovert linking')
       setBusy(false)

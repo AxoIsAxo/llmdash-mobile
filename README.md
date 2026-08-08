@@ -171,6 +171,10 @@ Edit `frontend/capacitor.config.ts` (`appId`, `appName`) and `frontend/android/a
 
 JWT auth tokens are stored in `@capacitor/preferences` on Android (encrypted shared prefs) and fall back to `localStorage` in a regular browser. See `frontend/src/storage.ts`.
 
+### Extrovert (OIDC) login on Android
+
+A plain `window.location.href` to the Extrovert authorization URL would make Capacitor hand the page to the OS browser, where the server callback stores the JWT — the app would never see it. Instead the frontend (`frontend/src/oauth.ts`) routes the flow through the custom `llmdash-oauth://` scheme, which `MainActivity`'s `WebViewClient` intercepts: the whole OIDC round-trip stays inside the WebView, the JWT is read from the server callback page's `localStorage` and written to the same `CapacitorStorage` prefs that `storage.ts` reads, then the app reloads into the bundled UI. Login and "Connect with Extrovert" (Account panel) both use this path.
+
 ### Native plugins enabled
 
 | Plugin | Purpose |
