@@ -3,6 +3,7 @@ import io
 import logging
 import os
 import tempfile
+import threading
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -11,6 +12,9 @@ _whisper_model = None
 _loaded_model_size = None
 _loaded_compute_type = None
 _loaded_device = None
+# Serializes model loading: the boot warmup (main.py) and a voice message that
+# arrives before it finishes can otherwise both start a (download + load) at once.
+_load_lock = threading.Lock()
 
 VALID_MODEL_SIZES = (
     "tiny",
@@ -103,11 +107,24 @@ def get_model():
             compute_type = f"{compute_type}_float16"
 
     if (
-        _whisper_model is None
-        or _loaded_model_size != size
-        or _loaded_compute_type != compute_type
-        or _loaded_device != device
+        _whisper_model is not None
+        and _loaded_model_size == size
+        and _loaded_compute_type == compute_type
+        and _loaded_device == device
     ):
+        return _whisper_model
+
+    # Load inside the lock, then re-check: two threads (boot warmup + a voice
+    # message) can reach here together — without the lock the loser would start
+    # a second download/load, doubling startup latency and RAM.
+    with _load_lock:
+        if (
+            _whisper_model is not None
+            and _loaded_model_size == size
+            and _loaded_compute_type == compute_type
+            and _loaded_device == device
+        ):
+            return _whisper_model
         from faster_whisper import WhisperModel
         logger.info(
             f"Loading faster-whisper model: {size} (device={device}, compute_type={compute_type})"

@@ -891,9 +891,11 @@ async def transcribe_voice(file: UploadFile = File(...), current_user: dict = De
         if provider == "openrouter":
             filename = file.filename or "audio.webm"
             content_type = file.content_type or "audio/webm"
-            text = transcribe_audio_openrouter(content, filename=filename, content_type=content_type)
+            text = await asyncio.to_thread(
+                transcribe_audio_openrouter, content, filename, content_type
+            )
         else:
-            text = transcribe_audio(content)
+            text = await asyncio.to_thread(transcribe_audio, content)
         return {"text": text}
     except Exception as e:
         raise HTTPException(500, f"Transcription failed: {str(e)}")
@@ -1391,11 +1393,12 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                         if whisper_provider_setting == "openrouter":
                             ct = att_type.lstrip(".") or "webm"
                             mime = f"audio/{ct if ct else 'webm'}"
-                            whisper_text = transcribe_audio_openrouter(
-                                audio_bytes, filename=att_filename, content_type=mime
+                            whisper_text = await asyncio.to_thread(
+                                transcribe_audio_openrouter,
+                                audio_bytes, filename=att_filename, content_type=mime,
                             )
                         else:
-                            whisper_text = transcribe_audio(audio_bytes)
+                            whisper_text = await asyncio.to_thread(transcribe_audio, audio_bytes)
                     except Exception as e:
                         whisper_text = None
                         logger.warning(f"Failed to transcribe audio {att_filename}: {e}")
