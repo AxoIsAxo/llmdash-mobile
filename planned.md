@@ -227,6 +227,50 @@ Free-plan defaults).
 
 ---
 
+## P10 · Proton full integration (access tokens)
+
+**Goal:** The AI can **securely read (and, with explicit consent, use) the user's Proton Pass
+vaults** — logins, API keys, notes, identity/cards — via [Proton Pass access
+tokens](https://proton.me/support/pass-access-tokens). Tokens are scoped by the user to
+specific vaults (1h–1yr expiry), logged per-access with a reason by Proton itself, and revoked
+instantly by deleting the token — so the AI gets exactly the credentials it was granted,
+never the user's Proton password.
+
+- **Access token:** created at `pass.proton.me → Settings → Access tokens → New token` (name,
+  expiry, vault selection, "Use for AI agent" toggle → Proton hands back markdown instructions
+  for the agent). Requires Pass Plus / Proton Unlimited / Pass Professional / Workspace
+  Standard. The token is shown **once** — store it like a provider API key.
+- **CLI in the sandbox:** the [Pass CLI](https://protonpass.github.io/pass-cli) runs inside
+  the existing per-conversation sandbox (`backend/app/sandbox.py`); its `item list` /
+  `item get` / `item edit` commands talk to the user's vaults with the token. Auth
+  (`PROTON_PASS_TOKEN` or a per-user token row) is provisioned into the container at first
+  use, exactly like P4's per-repo credentials — never embedded in chat.
+- **Skills:** new `Skill` subclasses in `backend/app/skills/builtins/` —
+  `proton_pass_list` / `proton_pass_get` / `proton_pass_edit`, each passing a **reason**
+  string ("Log into my bank's API to reconcile subscriptions") that the CLI forwards to
+  Proton's agent-activity log — the user can see *why* every credential was accessed.
+- **`proton_pass_get` discipline:** the model must never echo credentials into the chat —
+  secrets are redacted in tool output (reuse P4's `_redact` / `all_credentials` scrub-list so
+  `run_command` output can't leak them either); the skill returns *what* was found
+  (site/username/notes), and the credential itself only goes to tools that need it (e.g. a
+  `web_scrape` with the token, or into the sandbox for an API call).
+- **Read-only by default:** list/get only. `proton_pass_edit` (create/update/delete items,
+  move between vaults) is a per-token opt-in and requires a per-action confirm in the chat UI,
+  same policy as P4's read-only repos and the existing `edit_document` discipline.
+- **Per-user opt-in:** each user links their own token (Settings → Proton), never a global
+  admin credential; the token's vault scope stays in Proton's control.
+
+**Safety:** token stored server-side (hashed/encrypted like API keys), vault scope + expiry
+enforced by Proton, redaction of every secret in chat/tool output, read-only default with
+opt-in writes + per-action confirmation, per-access reasons surfaced to the user in an audit
+view (Proton-side + a local `proton_access_log` mirror), and instant revocation by deleting
+the token. P9's entitlement gate covers *who* may link a token (paid-plan feature).
+
+**Effort:** 🔲 ~1 week (token storage + CLI provisioning + 3 skills + redaction + consent UI +
+audit view).
+
+---
+
 ## Status notes
 
 - **P4 shipped as:** `git_repos` / `git_action_log` / `git_credential_history` tables (migrated
@@ -266,5 +310,9 @@ Free-plan defaults).
 - **P9 (subscription gating)** is the biggest cross-cutting change — it touches the tool
   registry, every gated endpoint, and the Admin Panel. Design the entitlements schema before
   P7/P8 so their new features are gated from day one.
+- **P10 (Proton Pass)** reuses P4's credential storage/redaction pattern and the sandbox CLI
+  provisioning — build it after P4 (which is done) and alongside P9 (token linking should be a
+  paid entitlement). The Pass CLI's per-access reason field slots into the same audit
+  table design as P3's action log.
 
 No dates attached; this is the backlog, not a commitment.
