@@ -8,6 +8,8 @@ from ..base import Skill
 class RenderHtmlSkill(Skill):
     name = "render_html"
     entitlement = "render"
+    category = "render"
+    scopes = ('render',)
     description = "Render HTML with CSS and JavaScript in a sandboxed iframe preview. Returns HTML that the chat UI will display visually."
     input_schema = {
         "type": "object",
@@ -38,6 +40,8 @@ class RenderHtmlSkill(Skill):
 class RenderSvgSkill(Skill):
     name = "render_svg"
     entitlement = "render"
+    category = "render"
+    scopes = ('render',)
     description = "Create an SVG vector graphic and display it in the chat. Use this for diagrams, charts, icons, illustrations, flowcharts, network graphs, architectural diagrams, or any vector graphics that should render inline as proper SVG (scalable, interactive, stylable). Pass the complete <svg>...</svg> markup including XML namespace. The SVG will be rendered inline in the conversation."
     input_schema = {
         "type": "object",

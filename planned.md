@@ -301,7 +301,7 @@ manifest, per-user scoping, and a proper overview UI — instead of one flat bui
 skills can only consume credentials they declared, and marketplace skills are sandboxed by
 scope (never implicit full access).
 
-**Effort:** 🟡 ~1 week (manifest + registry refactor + per-user scoping + Skills UI).
+**Effort:** 🟢 implemented.
 
 ---
 
@@ -333,6 +333,21 @@ review gate).
 
 ## Status notes
 
+- **P11 shipped as:** skills are now self-contained manifest modules — every `Skill` carries
+  `version` / `author` / `source` (builtin|user|marketplace) / `category` / `scopes`
+  (declared permission scopes: git, web, files, sandbox, theme, render, …) plus the P9
+  `entitlement` key. The loader auto-discovers skills by scanning `skills/builtins/` and the
+  (P12-populated) `skills/marketplace/` package instead of a hand-maintained list. A
+  `user_skills` table (user_id, skill_name, enabled, config_json) gives every user
+  per-skill enable/disable + custom config; the model only sees the user's enabled set
+  (filtered together with P9 entitlements in `get_tool_definitions`, with a
+  defense-in-depth check at execution). Scope enforcement lives in the registry
+  (`execute(allowed_scopes=...)`) — ready for P12 marketplace installs. The old admin CRUD
+  for metadata-only DB skills is removed; `GET /api/skills` now returns every skill's
+  manifest + per-user state, with `PUT /api/skills/{name}/enable` and
+  `/config` per-user endpoints. UI: Agent → Skills tab (list grouped by source, manifest
+  details, permission badges, enable toggle, JSON config editor), gated by the
+  `skills_management` entitlement.
 - **P9 shipped as:** per-plan `entitlements` JSON on `subscription_plans` (19 feature keys —
   all existing features plus every planned one (P1/P2/P3/P7/P8/P10/P11/P12), enforced as each
   feature ships) and a per-model access gate `plan_model_limits.allowed`. Defaults are

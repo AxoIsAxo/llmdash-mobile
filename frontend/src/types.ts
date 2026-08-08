@@ -198,6 +198,21 @@ export interface UserSubscription {
   created_at: string;
 }
 
+// P11 — skill manifest + per-user state (GET /api/skills).
+export interface SkillInfo {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+  version: string;
+  author: string;
+  source: 'builtin' | 'user' | 'marketplace';
+  category: string;
+  scopes: string[];
+  entitlement: string | null;
+  user_enabled: boolean;
+  config: Record<string, unknown>;
+}
+
 export interface SubscribeResult {
   subscription_id: number;
   status: string;

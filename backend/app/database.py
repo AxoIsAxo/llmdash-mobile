@@ -169,6 +169,24 @@ class UserModelUsage(Base):
     __table_args__ = (UniqueConstraint("user_id", "model_id", name="uq_user_model_usage"),)
 
 
+class UserSkill(Base):
+    """P11 — per-user skill scoping: enable/disable + custom config.
+
+    Absence of a row means the skill is enabled for the user (default-on,
+    preserving current behavior); a row with enabled=False disables it.
+    config_json is the user's custom config for that skill."""
+
+    __tablename__ = "user_skills"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    skill_name = Column(String(255), nullable=False)
+    enabled = Column(Boolean, nullable=False, default=True)
+    config_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    __table_args__ = (UniqueConstraint("user_id", "skill_name", name="uq_user_skill"),)
+
+
 class UserSubscription(Base):
     __tablename__ = "user_subscriptions"
 
@@ -443,15 +461,19 @@ def _migrate(conn):
         if "allowed" not in plan_limit_cols:
             conn.exec_driver_sql("ALTER TABLE plan_model_limits ADD COLUMN allowed BOOLEAN NOT NULL DEFAULT 1")
         if "skill_configs" not in existing_tables:
+            # Legacy metadata-only table (pre-P11); kept only so existing DBs
+            # don't error — nothing reads it anymore.
+            pass
+        if "user_skills" not in existing_tables:
             conn.exec_driver_sql("""
-                CREATE TABLE IF NOT EXISTS skill_configs (
+                CREATE TABLE IF NOT EXISTS user_skills (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name VARCHAR(255) NOT NULL UNIQUE,
-                    description TEXT NOT NULL,
-                    input_schema_json TEXT NOT NULL,
-                    source VARCHAR(32) NOT NULL DEFAULT 'db',
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    skill_name VARCHAR(255) NOT NULL,
                     enabled BOOLEAN NOT NULL DEFAULT 1,
-                    user_id INTEGER
+                    config_json TEXT,
+                    created_at DATETIME,
+                    UNIQUE (user_id, skill_name)
                 )
             """)
         if "theme_history" not in existing_tables:

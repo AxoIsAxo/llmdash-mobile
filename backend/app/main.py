@@ -38,6 +38,7 @@ from .ai import get_provider, ToolDef
 from .skills import register_builtins
 from .skills.registry import skill_registry
 from .skills.integration import build_system_prompt
+from .skills.user_skills import get_user_disabled_skills, get_user_skill_configs
 from .config_file import ConfigFileManager
 from .sse import active_generations, push_to_queues, cleanup_generation
 from .model_capabilities import detect_audio_enabled
@@ -1153,9 +1154,13 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
     if not model.enabled:
         raise HTTPException(400, "Model is disabled")
 
-    # P9: entitlement flags + per-model allowlist of the effective plan.
+    # P9/P11: entitlement flags + per-model allowlist + per-user skill state.
     # Admins/owner are never locked out of models (they manage them).
     user_entitlements = current_user.get("entitlements") or {}
+    disabled_skills = await get_user_disabled_skills(db, current_user["user_id"])
+    skill_configs = await get_user_skill_configs(db, current_user["user_id"])
+    # P11 scope guard: marketplace skills may only use scopes builtins already use.
+    allowed_scopes = skill_registry.builtin_scope_union()
     if current_user.get("role") not in ("owner", "admin"):
         if model_id in await get_denied_model_ids(db, current_user["user_id"]):
             raise HTTPException(403, "This model is not included in your current plan")
@@ -1503,7 +1508,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
         messages.append({"role": "user", "content": req.message})
 
     if getattr(model, "tools_enabled", True):
-        tool_defs = skill_registry.get_tool_definitions(user_entitlements)
+        tool_defs = skill_registry.get_tool_definitions(user_entitlements, disabled_skills)
         tools = [ToolDef(**t) for t in tool_defs]
     else:
         tools = []
@@ -1750,10 +1755,14 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                             ent = skill_registry.entitlement_of(tc["name"])
                             if ent and not user_entitlements.get(ent, True):
                                 result = f"__TOOL_ERROR__: Tool '{tc['name']}' is not included in your current plan."
+                            elif tc["name"] in disabled_skills:
+                                result = f"__TOOL_ERROR__: Tool '{tc['name']}' is disabled for your account."
                             else:
                                 result = await skill_registry.execute(
                                     tc["name"], tc["arguments"],
+                                    allowed_scopes=allowed_scopes,
                                     _current_user=current_user, _conversation_id=req.conversation_id,
+                                    _skill_config=skill_configs.get(tc["name"], {}),
                                 )
                         except Exception as e:
                             result = f"__TOOL_ERROR__: Tool execution error: {e}"
@@ -2522,8 +2531,9 @@ async def serve_file(filename: str, current_user: dict = Depends(get_current_use
 # --- Tool info ---
 
 @router.get("/tools")
-async def list_tools(current_user: dict = Depends(get_current_user)):
-    return skill_registry.get_tool_definitions(current_user.get("entitlements") or {})
+async def list_tools(current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    disabled_skills = await get_user_disabled_skills(db, current_user["user_id"])
+    return skill_registry.get_tool_definitions(current_user.get("entitlements") or {}, disabled_skills)
 
 
 app.include_router(router)

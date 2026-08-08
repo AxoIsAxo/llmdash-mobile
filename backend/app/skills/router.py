@@ -1,133 +1,79 @@
-from __future__ import annotations
+"""P11 — per-user skill management API.
 
-import json
-import logging
-from typing import Optional
+GET /api/skills returns every registered skill (builtins + marketplace) with
+its manifest and the current user's state (enabled / custom config). PUT
+endpoints manage the per-user row. The old admin CRUD for metadata-only DB
+skills is gone — the manifest lives in the skill modules themselves.
+"""
+
+from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import SkillConfigDB
+from ..database import get_db
+from ..routers.auth import require_entitlement
 from .registry import skill_registry
-from ..database import async_session
-from ..routers.auth import get_current_user, require_role
-
-logger = logging.getLogger(__name__)
+from .user_skills import get_user_skill_states, upsert_user_skill
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
 
 
-class SkillConfigCreate(BaseModel):
-    name: str
-    description: str
-    input_schema: dict
-
-
-class SkillConfigUpdate(BaseModel):
-    description: Optional[str] = None
-    input_schema: Optional[dict] = None
-    enabled: Optional[bool] = None
-
-
-class SkillConfigResponse(BaseModel):
-    id: int
-    name: str
-    description: str
-    input_schema: dict
-    source: str
+class SkillEnableRequest(BaseModel):
     enabled: bool
 
 
+class SkillConfigRequest(BaseModel):
+    config: dict
+
+
 @router.get("")
-async def list_skills(current_user: dict = Depends(get_current_user)):
-    builtin_defs = skill_registry.get_tool_definitions(current_user.get("entitlements") or {})
-    async with async_session() as sess:
-        result = await sess.execute(
-            select(SkillConfigDB).where(
-                (SkillConfigDB.user_id == current_user["user_id"]) | (SkillConfigDB.user_id.is_(None))
-            )
-        )
-        db_skills = result.scalars().all()
-    builtin_names = {s["name"] for s in builtin_defs}
+async def list_skills(
+    current_user: dict = Depends(require_entitlement("skills_management")),
+    db: AsyncSession = Depends(get_db),
+):
+    states = await get_user_skill_states(db, current_user["user_id"])
     response = []
-    for s in builtin_defs:
-        response.append({"name": s["name"], "description": s["description"], "input_schema": s["input_schema"], "source": "builtin", "enabled": True})
-    for s in db_skills:
-        if s.name not in builtin_names:
-            response.append({
-                "id": s.id,
-                "name": s.name,
-                "description": s.description,
-                "input_schema": json.loads(s.input_schema_json) if isinstance(s.input_schema_json, str) else s.input_schema_json,
-                "source": s.source,
-                "enabled": s.enabled,
-            })
+    for skill in skill_registry.list_skills():
+        manifest = skill.to_manifest()
+        state = states.get(skill.name, {"enabled": True, "config": {}})
+        response.append({
+            **manifest,
+            "user_enabled": state["enabled"],
+            "config": state["config"],
+        })
     return response
 
 
-@router.post("", response_model=SkillConfigResponse)
-async def create_skill(req: SkillConfigCreate, current_user: dict = Depends(require_role("owner", "admin"))):
-    async with async_session() as sess:
-        existing = await sess.execute(select(SkillConfigDB).where(SkillConfigDB.name == req.name))
-        if existing.scalar_one_or_none():
-            raise HTTPException(409, f"Skill '{req.name}' already exists")
-        if skill_registry.get(req.name):
-            raise HTTPException(409, f"Skill '{req.name}' conflicts with a built-in tool")
-        # Skills are global (shared across admins). DB skills currently have no
-        # execution backend — they are metadata-only until a loader is implemented.
-        cfg = SkillConfigDB(
-            name=req.name,
-            description=req.description,
-            input_schema_json=json.dumps(req.input_schema),
-            source="db",
-            user_id=None,
-        )
-        sess.add(cfg)
-        await sess.commit()
-        await sess.refresh(cfg)
-        return SkillConfigResponse(
-            id=cfg.id,
-            name=cfg.name,
-            description=cfg.description,
-            input_schema=json.loads(cfg.input_schema_json),
-            source=cfg.source,
-            enabled=cfg.enabled,
-        )
+@router.put("/{skill_name}/enable")
+async def set_skill_enabled(
+    skill_name: str,
+    req: SkillEnableRequest,
+    current_user: dict = Depends(require_entitlement("skills_management")),
+    db: AsyncSession = Depends(get_db),
+):
+    if not skill_registry.get(skill_name):
+        raise HTTPException(404, f"Unknown skill: {skill_name}")
+    await upsert_user_skill(db, current_user["user_id"], skill_name, enabled=req.enabled)
+    await db.commit()
+    return {"status": "updated", "name": skill_name, "enabled": req.enabled}
 
 
-@router.put("/{skill_id}", response_model=SkillConfigResponse)
-async def update_skill(skill_id: int, req: SkillConfigUpdate, current_user: dict = Depends(require_role("owner", "admin"))):
-    async with async_session() as sess:
-        result = await sess.execute(select(SkillConfigDB).where(SkillConfigDB.id == skill_id))
-        cfg = result.scalar_one_or_none()
-        if not cfg:
-            raise HTTPException(404, "Skill not found")
-        if req.description is not None:
-            cfg.description = req.description
-        if req.input_schema is not None:
-            cfg.input_schema_json = json.dumps(req.input_schema)
-        if req.enabled is not None:
-            cfg.enabled = req.enabled
-        await sess.commit()
-        await sess.refresh(cfg)
-        return SkillConfigResponse(
-            id=cfg.id,
-            name=cfg.name,
-            description=cfg.description,
-            input_schema=json.loads(cfg.input_schema_json),
-            source=cfg.source,
-            enabled=cfg.enabled,
-        )
-
-
-@router.delete("/{skill_id}")
-async def delete_skill(skill_id: int, current_user: dict = Depends(require_role("owner", "admin"))):
-    async with async_session() as sess:
-        result = await sess.execute(select(SkillConfigDB).where(SkillConfigDB.id == skill_id))
-        cfg = result.scalar_one_or_none()
-        if not cfg:
-            raise HTTPException(404, "Skill not found")
-        await sess.delete(cfg)
-        await sess.commit()
-    return {"status": "deleted"}
+@router.put("/{skill_name}/config")
+async def set_skill_config(
+    skill_name: str,
+    req: SkillConfigRequest,
+    current_user: dict = Depends(require_entitlement("skills_management")),
+    db: AsyncSession = Depends(get_db),
+):
+    if not skill_registry.get(skill_name):
+        raise HTTPException(404, f"Unknown skill: {skill_name}")
+    import json as _json
+    await upsert_user_skill(
+        db, current_user["user_id"], skill_name,
+        config_json=_json.dumps(req.config) if req.config else None,
+    )
+    await db.commit()
+    return {"status": "updated", "name": skill_name, "config": req.config}

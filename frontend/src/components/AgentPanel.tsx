@@ -1,9 +1,10 @@
 import React, { useState } from 'react'
-import { FileText, Brain, Palette, GitBranch, X, Sparkles } from 'lucide-react'
+import { FileText, Brain, Palette, GitBranch, Puzzle, X, Sparkles } from 'lucide-react'
 import DocumentManager from './DocumentManager'
 import MemoryPanel from './MemoryPanel'
 import CustomCssPanel from './CustomCssPanel'
 import GitPanel from './GitPanel'
+import SkillsPanel from './SkillsPanel'
 import type { User } from '../types'
 
 interface Props {
@@ -15,7 +16,7 @@ interface Props {
   onAutoScrollChange?: (v: boolean) => void
 }
 
-type AgentTab = 'documents' | 'memory' | 'css' | 'git'
+type AgentTab = 'documents' | 'memory' | 'css' | 'git' | 'skills'
 
 export default function AgentPanel({ currentUser, onClose, currentCss, onCssSaved, autoScroll, onAutoScrollChange }: Props) {
   const isAdmin = currentUser.role === 'owner' || currentUser.role === 'admin'
@@ -27,12 +28,14 @@ export default function AgentPanel({ currentUser, onClose, currentCss, onCssSave
     memory: 'memory',
     css: 'theme_editing',
     git: 'git_access',
+    skills: 'skills_management',
   }
   const tabs = [
     { key: 'documents' as AgentTab, icon: FileText, label: 'Documents' },
     { key: 'memory' as AgentTab, icon: Brain, label: 'Memory' },
     { key: 'css' as AgentTab, icon: Palette, label: 'Appearance' },
     { key: 'git' as AgentTab, icon: GitBranch, label: 'Git' },
+    { key: 'skills' as AgentTab, icon: Puzzle, label: 'Skills' },
   ].filter(t => ent[tabGate[t.key]!] !== false)
 
   const [tab, setTab] = useState<AgentTab>(() => {
@@ -71,6 +74,7 @@ export default function AgentPanel({ currentUser, onClose, currentCss, onCssSave
               {tab === 'memory' && <MemoryPanel currentUser={currentUser} onClose={onClose} embedded />}
               {tab === 'css' && <CustomCssPanel currentCss={currentCss} onClose={onClose} onSaved={onCssSaved} embedded autoScroll={autoScroll} onAutoScrollChange={onAutoScrollChange} />}
               {tab === 'git' && <GitPanel isAdmin={isAdmin} />}
+              {tab === 'skills' && <SkillsPanel embedded />}
             </>
           )}
         </div>

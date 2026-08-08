@@ -64,6 +64,8 @@ async def _resolve_repo(repo_arg: str | None, conversation_id: int, user_id: int
 class GitCloneSkill(Skill):
     name = "git_clone"
     entitlement = "git_access"
+    category = "git"
+    scopes = ('git',)
     description = (
         "Clone an allowlisted Git repository into this conversation's persistent worktree "
         "so you can work in it (edit files, run tests, commit, push, open PRs). The clone "
@@ -95,6 +97,8 @@ class GitCloneSkill(Skill):
 class GitStatusSkill(Skill):
     name = "git_status"
     entitlement = "git_access"
+    category = "git"
+    scopes = ('git',)
     description = (
         "Show the state of the Git worktree(s): current branch, modified/untracked files, "
         "upstream and ahead/behind counts, recent commits. With no 'repo' argument it lists "
@@ -141,6 +145,8 @@ class GitStatusSkill(Skill):
 class GitDiffSkill(Skill):
     name = "git_diff"
     entitlement = "git_access"
+    category = "git"
+    scopes = ('git',)
     description = (
         "Show the diff of changes in the Git worktree: unstaged, staged, all local changes, "
         "or changes vs the remote branch. Use before committing or pushing so the user can "
@@ -171,6 +177,8 @@ class GitDiffSkill(Skill):
 class GitCommitSkill(Skill):
     name = "git_commit"
     entitlement = "git_access"
+    category = "git"
+    scopes = ('git',)
     description = (
         "Stage and commit changes in the Git worktree. The commit is ALWAYS authored by the "
         "LLMDash bot identity, never the user. Only works in repositories with write access."
@@ -201,6 +209,8 @@ class GitCommitSkill(Skill):
 class GitPushSkill(Skill):
     name = "git_push"
     entitlement = "git_access"
+    category = "git"
+    scopes = ('git',)
     description = (
         "Push the current branch to the repository's granted remote (origin). Refuses to push "
         "commits not authored by the LLMDash bot identity, refuses force-push, verifies the "
@@ -230,6 +240,8 @@ class GitPushSkill(Skill):
 class GitPrSkill(Skill):
     name = "git_pr"
     entitlement = "git_access"
+    category = "git"
+    scopes = ('git',)
     description = (
         "Open a pull/merge request for the current (or given) branch against the repository's "
         "default branch. Pushes the source branch first (author-enforced), then creates the PR "

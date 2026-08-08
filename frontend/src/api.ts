@@ -428,6 +428,20 @@ export const api = {
     reset: () => request<{ status: string; user: number }>('/memory', { method: 'DELETE' }),
   },
 
+  skills: {
+    list: () => request<import('./types').SkillInfo[]>('/skills'),
+    enable: (name: string, enabled: boolean) =>
+      request<{ status: string; name: string; enabled: boolean }>(`/skills/${encodeURIComponent(name)}/enable`, {
+        method: 'PUT',
+        body: JSON.stringify({ enabled }),
+      }),
+    config: (name: string, config: Record<string, unknown>) =>
+      request<{ status: string; name: string; config: Record<string, unknown> }>(`/skills/${encodeURIComponent(name)}/config`, {
+        method: 'PUT',
+        body: JSON.stringify({ config }),
+      }),
+  },
+
   git: {
     info: () => request<import('./types').GitInfo>('/git/info'),
     repos: {
