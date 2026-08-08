@@ -4,6 +4,7 @@ import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Bundle;
+import android.util.Log;
 import android.webkit.CookieManager;
 import android.webkit.ValueCallback;
 import android.webkit.WebResourceRequest;
@@ -39,6 +40,7 @@ public class MainActivity extends BridgeActivity {
     private static final String TOKEN_PREFS = "CapacitorStorage";
     private static final String TOKEN_KEY = "llmdash_token";
     private static final long OAUTH_TIMEOUT_MS = 10 * 60 * 1000L;
+    private static final String LOG_TAG = "LlmdashOAuth";
 
     /**
      * Extrovert's consent page renders its hidden _csrf field empty on a fresh
@@ -106,6 +108,7 @@ public class MainActivity extends BridgeActivity {
         @Override
         public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
             Uri url = request.getUrl();
+            Log.d(LOG_TAG, "shouldOverride(request) " + url + " oauthMode=" + oauthMode);
             if (OAUTH_SCHEME.equals(url.getScheme())) {
                 startOAuthFlow(view, url);
                 return true;
@@ -126,6 +129,7 @@ public class MainActivity extends BridgeActivity {
         @Override
         @SuppressWarnings("deprecation")
         public boolean shouldOverrideUrlLoading(WebView view, String urlString) {
+            Log.d(LOG_TAG, "shouldOverride(String) " + urlString + " oauthMode=" + oauthMode);
             Uri url = Uri.parse(urlString);
             if (OAUTH_SCHEME.equals(url.getScheme())) {
                 startOAuthFlow(view, url);
@@ -143,6 +147,7 @@ public class MainActivity extends BridgeActivity {
 
         private void startOAuthFlow(WebView view, Uri url) {
             // llmdash-oauth://start?target=<extrovert authorize url>&server=<server origin>
+            Log.d(LOG_TAG, "startOAuthFlow target=" + url.getQueryParameter("target") + " server=" + url.getQueryParameter("server"));
             if (oauthMode) {
                 if (isExpired()) {
                     // The previous flow timed out (e.g. stranded on a provider
@@ -186,6 +191,7 @@ public class MainActivity extends BridgeActivity {
         @Override
         public void onPageStarted(WebView view, String url, Bitmap favicon) {
             super.onPageStarted(view, url, favicon);
+            Log.d(LOG_TAG, "onPageStarted " + url + " host=" + safeHost(url) + " oauthMode=" + oauthMode);
             // If the user backs out of the login flow, we land back on the
             // app's own origin — stop treating the WebView as an OAuth shell.
             String appHost = appHost();
@@ -200,6 +206,8 @@ public class MainActivity extends BridgeActivity {
         @Override
         public void onPageFinished(WebView view, String url) {
             super.onPageFinished(view, url);
+            Log.d(LOG_TAG, "onPageFinished " + url + " host=" + safeHost(url) + " oauthMode=" + oauthMode
+                    + " title=" + view.getTitle());
             if (!oauthMode) return;
             if (isExpired()) {
                 endOAuthFlow(view);
@@ -226,11 +234,15 @@ public class MainActivity extends BridgeActivity {
                     "(function(){ try { var t = localStorage.getItem('" + TOKEN_KEY + "'); return t ? t : null; } catch(e) { return null; } })()",
                     (ValueCallback<String>) value -> {
                         String token = unquoteJson(value);
+                        Log.d(LOG_TAG, "localStorage read: " + (token == null ? "null" : "token len " + token.length())
+                                + " on " + pageUrl);
                         if (token != null && !token.isEmpty()) {
                             storeToken(token);
+                            Log.d(LOG_TAG, "token stored — ending flow (logged in)");
                             endOAuthFlow(view);
                         } else if (pageUrl.contains("/api/auth/extrovert/callback")) {
                             // Error / expired / cancelled login — drop back into the app.
+                            Log.d(LOG_TAG, "callback page without token — ending flow (login failed)");
                             endOAuthFlow(view);
                         }
                     });
