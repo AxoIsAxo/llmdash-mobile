@@ -13,7 +13,7 @@ import {
   Send, Plus, Key, MessageSquare, Trash2, ChevronLeft,
   ChevronRight, Wrench, Bot, Loader2, Terminal, Globe, FileText, Eye, Search,
   Copy, Check, RefreshCw, Square, ChevronUp, ChevronDown, Download,
-  Shield, LogOut, Settings, Minus, CreditCard, Brain, Image, Paperclip, X, File as FileIcon, Mic, UserRound, Sparkles
+  Shield, LogOut, Settings, Minus, CreditCard, Brain, Image, Paperclip, X, File as FileIcon, Mic, UserRound, Sparkles, Volume2
 } from 'lucide-react'
 import MarkdownRenderer from './components/MarkdownRenderer'
 import SetupWizard from './components/SetupWizard'
@@ -1324,6 +1324,8 @@ function App() {
                       expandedToolCalls={expandedToolCalls}
                       onToggleToolCall={toggleToolCall}
                       setSidePanel={setSidePanel}
+                      ttsEnabled={currentUser.entitlements?.tts !== false}
+                      youtubePreviewsEnabled={currentUser.entitlements?.youtube_previews !== false}
                     />
                     {siblings.length > 1 && (
                       <div className="flex items-center justify-center gap-1 mt-1 text-xs text-theme-muted">
@@ -1853,7 +1855,82 @@ function ThinkingSection({ message, messages, executingTools, expandedToolCalls,
 
 // --- Message Bubble ---
 
-function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCopy, copiedId, executingTools, expandedToolCalls, onToggleToolCall, setSidePanel }: {
+// P7 — TTS cache (message id -> blob URL) so replaying doesn't re-synthesize.
+const ttsAudioCache = new Map<string, string>()
+let ttsCurrentAudio: HTMLAudioElement | null = null
+let ttsStopCurrent: (() => void) | null = null
+const TTS_CACHE_MAX = 100
+
+function TtsPlayButton({ messageId, text }: { messageId: number; text: string }) {
+  const [state, setState] = useState<'idle' | 'loading' | 'playing'>('idle')
+  const inflightRef = useRef(false)
+
+  const play = async () => {
+    if (inflightRef.current) return
+    const key = `msg:${messageId}`
+    let url = ttsAudioCache.get(key)
+    if (!url) {
+      inflightRef.current = true
+      setState('loading')
+      try {
+        const blob = await api.chat.tts(text)
+        url = URL.createObjectURL(blob)
+        ttsAudioCache.set(key, url)
+        if (ttsAudioCache.size > TTS_CACHE_MAX) {
+          const oldest = ttsAudioCache.keys().next().value
+          if (oldest !== undefined) {
+            const oldUrl = ttsAudioCache.get(oldest)
+            if (oldUrl) URL.revokeObjectURL(oldUrl)
+            ttsAudioCache.delete(oldest)
+          }
+        }
+      } catch (e: any) {
+        console.error('TTS failed:', e)
+        alert('Speech synthesis failed: ' + (e.message || 'Unknown error'))
+        setState('idle')
+        inflightRef.current = false
+        return
+      }
+      inflightRef.current = false
+    }
+
+    // Stop whatever is playing (pauses it and resets that button's state).
+    if (ttsStopCurrent) ttsStopCurrent()
+    const audio = new Audio(url)
+    ttsCurrentAudio = audio
+    const cleanup = () => {
+      if (ttsCurrentAudio === audio) ttsCurrentAudio = null
+      if (ttsStopCurrent === stop) ttsStopCurrent = null
+      setState('idle')
+    }
+    const stop = () => {
+      if (ttsCurrentAudio === audio) ttsCurrentAudio?.pause()
+      cleanup()
+    }
+    ttsStopCurrent = stop
+    setState('playing')
+    audio.onended = cleanup
+    audio.onerror = cleanup
+    audio.play().catch(cleanup)
+  }
+
+  return (
+    <button
+      onClick={play}
+      disabled={state === 'loading'}
+      className="p-1 hover:bg-theme-bg-hover rounded transition-colors text-theme-muted hover:text-theme-accent-text disabled:opacity-50"
+      title={state === 'playing' ? 'Playing…' : 'Speak this reply'}
+    >
+      {state === 'loading' ? (
+        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+      ) : (
+        <Volume2 className={`w-3.5 h-3.5 ${state === 'playing' ? 'text-theme-accent-text' : ''}`} />
+      )}
+    </button>
+  )
+}
+
+function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCopy, copiedId, executingTools, expandedToolCalls, onToggleToolCall, setSidePanel, ttsEnabled, youtubePreviewsEnabled }: {
   message: Message
   msgIndex: number
   messages: Message[]
@@ -1865,6 +1942,8 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
   expandedToolCalls: Set<string>
   onToggleToolCall: (id: string) => void
   setSidePanel: (panel: SidePanel | null) => void
+  ttsEnabled: boolean
+  youtubePreviewsEnabled: boolean
 }) {
   if (message.role === 'tool') return null
 
@@ -1894,7 +1973,7 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
             )}
             {message.content && (
               <div className="bg-theme-bg-elevated rounded-xl px-4 py-2.5">
-                <MarkdownRenderer content={message.content} />
+                <MarkdownRenderer content={message.content} youtubePreviewsEnabled={youtubePreviewsEnabled} />
               </div>
             )}
             <MemoryPills items={message.memory_saved || []} />
@@ -1915,7 +1994,7 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
           <div className="llm-bubble llm-bubble-assistant max-w-[var(--theme-bubble-max-width)] min-w-0 space-y-2">
             {message.content && (
               <div className="bg-theme-bg-elevated rounded-xl px-4 py-2.5">
-                <MarkdownRenderer content={message.content} />
+                <MarkdownRenderer content={message.content} youtubePreviewsEnabled={youtubePreviewsEnabled} />
               </div>
             )}
             <div className="flex items-center gap-2 text-xs text-theme-purple ml-1">
@@ -1998,7 +2077,7 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
                   )
                 } catch { return <span key={i}>{part}</span> }
               }
-              return <MarkdownRenderer key={i} content={part} />
+              return <MarkdownRenderer key={i} content={part} youtubePreviewsEnabled={youtubePreviewsEnabled} />
             })}
           </div>
         </div>
@@ -2068,7 +2147,7 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
           </div>
         )}
         <div className={`llm-bubble ${isUser ? 'llm-bubble-user' : 'llm-bubble-assistant'} max-w-[var(--theme-bubble-max-width)] ${isUser ? 'bg-theme-msg-user' : 'bg-theme-bg-elevated'} rounded-xl px-4 py-2.5`}>
-          <MarkdownRenderer content={content} />
+          <MarkdownRenderer content={content} youtubePreviewsEnabled={youtubePreviewsEnabled} />
         </div>
         {isAssistant && message.memory_saved && message.memory_saved.length > 0 && (
           <MemoryPills items={message.memory_saved} />
@@ -2080,6 +2159,9 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
         )}
       </div>
       <div className={`flex gap-1 mt-0.5 ${isUser ? 'justify-end mr-10' : 'justify-start ml-10'}`}>
+        {isAssistant && !isGenerating && ttsEnabled && (
+          <TtsPlayButton messageId={message.id} text={content} />
+        )}
         <button onClick={() => onCopy(content, message.id)} className="p-1 hover:bg-theme-bg-hover rounded transition-colors text-theme-muted hover:text-theme-text" title="Copy">
           {copiedId === message.id ? <Check className="w-3.5 h-3.5 text-theme-accent-text" /> : <Copy className="w-3.5 h-3.5" />}
         </button>

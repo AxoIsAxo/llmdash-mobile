@@ -252,6 +252,12 @@ class AutoScrollUpdateRequest(BaseModel):
     auto_scroll: bool
 
 
+class TtsRequest(BaseModel):
+    # P7 text-to-speech: the text to speak + an optional provider voice id.
+    text: str = Field(..., min_length=1, max_length=4000)
+    voice: Optional[str] = Field(None, max_length=128)
+
+
 class SubscriptionPlanCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=64)
     price_sats: int = Field(..., ge=0)

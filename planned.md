@@ -173,7 +173,7 @@ with provider-agnostic TTS — but **`fish-audio/s2.1-pro-free:free` must work o
 user's token budget), model allowlist so arbitrary `audio:` model ids can't be requested, and
 timeouts on synthesis.
 
-**Effort:** 🔲 ~2 days (TTS endpoint + provider wiring + player UI + rate limit).
+**Effort:** 🟢 implemented.
 
 ---
 
@@ -195,7 +195,7 @@ duration — like YouTube itself, instead of a plain text link.
 **Safety:** client-side oEmbed fetch with a short timeout and no server round-trip;
 link-only fallback when metadata fails.
 
-**Effort:** 🔲 ~1 day (link detection + card UI + embed swap).
+**Effort:** 🟢 implemented.
 
 ---
 
@@ -332,6 +332,29 @@ without a code change, with review and sandboxing built in.
 
 ## Status notes
 
+- **P7 shipped as:** `POST /api/chat/tts` synthesizes a reply through OpenRouter's audio
+  output modality (`modalities: ["audio"]`, `audio: {voice, format}`), default model
+  `fish-audio/s2.1-pro-free:free` — works out of the box with just `OPENROUTER_API_KEY`
+  (config: `TTS_PROVIDER` / `TTS_OPENROUTER_MODEL` / `TTS_VOICE`, same pattern as Whisper
+  STT in `tts.py`). The model id is server-side only (no client-supplied models); an
+  optional client `voice` is validated. Returns raw `audio/mpeg` bytes; the response parser
+  handles both `message.audio.data` and content-part audio shapes. TTS burns the user's
+  token budget: an estimated cost (chars/4, min 25) is checked against the effective
+  limit (user/plan `token_limit`) before synthesis and charged to `User.token_usage` +
+  `TokenUsageLog` after success; gated by the `tts` entitlement. Frontend: a voice icon
+  under finished assistant messages plays the reply via an inline `Audio` element, with a
+  per-session per-message cache (no re-synthesis on replay), in-flight guard, cache cap,
+  and single-playing-audio semantics; icon hidden when the plan locks TTS.
+- **P8 shipped as:** YouTube link previews in `MarkdownRenderer` — `youtube.com/watch?v=`,
+  `youtu.be/`, `/shorts/` and `/embed/` links (ids validated to the exact 11-char format)
+  render a preview card: client-side oEmbed fetch (6s AbortController timeout, hard-coded
+  host, no server round-trip) for title/author/thumbnail with the stable
+  `i.ytimg.com/vi/<id>/hqdefault.jpg` fallback, and a play button that swaps in the
+  `youtube.com/embed/<id>` iframe (works with the app's `COEP: credentialless` header).
+  Bare YouTube URLs in prose are auto-linked via a code-block-aware preprocessor so cards
+  appear even without markdown link syntax; non-YouTube URLs are untouched and link-only
+  fallback applies when metadata fails. Gated by the `youtube_previews` entitlement
+  (passed as a prop from the user's entitlements).
 - **P12 shipped as:** browseable + installable skill marketplace. `GET /api/marketplace`
   returns the bundled catalog (`backend/app/marketplace_catalog.json`, empty by default,
   owner-editable) plus installed skills; `POST /api/marketplace/install {url}` clones a git

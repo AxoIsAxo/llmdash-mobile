@@ -416,6 +416,26 @@ export const api = {
       }
       return response.json() as Promise<import('./types').UploadResponse>;
     },
+
+    // P7 text-to-speech: synthesize the reply to an audio blob.
+    tts: async (text: string, voice?: string) => {
+      const token = getToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const body: Record<string, unknown> = { text };
+      if (voice) body.voice = voice;
+      const response = await fetch(`${BASE}/chat/tts`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        let detail = ''
+        try { const err = await response.json(); detail = err.detail ? `: ${err.detail}` : '' } catch (e) { reportError('tts:errorBody', e) }
+        throw new Error(`TTS error ${response.status}${detail}`)
+      }
+      return response.blob();
+    },
   },
 
   memory: {

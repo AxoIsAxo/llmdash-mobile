@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     whisper_provider: str = "local"
     whisper_openrouter_model: str = "openai/whisper-1"
 
+    # P7 text-to-speech (OpenRouter audio output; fish-audio default)
+    tts_provider: str = "openrouter"
+    tts_openrouter_model: str = "fish-audio/s2.1-pro-free:free"
+    tts_voice: Optional[str] = None  # optional provider voice id
+
     # Cross-session memory
     memory_dir: str = "data/memory"
     memory_enabled: bool = True
@@ -71,6 +76,9 @@ ENV_VAR_MAP = {
     "WHISPER_BEAM_SIZE": "whisper_beam_size",
     "WHISPER_PROVIDER": "whisper_provider",
     "WHISPER_OPENROUTER_MODEL": "whisper_openrouter_model",
+    "TTS_PROVIDER": "tts_provider",
+    "TTS_OPENROUTER_MODEL": "tts_openrouter_model",
+    "TTS_VOICE": "tts_voice",
     "MEMORY_DIR": "memory_dir",
     "MEMORY_ENABLED": "memory_enabled",
     "MEMORY_EXTRACT_MODEL": "memory_extract_model",

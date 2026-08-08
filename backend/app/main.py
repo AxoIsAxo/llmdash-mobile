@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI, Depends, HTTPException, APIRouter, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse
+from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -33,6 +33,7 @@ from .models import (
     ModelReorderRequest,
     ImageGenerationRequest, ImageGenerationResponse,
     UploadResponse, FileUploadSettings, FileUploadSettingsUpdate,
+    TtsRequest,
 )
 from .ai import get_provider, ToolDef
 from .skills import register_builtins
@@ -53,7 +54,8 @@ from .routers.theme import router as theme_router
 from .routers.memory import router as memory_router
 from .routers.git import router as git_router
 from .routers.marketplace import router as marketplace_router
-from .entitlements import get_denied_model_ids
+from .entitlements import get_denied_model_ids, get_effective_plan
+from .tts import synthesize_speech as tts_synthesize, validate_voice as tts_validate_voice
 from .memory.capture import assistant_turn_summary, capture_assistant_reply, capture_user_message
 from .memory import config as mem_cfg
 from .memory.commands import maybe_run_command as memory_maybe_run_command
@@ -909,6 +911,52 @@ async def transcribe_voice(file: UploadFile = File(...), current_user: dict = De
         return {"text": text}
     except Exception as e:
         raise HTTPException(500, f"Transcription failed: {str(e)}")
+
+
+# --- P7: text-to-speech ---
+
+@router.post("/chat/tts")
+async def synthesize_speech(
+    req: TtsRequest,
+    current_user: dict = Depends(require_entitlement("tts")),
+    db: AsyncSession = Depends(get_db),
+):
+    if req.voice and not tts_validate_voice(req.voice):
+        raise HTTPException(400, "Invalid voice id")
+    text = (req.text or "").strip()
+    if not text:
+        raise HTTPException(400, "No text to synthesize")
+    if len(text) > 4000:
+        raise HTTPException(400, "Text too long (max 4000 chars)")
+
+    # TTS burns the user's token budget (same accounting as chat_stream):
+    # estimate cost, refuse when the effective limit would be exceeded, and
+    # charge only after a successful synthesis.
+    est_tokens = max(25, len(text) // 4)
+    user_result = await db.execute(select(User).where(User.id == current_user["user_id"]))
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(404, "User not found")
+    plan = await get_effective_plan(db, current_user["user_id"])
+    limit = user.token_limit
+    if plan is not None and plan.token_limit is not None:
+        limit = plan.token_limit if limit is None else min(limit, plan.token_limit)
+    if limit is not None and (user.token_usage or 0) + est_tokens > limit:
+        raise HTTPException(403, "Insufficient token budget for TTS (upgrade your plan or contact an admin)")
+
+    try:
+        audio = await asyncio.to_thread(tts_synthesize, text, req.voice)
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc))
+
+    user.token_usage = (user.token_usage or 0) + est_tokens
+    db.add(TokenUsageLog(
+        user_id=current_user["user_id"], model_id=None,
+        prompt_tokens=0, completion_tokens=est_tokens,
+        reasoning_tokens=None, total_tokens=est_tokens,
+    ))
+    await db.commit()
+    return Response(content=audio, media_type="audio/mpeg")
 
 
 @router.get("/uploads/{filename}")
