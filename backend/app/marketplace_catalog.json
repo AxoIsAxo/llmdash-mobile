@@ -1,0 +1,5 @@
+{
+  "schema": "llmdash-marketplace-catalog/1",
+  "note": "Bundled marketplace catalog. Add entries here (or install directly from a URL in Admin Panel → Marketplace). Each entry: {name, description, version, author, category, scopes, install_url}.",
+  "entries": []
+}

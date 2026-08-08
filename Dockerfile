@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-liberation \
     fonts-noto \
     ffmpeg \
+    git \
     tesseract-ocr \
     tesseract-ocr-eng \
     texlive-latex-base \

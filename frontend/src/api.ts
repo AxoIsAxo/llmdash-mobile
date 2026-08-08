@@ -442,6 +442,23 @@ export const api = {
       }),
   },
 
+  marketplace: {
+    list: () => request<import('./types').MarketplaceOverview>('/marketplace'),
+    install: (url: string) =>
+      request<{ name: string; version: string; source_url: string; approved: boolean }>('/marketplace/install', {
+        method: 'POST',
+        body: JSON.stringify({ url }),
+      }),
+    approve: (name: string) =>
+      request<{ status: string; name: string }>(`/marketplace/${encodeURIComponent(name)}/approve`, {
+        method: 'POST',
+      }),
+    uninstall: (name: string) =>
+      request<{ status: string; name: string }>(`/marketplace/${encodeURIComponent(name)}`, {
+        method: 'DELETE',
+      }),
+  },
+
   git: {
     info: () => request<import('./types').GitInfo>('/git/info'),
     repos: {

@@ -213,6 +213,35 @@ export interface SkillInfo {
   config: Record<string, unknown>;
 }
 
+// P12 — skill marketplace.
+export interface MarketplaceCatalogEntry {
+  name: string;
+  description: string;
+  version: string;
+  author: string;
+  category: string;
+  scopes: string[];
+  install_url: string;
+}
+
+export interface MarketplaceInstalled {
+  name: string;
+  version: string;
+  author: string;
+  description: string;
+  category: string;
+  scopes: string[];
+  entitlement: string | null;
+  source_url: string;
+  approved: boolean;
+  installed_at: string;
+}
+
+export interface MarketplaceOverview {
+  catalog: { schema: string; entries: MarketplaceCatalogEntry[] };
+  installed: MarketplaceInstalled[];
+}
+
 export interface SubscribeResult {
   subscription_id: number;
   status: string;

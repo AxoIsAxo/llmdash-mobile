@@ -326,13 +326,30 @@ without a code change, with review and sandboxing built in.
   scopes (P11), credentials never implicitly shared, uninstall removes the code + revokes
   access instantly.
 
-**Effort:** 🔲 ~1 week after P11 (catalog + install/update pipeline + marketplace UI +
-review gate).
+**Effort:** 🟢 implemented.
 
 ---
 
 ## Status notes
 
+- **P12 shipped as:** browseable + installable skill marketplace. `GET /api/marketplace`
+  returns the bundled catalog (`backend/app/marketplace_catalog.json`, empty by default,
+  owner-editable) plus installed skills; `POST /api/marketplace/install {url}` clones a git
+  repo (https/file/ssh), validates `manifest.json` (name/version/author/category/scopes ⊆
+  builtin scopes/entitlement ∈ known keys/flat entry module) and the entry module's Skill
+  subclass (name/version/scopes/entitlement must match the manifest), copies it into the
+  managed `skills/marketplace/` package where the P11 loader auto-discovers it, and forces
+  `source="marketplace"` so a repo can never self-grant. Review gate: installed skills are
+  `approved=False` and invisible to regular users (hidden from `/api/skills`,
+  `/api/tools` and the chat tool set/execution guard) until an owner/admin approves them
+  (`POST /{name}/approve`). `DELETE /{name}` uninstalls: removes the code, unregisters, and
+  purges per-user `user_skills` rows instantly. Scope sandboxing is P11's
+  `allowed_scopes` guard (chat passes the builtin scope union). Install/approve/uninstall
+  are owner/admin-only AND gated by the `skill_marketplace` entitlement. UI: Admin Panel →
+  Marketplace tab (catalog, install-from-URL, approve/uninstall); installed skills appear
+  in Agent → Skills for per-user enablement once approved. Dockerfile now installs `git`.
+  Trust model: installing runs the skill's code in the server process, so the owner is the
+  review gate; installed code lives in `skills/marketplace/` (ephemeral in containers).
 - **P11 shipped as:** skills are now self-contained manifest modules — every `Skill` carries
   `version` / `author` / `source` (builtin|user|marketplace) / `category` / `scopes`
   (declared permission scopes: git, web, files, sandbox, theme, render, …) plus the P9

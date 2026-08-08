@@ -39,6 +39,7 @@ from .skills import register_builtins
 from .skills.registry import skill_registry
 from .skills.integration import build_system_prompt
 from .skills.user_skills import get_user_disabled_skills, get_user_skill_configs
+from .skills.marketplace_store import unapproved_names
 from .config_file import ConfigFileManager
 from .sse import active_generations, push_to_queues, cleanup_generation
 from .model_capabilities import detect_audio_enabled
@@ -51,6 +52,7 @@ from .routers.subscriptions import router as subscriptions_router
 from .routers.theme import router as theme_router
 from .routers.memory import router as memory_router
 from .routers.git import router as git_router
+from .routers.marketplace import router as marketplace_router
 from .entitlements import get_denied_model_ids
 from .memory.capture import assistant_turn_summary, capture_assistant_reply, capture_user_message
 from .memory import config as mem_cfg
@@ -163,6 +165,7 @@ app.include_router(subscriptions_router)
 app.include_router(theme_router)
 app.include_router(memory_router)
 app.include_router(git_router)
+app.include_router(marketplace_router)
 from .skills.router import router as skills_router
 app.include_router(skills_router)
 
@@ -1154,10 +1157,13 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
     if not model.enabled:
         raise HTTPException(400, "Model is disabled")
 
-    # P9/P11: entitlement flags + per-model allowlist + per-user skill state.
+    # P9/P11/P12: entitlement flags + per-model allowlist + per-user skill state.
     # Admins/owner are never locked out of models (they manage them).
     user_entitlements = current_user.get("entitlements") or {}
     disabled_skills = await get_user_disabled_skills(db, current_user["user_id"])
+    if current_user.get("role") not in ("owner", "admin"):
+        # Review gate (P12): unapproved marketplace skills are invisible to users.
+        disabled_skills |= unapproved_names()
     skill_configs = await get_user_skill_configs(db, current_user["user_id"])
     # P11 scope guard: marketplace skills may only use scopes builtins already use.
     allowed_scopes = skill_registry.builtin_scope_union()
@@ -2533,6 +2539,8 @@ async def serve_file(filename: str, current_user: dict = Depends(get_current_use
 @router.get("/tools")
 async def list_tools(current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     disabled_skills = await get_user_disabled_skills(db, current_user["user_id"])
+    if current_user.get("role") not in ("owner", "admin"):
+        disabled_skills |= unapproved_names()
     return skill_registry.get_tool_definitions(current_user.get("entitlements") or {}, disabled_skills)
 
 

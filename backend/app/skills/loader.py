@@ -18,7 +18,7 @@ from .base import Skill
 from .registry import SkillRegistry, skill_registry
 
 
-def _discover_module(module: ModuleType, registry: SkillRegistry):
+def _discover_module(module: ModuleType, registry: SkillRegistry, source: str | None = None):
     for _, cls in inspect.getmembers(module, inspect.isclass):
         if cls is Skill or not issubclass(cls, Skill):
             continue
@@ -26,13 +26,17 @@ def _discover_module(module: ModuleType, registry: SkillRegistry):
         if not name or name.startswith("_"):
             continue
         try:
+            if source:
+                # Never trust the repo's own source claim (P12): modules from
+                # the marketplace package are always marketplace skills.
+                cls.source = source
             registry.register(cls())
         except Exception as exc:  # a broken marketplace skill must not kill startup
             import logging
             logging.getLogger(__name__).warning(f"skill discovery: failed to instantiate {cls.__name__}: {exc}")
 
 
-def _discover_package(package_name: str, registry: SkillRegistry):
+def _discover_package(package_name: str, registry: SkillRegistry, source: str | None = None):
     try:
         package = importlib.import_module(package_name)
     except ImportError:
@@ -46,11 +50,11 @@ def _discover_package(package_name: str, registry: SkillRegistry):
             import logging
             logging.getLogger(__name__).warning(f"skill discovery: failed to import {package_name}.{mod.name}: {exc}")
             continue
-        _discover_module(module, registry)
+        _discover_module(module, registry, source)
 
 
 def register_builtins() -> SkillRegistry:
     """Register every builtin skill plus any installed marketplace skills."""
     _discover_package("app.skills.builtins", skill_registry)
-    _discover_package("app.skills.marketplace", skill_registry)
+    _discover_package("app.skills.marketplace", skill_registry, source="marketplace")
     return skill_registry

@@ -2,10 +2,11 @@ import React, { useState, useEffect } from 'react'
 import {
   Users, UserPlus, Trash2, Key, Wrench, Shield, Globe,
   Loader2, X, Check, Settings, RotateCcw, CreditCard, Plus, Edit3, Brain,
-  ArrowUp, ArrowDown, Upload, File, Eye, Mic, Sparkles, SlidersHorizontal
+  ArrowUp, ArrowDown, Upload, File, Eye, Mic, Sparkles, SlidersHorizontal, Store
 } from 'lucide-react'
 import { api } from '../api'
 import { ENTITLEMENT_META, ENTITLEMENT_GROUPS } from '../entitlements'
+import MarketplaceTab from './MarketplaceTab'
 import type { User, ProviderConfig, ScannedProvider, ModelConfig, SubscriptionPlan, PlanModelLimit, UserSubscription as UserSub } from '../types'
 
 interface Props {
@@ -14,7 +15,7 @@ interface Props {
   onRefreshModels: () => void
 }
 
-type AdminTab = 'users' | 'providers' | 'models' | 'apikeys' | 'subscriptions' | 'uploads'
+type AdminTab = 'users' | 'providers' | 'models' | 'apikeys' | 'subscriptions' | 'marketplace' | 'uploads'
 
 export default function AdminPanel({ currentUser, onClose, onRefreshModels }: Props) {
   const [tab, setTab] = useState<AdminTab>('users')
@@ -35,6 +36,7 @@ export default function AdminPanel({ currentUser, onClose, onRefreshModels }: Pr
             { key: 'models' as AdminTab, icon: Wrench, label: 'Models' },
             { key: 'apikeys' as AdminTab, icon: Key, label: 'API Keys' },
             { key: 'subscriptions' as AdminTab, icon: CreditCard, label: 'Subscriptions' },
+            { key: 'marketplace' as AdminTab, icon: Store, label: 'Marketplace' },
             { key: 'uploads' as AdminTab, icon: Upload, label: 'Uploads' },
           ].map(t => (
             <button
@@ -54,6 +56,7 @@ export default function AdminPanel({ currentUser, onClose, onRefreshModels }: Pr
           {tab === 'models' && <ModelsTab onRefresh={onRefreshModels} />}
           {tab === 'apikeys' && <ApiKeysTab />}
           {tab === 'subscriptions' && <SubscriptionsTab currentUser={currentUser} />}
+          {tab === 'marketplace' && <MarketplaceTab currentUser={currentUser} />}
           {tab === 'uploads' && <UploadsTab />}
         </div>
       </div>
