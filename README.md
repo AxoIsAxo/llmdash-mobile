@@ -18,7 +18,7 @@ The web frontend (chat, models, tools, settings) is identical to the upstream LL
 ### Prerequisites
 
 - **Node.js 22+** and **npm**
-- **JDK 17 or newer** with `JAVA_HOME` set and `$JAVA_HOME/bin` on `PATH`
+- **JDK 21** (Capacitor's generated `capacitor.build.gradle` compiles with source/target 21) with `JAVA_HOME` set and `$JAVA_HOME/bin` on `PATH`
 - **Android SDK** with `platforms;android-35` and `build-tools;35.0.0` installed
 - An **Android device or emulator** for testing
 
