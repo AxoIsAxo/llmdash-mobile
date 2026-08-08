@@ -1,81 +1,74 @@
 export const BASE_THEME_CSS = `:root {
+  /* Extrovert · Ink (dark) — https://extrovert.redforged.eu */
   /* Surfaces */
-  --theme-bg: 3 7 18;
-  --theme-bg-secondary: 17 24 39;
-  --theme-bg-elevated: 31 41 55;
-  --theme-bg-hover: 55 65 81;
-  --theme-bg-active: 55 65 81;
+  --theme-bg: 16 19 31;
+  --theme-bg-secondary: 24 27 46;
+  --theme-bg-elevated: 33 37 64;
+  --theme-bg-hover: 42 47 77;
+  --theme-bg-active: 42 47 77;
   --theme-overlay: 0 0 0;
 
   /* Messages */
-  --theme-msg-user: 4 120 87;
-  --theme-msg-ai: 31 41 55;
+  --theme-msg-user: 56 36 59;
+  --theme-msg-ai: 24 27 46;
 
   /* Code */
-  --theme-code-bg: 26 27 38;
+  --theme-code-bg: 27 30 48;
 
   /* Text */
-  --theme-text: 243 244 246;
-  --theme-text-secondary: 209 213 219;
-  --theme-text-muted: 107 114 128;
-  --theme-text-subtle: 156 163 175;
-  --theme-text-accent: 52 211 153;
-  --theme-text-accent-dim: 110 231 183;
-  --theme-text-danger: 248 113 113;
-  --theme-icon-muted: 55 65 81;
+  --theme-text: 242 240 251;
+  --theme-text-secondary: 168 170 204;
+  --theme-text-muted: 118 121 160;
+  --theme-text-subtle: 143 146 184;
+  --theme-text-accent: 255 92 138;
+  --theme-text-accent-dim: 122 236 239;
+  --theme-text-danger: 255 93 108;
+  --theme-icon-muted: 58 63 94;
 
-  /* Accent (interactive) */
-  --theme-accent: 5 150 105;
-  --theme-accent-hover: 16 185 129;
+  /* Accent (interactive) — rose */
+  --theme-accent: 255 92 138;
+  --theme-accent-hover: 255 125 163;
 
   /* Danger */
-  --theme-danger: 220 38 38;
-  --theme-danger-hover: 239 68 68;
+  --theme-danger: 255 93 108;
+  --theme-danger-hover: 255 122 133;
 
   /* Borders */
-  --theme-border: 31 41 55;
-  --theme-border-light: 55 65 81;
+  --theme-border: 42 46 72;
+  --theme-border-light: 58 63 94;
 
   /* Icons */
-  --theme-icon-user: 37 99 235;
-  --theme-icon-ai: 5 150 105;
+  --theme-icon-user: 255 92 138;
+  --theme-icon-ai: 92 223 224;
 
   /* Special */
-  --theme-purple: 192 132 252;
-  --theme-amber: 251 191 36;
-  --theme-spinner: 52 211 153;
-  --theme-focus-ring: 16 185 129;
-  --theme-switch-off: 75 85 99;
-  --theme-blue: 37 99 235;
-  --theme-blue-text: 147 197 253;
+  --theme-purple: 167 139 250;
+  --theme-amber: 255 206 77;
+  --theme-spinner: 255 92 138;
+  --theme-focus-ring: 255 125 163;
+  --theme-switch-off: 72 77 106;
+  --theme-blue: 92 223 224;
+  --theme-blue-text: 122 236 239;
 
   /* Preview */
   --theme-preview-bg: 255 255 255;
 
   /* Border radius */
-  --theme-radius: 0.25rem;
-  --theme-radius-sm: 0.125rem;
-  --theme-radius-md: 0.375rem;
-  --theme-radius-lg: 0.5rem;
-  --theme-radius-xl: 0.75rem;
-  --theme-radius-2xl: 1rem;
+  --theme-radius: 0.75rem;
+  --theme-radius-sm: 0.5rem;
+  --theme-radius-md: 0.75rem;
+  --theme-radius-lg: 1rem;
+  --theme-radius-xl: 1.375rem;
+  --theme-radius-2xl: 1.5rem;
   --theme-radius-full: 9999px;
 
   /* Shadows */
-  --theme-shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1);
-  --theme-shadow-2xl: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+  --theme-shadow-xl: 0 6px 22px rgb(0 0 0 / 0.28);
+  --theme-shadow-2xl: 0 18px 48px rgb(0 0 0 / 0.38);
 
   /* Font families */
-  --theme-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --theme-font-sans: "Hanken Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --theme-font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-
-  /* Font sizes */
-  --theme-text-xs: 0.75rem;
-  --theme-text-sm: 0.875rem;
-  --theme-text-base: 1rem;
-  --theme-text-lg: 1.125rem;
-  --theme-text-xl: 1.25rem;
-  --theme-text-2xl: 1.5rem;
 
   /* Font weights */
   --theme-font-medium: 500;
@@ -91,6 +84,12 @@ export const BASE_THEME_CSS = `:root {
   --theme-chat-max-width: 56rem;
   --theme-panel-max-width: 48rem;
   --theme-dropdown-width: 16rem;
+  --theme-bubble-max-width: 75%;
+  --theme-side-panel-width: 420px;
+  --theme-avatar-size: 2rem;
+  --theme-message-gap: 1rem;
+  --theme-preview-height: 24rem;
+  --theme-auth-max-width: 24rem;
 
   /* Z-index */
   --theme-z-modal: 50;
@@ -108,6 +107,7 @@ const GLOBAL_CSS = `
 
 body {
   margin: 0;
+  padding-top: env(safe-area-inset-top);
   font-family: var(--theme-font-sans);
 }
 

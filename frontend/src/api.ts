@@ -1,5 +1,11 @@
 import { getToken, setToken } from './storage'
 
+function reportError(context: string, err: unknown) {
+  if (import.meta.env.DEV) {
+    console.warn(`[${context}]`, err);
+  }
+}
+
 const BASE = (import.meta.env.VITE_API_BASE as string) || '/api'
 
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
@@ -20,7 +26,7 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   }
   if (!res.ok) {
     let text = '';
-    try { text = await res.text() } catch {}
+    try { text = await res.text() } catch (e) { reportError('request:readBody', e) }
     throw new Error(`${res.status}: ${text || 'Unknown error'}`);
   }
   return res.json();
@@ -29,6 +35,7 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
 export const api = {
   getToken,
   setToken,
+  request,
 
   auth: {
     status: () =>
@@ -114,6 +121,34 @@ export const api = {
         }),
     },
 
+    theme: {
+      get: () => request<import('./types').ThemeInfo>('/auth/theme'),
+      put: (spec: unknown) =>
+        request<{ spec: import('./types').ThemeSpec; css: string }>('/auth/theme', {
+          method: 'PUT',
+          body: JSON.stringify({ spec }),
+        }),
+      reset: (preset: string) =>
+        request<{ spec: import('./types').ThemeSpec; css: string }>('/auth/theme/reset', {
+          method: 'POST',
+          body: JSON.stringify({ preset }),
+        }),
+      history: () => request<import('./types').ThemeHistoryEntry[]>('/auth/theme/history'),
+      restore: (historyId: number) =>
+        request<{ spec: import('./types').ThemeSpec; css: string }>(`/auth/theme/restore/${historyId}`, {
+          method: 'POST',
+        }),
+    },
+
+    autoScroll: {
+      get: () => request<{ auto_scroll: boolean }>('/auth/auto-scroll'),
+      put: (autoScroll: boolean) =>
+        request<{ status: string; auto_scroll: boolean }>('/auth/auto-scroll', {
+          method: 'PUT',
+          body: JSON.stringify({ auto_scroll: autoScroll }),
+        }),
+    },
+
     providers: {
       list: () => request<import('./types').ProviderConfig[]>('/auth/providers'),
       update: (key: string, data: { name?: string; base_url?: string }) =>
@@ -122,6 +157,9 @@ export const api = {
           body: JSON.stringify(data),
         }),
     },
+    extrovertStart: (mode: 'login' | 'link' = 'login') =>
+      request<{ url: string }>(`/auth/extrovert/start${mode === 'link' ? '?mode=link' : ''}`),
+    deleteMe: () => request<{ status: string }>('/auth/me/delete', { method: 'POST' }),
   },
 
   models: {
@@ -139,6 +177,10 @@ export const api = {
       }),
     delete: (id: number) =>
       request<{ status: string }>(`/models/${id}`, { method: 'DELETE' }),
+    autoEnable: (id: number) =>
+      request<{ changed: string[]; capabilities: { audio: boolean; vision: boolean; source: string; input_modalities?: string[] } }>(`/models/${id}/auto-enable`, { method: 'POST' }),
+    detectCapabilities: (id: number) =>
+      request<{ audio: boolean; vision: boolean; source: string; input_modalities?: string[] }>(`/models/${id}/detect-capabilities`),
     reorder: (modelIds: number[]) =>
       request<{ status: string }>('/models/reorder', {
         method: 'PUT',
@@ -179,7 +221,18 @@ export const api = {
     status: () => request<import('./types').ConfigStatus>('/config/status'),
     uploads: {
       get: () => request<import('./types').FileUploadSettings>('/config/uploads'),
-      update: (data: { file_upload_enabled?: boolean; ocr_enabled?: boolean; ocr_strategy?: string; whisper_model?: string }) =>
+      update: (data: {
+        file_upload_enabled?: boolean;
+        ocr_enabled?: boolean;
+        ocr_strategy?: string;
+        whisper_model?: string;
+        whisper_compute_type?: string;
+        whisper_device?: string;
+        whisper_language?: string | null;
+        whisper_beam_size?: number;
+        whisper_provider?: string;
+        whisper_openrouter_model?: string;
+      }) =>
         request<import('./types').FileUploadSettings>('/config/uploads', {
           method: 'PUT',
           body: JSON.stringify(data),
@@ -191,12 +244,12 @@ export const api = {
     plans: {
       list: () => request<import('./types').SubscriptionPlan[]>('/subscriptions/plans'),
       public: () => request<import('./types').SubscriptionPlan[]>('/subscriptions/plans/public'),
-      create: (data: { name: string; price_sats: number; duration_days: number; token_limit?: number | null; image_limit?: number | null; enabled?: boolean }) =>
+      create: (data: { name: string; price_sats: number; duration_days: number; token_limit?: number | null; image_limit?: number | null; enabled?: boolean; entitlements?: Record<string, boolean> }) =>
         request<{ id: number; status: string }>('/subscriptions/plans', {
           method: 'POST',
           body: JSON.stringify(data),
         }),
-      update: (id: number, data: { name?: string; price_sats?: number; duration_days?: number; token_limit?: number | null; image_limit?: number | null; enabled?: boolean }) =>
+      update: (id: number, data: { name?: string; price_sats?: number; duration_days?: number; token_limit?: number | null; image_limit?: number | null; enabled?: boolean; entitlements?: Record<string, boolean> }) =>
         request<{ status: string }>(`/subscriptions/plans/${id}`, {
           method: 'PUT',
           body: JSON.stringify(data),
@@ -204,7 +257,7 @@ export const api = {
       delete: (id: number) =>
         request<{ status: string }>(`/subscriptions/plans/${id}`, { method: 'DELETE' }),
       limits: (planId: number) => request<import('./types').PlanModelLimit[]>(`/subscriptions/plans/${planId}/limits`),
-      setLimits: (planId: number, limits: { model_id: number; token_limit: number | null; image_limit?: number | null }[]) =>
+      setLimits: (planId: number, limits: { model_id: number; token_limit: number | null; image_limit?: number | null; allowed: boolean }[]) =>
         request<{ status: string }>(`/subscriptions/plans/${planId}/limits`, {
           method: 'PUT',
           body: JSON.stringify(limits),
@@ -239,11 +292,6 @@ export const api = {
   },
 
   chat: {
-    stream(convId: number, message: string, modelId?: number): EventSource {
-      const params = new URLSearchParams({ conversation_id: String(convId), message });
-      if (modelId) params.set('model_id', String(modelId));
-      return new EventSource(`${BASE}/chat/stream?${params}`);
-    },
     send: async function* (convId: number, message: string, modelId?: number, signal?: AbortSignal, attachments?: import('./types').AttachmentRecord[]) {
       const token = getToken();
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -262,7 +310,7 @@ export const api = {
       });
       if (!response.ok) {
         let detail = ''
-        try { const err = await response.json(); detail = err.detail ? `: ${err.detail}` : '' } catch {}
+        try { const err = await response.json(); detail = err.detail ? `: ${err.detail}` : '' } catch (e) { reportError('chat.send:errorBody', e) }
         throw new Error(`Chat error ${response.status}${detail}`)
       }
       const reader = response.body?.getReader();
@@ -281,7 +329,7 @@ export const api = {
             if (data === '[DONE]') return;
             try {
               yield JSON.parse(data) as import('./types').StreamEvent;
-            } catch { /* skip malformed */ }
+            } catch (e) { reportError('chat.send:parseEvent', e) }
           }
         }
       }
@@ -298,7 +346,7 @@ export const api = {
       });
       if (!response.ok) {
         let detail = ''
-        try { const err = await response.json(); detail = err.detail ? `: ${err.detail}` : '' } catch {}
+        try { const err = await response.json(); detail = err.detail ? `: ${err.detail}` : '' } catch (e) { reportError('chat.resume:errorBody', e) }
         throw new Error(`Resume error ${response.status}${detail}`)
       }
       const reader = response.body?.getReader();
@@ -317,7 +365,7 @@ export const api = {
             if (data === '[DONE]') return;
             try {
               yield JSON.parse(data) as import('./types').StreamEvent;
-            } catch { /* skip malformed */ }
+            } catch (e) { reportError('chat.resume:parseEvent', e) }
           }
         }
       }
@@ -337,7 +385,7 @@ export const api = {
       });
       if (!response.ok) {
         let detail = ''
-        try { const err = await response.json(); detail = err.detail ? `: ${err.detail}` : '' } catch {}
+        try { const err = await response.json(); detail = err.detail ? `: ${err.detail}` : '' } catch (e) { reportError('generateImage:errorBody', e) }
         throw new Error(`Image generation error ${response.status}${detail}`)
       }
       return response.json() as Promise<{ images: string[]; revised_prompt?: string }>;
@@ -355,7 +403,9 @@ export const api = {
         body: formData,
       });
       if (!response.ok) {
-        throw new Error(`Upload error ${response.status}`);
+        let detail = ''
+        try { const err = await response.json(); detail = err.detail ? `: ${err.detail}` : '' } catch (e) { reportError('upload:errorBody', e) }
+        throw new Error(`Upload error ${response.status}${detail}`)
       }
       return response.json() as Promise<import('./types').UploadResponse>;
     },
@@ -381,5 +431,105 @@ export const api = {
       }
       return response.json() as Promise<{ text: string }>;
     },
+
+    // P7 text-to-speech: synthesize the reply to an audio blob.
+    tts: async (text: string, voice?: string) => {
+      const token = getToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const body: Record<string, unknown> = { text };
+      if (voice) body.voice = voice;
+      const response = await fetch(`${BASE}/chat/tts`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        let detail = ''
+        try { const err = await response.json(); detail = err.detail ? `: ${err.detail}` : '' } catch (e) { reportError('tts:errorBody', e) }
+        throw new Error(`TTS error ${response.status}${detail}`)
+      }
+      return response.blob();
+    },
+  },
+
+  memory: {
+    status: () => request<import('./types').MemoryStatus>('/memory/status'),
+    deleteAtom: (atomId: string) =>
+      request<{ status: string; atom_id: string }>(`/memory/atoms/${encodeURIComponent(atomId)}`, { method: 'DELETE' }),
+    extract: () => request<{ processed: number; pending: number }>('/memory/extract', { method: 'POST' }),
+    consolidate: () => request<Record<string, unknown>>('/memory/consolidate', { method: 'POST' }),
+    lint: () => request<{ findings: import('./types').LintFinding[] }>('/memory/lint', { method: 'POST' }),
+    reset: () => request<{ status: string; user: number }>('/memory', { method: 'DELETE' }),
+  },
+
+  skills: {
+    list: () => request<import('./types').SkillInfo[]>('/skills'),
+    enable: (name: string, enabled: boolean) =>
+      request<{ status: string; name: string; enabled: boolean }>(`/skills/${encodeURIComponent(name)}/enable`, {
+        method: 'PUT',
+        body: JSON.stringify({ enabled }),
+      }),
+    config: (name: string, config: Record<string, unknown>) =>
+      request<{ status: string; name: string; config: Record<string, unknown> }>(`/skills/${encodeURIComponent(name)}/config`, {
+        method: 'PUT',
+        body: JSON.stringify({ config }),
+      }),
+  },
+
+  marketplace: {
+    list: () => request<import('./types').MarketplaceOverview>('/marketplace'),
+    install: (url: string) =>
+      request<{ name: string; version: string; source_url: string; approved: boolean }>('/marketplace/install', {
+        method: 'POST',
+        body: JSON.stringify({ url }),
+      }),
+    approve: (name: string) =>
+      request<{ status: string; name: string }>(`/marketplace/${encodeURIComponent(name)}/approve`, {
+        method: 'POST',
+      }),
+    uninstall: (name: string) =>
+      request<{ status: string; name: string }>(`/marketplace/${encodeURIComponent(name)}`, {
+        method: 'DELETE',
+      }),
+  },
+
+  git: {
+    info: () => request<import('./types').GitInfo>('/git/info'),
+    repos: {
+      list: () => request<import('./types').GitRepo[]>('/git/repos'),
+      create: (data: {
+        name: string;
+        clone_url: string;
+        access: string;
+        auth_type: string;
+        credential?: string;
+        default_branch?: string;
+        pr_preferred?: boolean;
+        enabled?: boolean;
+        global_scope?: boolean;
+      }) =>
+        request<import('./types').GitRepo>('/git/repos', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }),
+      update: (id: number, data: {
+        clone_url?: string;
+        access?: string;
+        auth_type?: string;
+        credential?: string;
+        clear_credential?: boolean;
+        default_branch?: string;
+        pr_preferred?: boolean;
+        enabled?: boolean;
+      }) =>
+        request<import('./types').GitRepo>(`/git/repos/${id}`, {
+          method: 'PUT',
+          body: JSON.stringify(data),
+        }),
+      delete: (id: number) =>
+        request<{ status: string }>(`/git/repos/${id}`, { method: 'DELETE' }),
+    },
+    audit: () => request<import('./types').GitAuditEntry[]>('/git/audit'),
   },
 };

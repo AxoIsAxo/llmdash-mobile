@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react'
 import {
   Users, UserPlus, Trash2, Key, Wrench, Shield, Globe,
   Loader2, X, Check, Settings, RotateCcw, CreditCard, Plus, Edit3, Brain,
-  ArrowUp, ArrowDown, Upload, File, Eye, Mic
+  ArrowUp, ArrowDown, Upload, File, Eye, Mic, Sparkles, SlidersHorizontal, Store
 } from 'lucide-react'
 import { api } from '../api'
+import { ENTITLEMENT_META, ENTITLEMENT_GROUPS } from '../entitlements'
+import MarketplaceTab from './MarketplaceTab'
 import type { User, ProviderConfig, ScannedProvider, ModelConfig, SubscriptionPlan, PlanModelLimit, UserSubscription as UserSub } from '../types'
 
 interface Props {
@@ -13,14 +15,14 @@ interface Props {
   onRefreshModels: () => void
 }
 
-type AdminTab = 'users' | 'providers' | 'models' | 'apikeys' | 'subscriptions' | 'uploads'
+type AdminTab = 'users' | 'providers' | 'models' | 'apikeys' | 'subscriptions' | 'marketplace' | 'uploads'
 
 export default function AdminPanel({ currentUser, onClose, onRefreshModels }: Props) {
   const [tab, setTab] = useState<AdminTab>('users')
 
   return (
     <div className="fixed inset-0 bg-theme-overlay/60 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-theme-bg-secondary rounded-2xl w-full max-w-3xl max-h-[85vh] flex flex-col border border-theme-border-light" onClick={e => e.stopPropagation()}>
+      <div className="llm-modal bg-theme-bg-secondary rounded-2xl w-full max-w-3xl max-h-[85vh] flex flex-col border border-theme-border-light" onClick={e => e.stopPropagation()}>
         <div className="p-4 border-b border-theme-border flex items-center justify-between shrink-0">
           <h2 className="text-lg font-semibold flex items-center gap-2">
             <Shield className="w-5 h-5 text-theme-accent-text" /> Admin Panel
@@ -34,6 +36,7 @@ export default function AdminPanel({ currentUser, onClose, onRefreshModels }: Pr
             { key: 'models' as AdminTab, icon: Wrench, label: 'Models' },
             { key: 'apikeys' as AdminTab, icon: Key, label: 'API Keys' },
             { key: 'subscriptions' as AdminTab, icon: CreditCard, label: 'Subscriptions' },
+            { key: 'marketplace' as AdminTab, icon: Store, label: 'Marketplace' },
             { key: 'uploads' as AdminTab, icon: Upload, label: 'Uploads' },
           ].map(t => (
             <button
@@ -53,6 +56,7 @@ export default function AdminPanel({ currentUser, onClose, onRefreshModels }: Pr
           {tab === 'models' && <ModelsTab onRefresh={onRefreshModels} />}
           {tab === 'apikeys' && <ApiKeysTab />}
           {tab === 'subscriptions' && <SubscriptionsTab currentUser={currentUser} />}
+          {tab === 'marketplace' && <MarketplaceTab currentUser={currentUser} />}
           {tab === 'uploads' && <UploadsTab />}
         </div>
       </div>
@@ -412,10 +416,11 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
   const [loading, setLoading] = useState(true)
   const [toggling, setToggling] = useState<Set<string>>(new Set())
   const [renaming, setRenaming] = useState<number | null>(null)
+  const [autoEnableMsg, setAutoEnableMsg] = useState<string>('')
   const [renameVal, setRenameVal] = useState('')
   const [configuringId, setConfiguringId] = useState<number | null>(null)
-  const [configForm, setConfigForm] = useState<{ temperature: number; max_tokens: number; thinking_enabled: boolean; thinking_budget_tokens: number; model_type: string; vision_enabled: boolean; tools_enabled: boolean }>({
-    temperature: 0.7, max_tokens: 4096, thinking_enabled: false, thinking_budget_tokens: 4000, model_type: 'chat', vision_enabled: false, tools_enabled: true,
+  const [configForm, setConfigForm] = useState<{ temperature: number; max_tokens: number; thinking_enabled: boolean; thinking_budget_tokens: number; model_type: string; vision_enabled: boolean; audio_enabled: boolean; tools_enabled: boolean }>({
+    temperature: 0.7, max_tokens: 4096, thinking_enabled: false, thinking_budget_tokens: 4000, model_type: 'chat', vision_enabled: false, audio_enabled: false, tools_enabled: true,
   })
   const [reordering, setReordering] = useState(false)
 
@@ -446,6 +451,7 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
           model_name: modelId,
           model_type: foundModel?.suggested_type || 'chat',
           vision_enabled: foundModel?.supports_vision || false,
+          audio_enabled: foundModel?.supports_audio || false,
           base_url: provider.base_url,
           api_key_env: provider.env_var,
           temperature: 0.7,
@@ -482,8 +488,27 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
       thinking_budget_tokens: model.thinking_budget_tokens || 4000,
       model_type: model.model_type || 'chat',
       vision_enabled: model.vision_enabled || false,
+      audio_enabled: model.audio_enabled || false,
       tools_enabled: model.tools_enabled ?? true,
     })
+  }
+
+  const handleAutoEnable = async (id: number) => {
+    try {
+      const res = await api.models.autoEnable(id)
+      if (res.changed.length > 0) {
+        loadAll()
+        onRefresh()
+      }
+      const cap = res.capabilities || {}
+      setAutoEnableMsg(
+        res.changed.length > 0
+          ? `Enabled: ${res.changed.join(', ')} (audio=${cap.audio}, vision=${cap.vision}, source=${cap.source})`
+          : `Already up to date. audio=${cap.audio}, vision=${cap.vision}, source=${cap.source}`
+      )
+    } catch (e) {
+      setAutoEnableMsg(`Auto-detect failed: ${e}`)
+    }
   }
 
   const handleConfigure = async (id: number) => {
@@ -495,6 +520,7 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
         thinking_budget_tokens: configForm.thinking_enabled ? configForm.thinking_budget_tokens : null,
         model_type: configForm.model_type,
         vision_enabled: configForm.vision_enabled,
+        audio_enabled: configForm.audio_enabled,
         tools_enabled: configForm.tools_enabled,
       })
       setConfiguringId(null)
@@ -511,14 +537,12 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
   })
 
   const handleMoveUp = async (idx: number) => {
-    console.log('handleMoveUp called, idx:', idx, 'reordering:', reordering)
     if (idx <= 0 || reordering) return
     setReordering(true)
     try {
       const reordered = [...enabledModels]
       ;[reordered[idx - 1], reordered[idx]] = [reordered[idx], reordered[idx - 1]]
       const ids = reordered.map(m => m.id)
-      console.log('Reordering model IDs:', ids)
       await api.models.reorder(ids)
       await loadAll()
       onRefresh()
@@ -527,14 +551,12 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
   }
 
   const handleMoveDown = async (idx: number) => {
-    console.log('handleMoveDown called, idx:', idx, 'reordering:', reordering)
     if (idx >= enabledModels.length - 1 || reordering) return
     setReordering(true)
     try {
       const reordered = [...enabledModels]
       ;[reordered[idx], reordered[idx + 1]] = [reordered[idx + 1], reordered[idx]]
       const ids = reordered.map(m => m.id)
-      console.log('Reordering model IDs:', ids)
       await api.models.reorder(ids)
       await loadAll()
       onRefresh()
@@ -554,6 +576,14 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
       {loading && scanned.length === 0 && (
         <div className="flex items-center justify-center py-12 text-theme-subtle">
           <Loader2 className="w-6 h-6 animate-spin mr-2" /> Scanning providers...
+        </div>
+      )}
+
+      {autoEnableMsg && (
+        <div className="text-xs text-theme-muted bg-theme-bg-elevated border border-theme-border rounded-lg px-3 py-2 mb-2 flex items-start gap-2">
+          <Sparkles className="w-3.5 h-3.5 mt-0.5 shrink-0 text-theme-purple" />
+          <span>{autoEnableMsg}</span>
+          <button onClick={() => setAutoEnableMsg('')} className="ml-auto shrink-0 text-theme-subtle hover:text-theme-text"><X className="w-3.5 h-3.5" /></button>
         </div>
       )}
 
@@ -625,6 +655,13 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
                       title="Configure"
                     >
                       <Settings className="w-3.5 h-3.5 text-theme-subtle hover:text-theme-text" />
+                    </button>
+                    <button
+                      onClick={() => handleAutoEnable(model.id)}
+                      className="p-1.5 hover:bg-theme-bg-active rounded-lg transition-colors shrink-0"
+                      title="Auto-detect capabilities from provider"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-theme-subtle hover:text-theme-text" />
                     </button>
                     <button
                       onClick={async () => {
@@ -704,6 +741,18 @@ function ModelsTab({ onRefresh }: { onRefresh: () => void }) {
                           <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${configForm.vision_enabled ? 'left-4' : 'left-0.5'}`} />
                         </button>
                         <span className="text-xs text-theme-muted">{configForm.vision_enabled ? 'Enabled' : 'Disabled'}</span>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <label className="text-xs text-theme-subtle w-24 shrink-0 flex items-center gap-1">
+                          <Mic className="w-3 h-3" /> Audio
+                        </label>
+                        <button
+                          onClick={() => setConfigForm(f => ({ ...f, audio_enabled: !f.audio_enabled }))}
+                          className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${configForm.audio_enabled ? 'bg-theme-purple' : 'bg-theme-switch-off'}`}
+                        >
+                          <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${configForm.audio_enabled ? 'left-4' : 'left-0.5'}`} />
+                        </button>
+                        <span className="text-xs text-theme-muted">{configForm.audio_enabled ? 'Enabled' : 'Disabled'}</span>
                       </div>
                       <div className="flex items-center gap-4">
                         <label className="text-xs text-theme-subtle w-24 shrink-0 flex items-center gap-1">
@@ -854,7 +903,11 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
   const [limits, setLimits] = useState<PlanModelLimit[]>([])
   const [limitValues, setLimitValues] = useState<Record<number, string>>({})
   const [limitImageValues, setLimitImageValues] = useState<Record<number, string>>({})
+  const [limitAllowed, setLimitAllowed] = useState<Record<number, boolean>>({})
   const [savingLimits, setSavingLimits] = useState(false)
+  const [entPlan, setEntPlan] = useState<number | null>(null)
+  const [entEdit, setEntEdit] = useState<Record<string, boolean>>({})
+  const [savingEnt, setSavingEnt] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -878,9 +931,15 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
       setLimits(data)
       const vals: Record<number, string> = {}
       const imgVals: Record<number, string> = {}
-      data.forEach(l => { vals[l.model_id] = l.token_limit?.toString() || ''; imgVals[l.model_id] = l.image_limit?.toString() || '' })
+      const allowed: Record<number, boolean> = {}
+      data.forEach(l => {
+        vals[l.model_id] = l.token_limit?.toString() || ''
+        imgVals[l.model_id] = l.image_limit?.toString() || ''
+        allowed[l.model_id] = l.allowed !== false
+      })
       setLimitValues(vals)
       setLimitImageValues(imgVals)
+      setLimitAllowed(allowed)
     } catch (e) { console.error('loadLimits failed:', e) }
   }
 
@@ -935,11 +994,29 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
         model_id: m.id,
         token_limit: limitValues[m.id] ? parseInt(limitValues[m.id]) : null,
         image_limit: limitImageValues[m.id] ? parseInt(limitImageValues[m.id]) : null,
+        allowed: limitAllowed[m.id] !== false,
       }))
       await api.subscriptions.plans.setLimits(limitsPlan!, entries)
       setLimitsPlan(null)
     } catch (e: any) { setError(e.message) }
     setSavingLimits(false)
+  }
+
+  const openEntitlements = (plan: SubscriptionPlan) => {
+    setEntPlan(plan.id)
+    setEntEdit({ ...(plan.entitlements || {}) })
+  }
+
+  const handleSaveEntitlements = async () => {
+    if (entPlan === null) return
+    setSavingEnt(true)
+    setError('')
+    try {
+      await api.subscriptions.plans.update(entPlan, { entitlements: entEdit })
+      setEntPlan(null)
+      load()
+    } catch (e: any) { setError(e.message) }
+    setSavingEnt(false)
   }
 
   const handleSubStatus = async (subId: number, status: string) => {
@@ -1110,6 +1187,13 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
                         <Wrench className="w-3.5 h-3.5" />
                       </button>
                       <button
+                        onClick={() => entPlan === plan.id ? setEntPlan(null) : openEntitlements(plan)}
+                        className={`p-1.5 rounded text-xs ${entPlan === plan.id ? 'bg-theme-accent/30 text-theme-accent-text' : 'hover:bg-theme-bg-active text-theme-muted hover:text-theme-text'}`}
+                        title="Feature entitlements"
+                      >
+                        <SlidersHorizontal className="w-3.5 h-3.5" />
+                      </button>
+                      <button
                         onClick={() => {
                           setEditingPlan(plan.id)
                           setEditPlanData({
@@ -1145,6 +1229,22 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
                           {models.map(m => (
                             <div key={m.id} className="flex items-center gap-2">
                               <span className="text-xs text-theme-subtle w-32 truncate">{m.name}</span>
+                              <button
+                                type="button"
+                                role="switch"
+                                aria-checked={limitAllowed[m.id] !== false}
+                                onClick={() => setLimitAllowed(a => ({ ...a, [m.id]: a[m.id] !== false ? false : true }))}
+                                className={`relative w-8 h-5 rounded-full transition-colors shrink-0 ${
+                                  limitAllowed[m.id] !== false ? 'bg-theme-accent' : 'bg-theme-bg-active border border-theme-border-light'
+                                }`}
+                                title={limitAllowed[m.id] !== false ? 'Allowed — click to deny this model for this plan' : 'Denied — click to allow'}
+                              >
+                                <span
+                                  className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                                    limitAllowed[m.id] !== false ? 'translate-x-3' : ''
+                                  }`}
+                                />
+                              </button>
                               <input
                                 type="number"
                                 value={limitValues[m.id] || ''}
@@ -1166,6 +1266,50 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
                           </button>
                         </>
                       )}
+                    </div>
+                  )}
+
+                  {entPlan === plan.id && (
+                    <div className="mt-3 pt-3 border-t border-theme-border-light space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs text-theme-muted">
+                          Feature entitlements for <span className="text-theme-accent-text">{plan.name}</span>.
+                          All default to enabled — turn a feature off to lock it for users of this plan.
+                        </p>
+                      </div>
+                      {ENTITLEMENT_GROUPS.map(g => (
+                        <div key={g.key}>
+                          <p className="text-xs font-semibold text-theme-subtle uppercase tracking-wider mb-1.5">{g.label}</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            {ENTITLEMENT_META.filter(e => e.group === g.key).map(e => (
+                              <div key={e.key} className="flex items-center justify-between gap-2 bg-theme-bg-elevated/30 rounded-lg px-3 py-2" title={e.hint}>
+                                <span className="text-xs min-w-0 truncate">{e.label}</span>
+                                <button
+                                  type="button"
+                                  role="switch"
+                                  aria-checked={entEdit[e.key] !== false}
+                                  onClick={() => setEntEdit(prev => ({ ...prev, [e.key]: prev[e.key] !== false ? false : true }))}
+                                  className={`relative w-8 h-5 rounded-full transition-colors shrink-0 ${
+                                    entEdit[e.key] !== false ? 'bg-theme-accent' : 'bg-theme-bg-active border border-theme-border-light'
+                                  }`}
+                                >
+                                  <span
+                                    className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                                      entEdit[e.key] !== false ? 'translate-x-3' : ''
+                                    }`}
+                                  />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                      <div className="flex gap-2">
+                        <button onClick={handleSaveEntitlements} disabled={savingEnt} className="px-4 py-1.5 bg-theme-accent hover:bg-theme-accent-hover rounded text-sm disabled:opacity-50">
+                          {savingEnt ? 'Saving...' : 'Save Entitlements'}
+                        </button>
+                        <button onClick={() => setEntPlan(null)} className="px-4 py-1.5 hover:bg-theme-bg-active rounded text-sm">Cancel</button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1239,11 +1383,11 @@ function UploadsTab() {
 
   useEffect(() => { load() }, [])
 
-  const handleSave = async (key: string, value: boolean | string) => {
+  const handleSave = async (key: string, value: boolean | string | number | null) => {
     setSaving(true)
     setError('')
     try {
-      const update: Record<string, boolean | string> = {}
+      const update: Record<string, boolean | string | number | null> = {}
       update[key] = value
       const updated = await api.config.uploads.update(update)
       setSettings(updated)
@@ -1281,25 +1425,107 @@ function UploadsTab() {
         </div>
 
         <div className="mt-4 bg-theme-bg-elevated/40 rounded-lg p-4 space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm font-medium flex items-center gap-2">
-                <Mic className="w-4 h-4 text-theme-blue-text" />
-                Whisper Model (Speech-to-Text)
-              </div>
-              <p className="text-xs text-theme-muted mt-1">Choose the Whisper model for voice transcription. Tiny is faster, Small is more accurate</p>
+          <div>
+            <div className="text-sm font-medium flex items-center gap-2">
+              <Mic className="w-4 h-4 text-theme-blue-text" />
+              Speech-to-Text (faster-whisper, multilingual)
             </div>
-            <div className="flex items-center gap-2">
-              <span className={`text-xs cursor-pointer select-none ${settings.whisper_model === 'tiny' ? 'text-theme-text font-semibold' : 'text-theme-muted'}`} onClick={() => handleSave('whisper_model', 'tiny')}>Tiny</span>
-              <button
-                onClick={() => handleSave('whisper_model', settings.whisper_model === 'tiny' ? 'small' : 'tiny')}
+            <p className="text-xs text-theme-muted mt-1">Picks the Whisper model used to transcribe voice messages sent to models that don't natively understand audio. Audio-capable models (set per-model in the <span className="text-theme-accent-text">Models</span> tab) skip Whisper entirely and receive the audio directly.</p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="block">
+              <span className="text-xs text-theme-muted">Provider</span>
+              <select
+                value={settings.whisper_provider || 'local'}
                 disabled={saving}
-                className={`w-9 h-5 rounded-full transition-colors relative ${saving ? 'opacity-50' : ''} ${settings.whisper_model === 'small' ? 'bg-theme-blue' : 'bg-theme-switch-off'}`}
+                onChange={e => handleSave('whisper_provider', e.target.value)}
+                className="mt-1 w-full bg-theme-bg-elevated rounded px-2 py-1.5 text-sm border border-theme-border-light/30"
               >
-                <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${settings.whisper_model === 'small' ? 'left-4' : 'left-0.5'}`} />
-              </button>
-              <span className={`text-xs cursor-pointer select-none ${settings.whisper_model === 'small' ? 'text-theme-text font-semibold' : 'text-theme-muted'}`} onClick={() => handleSave('whisper_model', 'small')}>Small</span>
-            </div>
+                <option value="local">local — faster-whisper (on-device, free)</option>
+                <option value="openrouter">openrouter — Whisper via OpenRouter API</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-xs text-theme-muted">OpenRouter model (used when provider = openrouter)</span>
+              <input
+                value={settings.whisper_openrouter_model || ''}
+                disabled={saving}
+                onChange={e => handleSave('whisper_openrouter_model', e.target.value || 'openai/whisper-1')}
+                placeholder="openai/whisper-1"
+                className="mt-1 w-full bg-theme-bg-elevated rounded px-2 py-1.5 text-sm border border-theme-border-light/30"
+              />
+            </label>
+            <p className="text-xs text-theme-muted sm:col-span-2">
+              The OpenRouter provider requires <code>OPENROUTER_API_KEY</code> in <code>data/.env</code>. Local whisper settings below are still saved and used when the provider is set to <code>local</code>.
+            </p>
+
+            <label className="block">
+              <span className="text-xs text-theme-muted">Model</span>
+              <select
+                value={settings.whisper_model}
+                disabled={saving}
+                onChange={e => handleSave('whisper_model', e.target.value)}
+                className="mt-1 w-full bg-theme-bg-elevated rounded px-2 py-1.5 text-sm border border-theme-border-light/30"
+              >
+                <option value="tiny">tiny — fastest, ~75MB (real-time on CPU)</option>
+                <option value="base">base — fast, ~142MB</option>
+                <option value="small">small — accurate, ~466MB</option>
+                <option value="medium">medium — more accurate, ~1.5GB</option>
+                <option value="large-v3">large-v3 — most accurate, ~3.1GB</option>
+                <option value="distil-large-v3">distil-large-v3 — fast large, ~1.5GB</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-xs text-theme-muted">Beam size (1 = greedy, fastest)</span>
+              <input
+                type="number"
+                min={1}
+                max={10}
+                value={settings.whisper_beam_size}
+                disabled={saving}
+                onChange={e => handleSave('whisper_beam_size', Math.max(1, Math.min(10, parseInt(e.target.value || '1', 10))))}
+                className="mt-1 w-full bg-theme-bg-elevated rounded px-2 py-1.5 text-sm border border-theme-border-light/30"
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs text-theme-muted">Compute type</span>
+              <select
+                value={settings.whisper_compute_type}
+                disabled={saving}
+                onChange={e => handleSave('whisper_compute_type', e.target.value)}
+                className="mt-1 w-full bg-theme-bg-elevated rounded px-2 py-1.5 text-sm border border-theme-border-light/30"
+              >
+                <option value="int8">int8 — best on CPU (default)</option>
+                <option value="int8_float16">int8_float16 — mixed (CUDA)</option>
+                <option value="float16">float16 — GPU</option>
+                <option value="float32">float32 — max precision</option>
+                <option value="bfloat16">bfloat16 — newer GPU</option>
+                <option value="int16">int16 — CPU alt</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-xs text-theme-muted">Device</span>
+              <select
+                value={settings.whisper_device || 'auto'}
+                disabled={saving}
+                onChange={e => handleSave('whisper_device', e.target.value)}
+                className="mt-1 w-full bg-theme-bg-elevated rounded px-2 py-1.5 text-sm border border-theme-border-light/30"
+              >
+                <option value="auto">auto (cuda if available, else cpu)</option>
+                <option value="cpu">cpu</option>
+                <option value="cuda">cuda</option>
+              </select>
+            </label>
+            <label className="block sm:col-span-2">
+              <span className="text-xs text-theme-muted">Language (optional)</span>
+              <input
+                value={settings.whisper_language || ''}
+                disabled={saving}
+                onChange={e => handleSave('whisper_language', e.target.value || null)}
+                placeholder="auto-detect (en, de, fr, ...)"
+                className="mt-1 w-full bg-theme-bg-elevated rounded px-2 py-1.5 text-sm border border-theme-border-light/30"
+              />
+            </label>
           </div>
         </div>
 
@@ -1367,7 +1593,14 @@ function UploadsTab() {
           <p className="text-xs text-theme-accent-text/70">Vision-capable models can "see" and understand images directly. Examples: GPT-4o, Claude 3.5 Sonnet, Gemini Pro Vision, Qwen-VL. These models bypass OCR entirely for more accurate image understanding.</p>
           <p className="text-xs text-theme-accent-text/70 mt-1">Set each model's Vision capability in the <span className="text-theme-accent-text">Models</span> tab.</p>
         </div>
+
+        <div className="mt-2 p-4 bg-theme-purple/10 border border-theme-purple/20 rounded-lg">
+          <div className="text-xs text-theme-purple font-medium mb-1">What's an Audio Model?</div>
+          <p className="text-xs text-theme-purple/70">Audio-capable models can "hear" and understand voice recordings directly. Examples: gpt-4o-audio, Gemini 2.5, Qwen2-Audio. When a model has Audio enabled, voice recordings are sent to the model as audio instead of being transcribed with Whisper first — preserving tone, emotion, and other vocal cues that text-only transcription loses.</p>
+          <p className="text-xs text-theme-purple/70 mt-1">Set each model's Audio capability in the <span className="text-theme-purple">Models</span> tab. Models without Audio enabled will still use Whisper for voice messages (or the configured STT provider).</p>
+        </div>
       </div>
     </div>
   )
 }
+

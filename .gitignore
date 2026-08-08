@@ -42,6 +42,11 @@ captures/
 .kotlin/
 .externalNativeBuild/
 
+# --- Local tooling (venv/uv, not part of the project) ---
+.uv-cache/
+.uv-python/
+.reasonix/
+
 # --- IDE / editor --------------------------------------------
 .vscode/
 .idea/

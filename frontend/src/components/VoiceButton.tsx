@@ -5,10 +5,12 @@ import { api } from '../api'
 
 interface VoiceButtonProps {
   onTranscribed: (text: string) => void
+  onAudioCaptured?: (audioBlob: Blob, mimeType: string) => void
+  audioEnabled?: boolean
   disabled?: boolean
 }
 
-type ButtonState = 'idle' | 'recording' | 'transcribing' | 'error'
+type ButtonState = 'idle' | 'recording' | 'processing' | 'error'
 
 function base64ToBlob(base64: string, mimeType: string): Blob {
   const byteChars = atob(base64)
@@ -37,6 +39,8 @@ function extensionForMime(mimeType: string): string {
 
 export default function VoiceButton({
   onTranscribed,
+  onAudioCaptured,
+  audioEnabled = false,
   disabled = false,
 }: VoiceButtonProps) {
   const [buttonState, setButtonState] = useState<ButtonState>('idle')
@@ -70,7 +74,7 @@ export default function VoiceButton({
   }, [])
 
   const stopAndTranscribe = useCallback(async () => {
-    setButtonState('transcribing')
+    setButtonState('processing')
     try {
       const result: RecordingData = await VoiceRecorder.stopRecording()
       recordingRef.current = false
@@ -83,6 +87,14 @@ export default function VoiceButton({
       }
 
       const blob = base64ToBlob(base64, mimeType)
+
+      // TTS mode: hand the raw audio to the model instead of transcribing.
+      if (audioEnabled && onAudioCaptured) {
+        onAudioCaptured(blob, mimeType)
+        setButtonState('idle')
+        return
+      }
+
       const filename = `recording.${extensionForMime(mimeType)}`
       const data = await api.chat.transcribe(blob, filename)
       const text = data.text || ''
@@ -101,11 +113,10 @@ export default function VoiceButton({
       setErrorMsg(message || 'Transcription failed')
       setButtonState('error')
     }
-  }, [onTranscribed])
+  }, [onTranscribed, onAudioCaptured, audioEnabled])
 
   const handleClick = useCallback(async () => {
-    if (disabled) return
-    if (buttonState === 'transcribing') return
+    if (disabled || buttonState === 'processing') return
 
     if (buttonState === 'recording') {
       await stopAndTranscribe()
@@ -152,39 +163,46 @@ export default function VoiceButton({
   }, [])
 
   const showError = buttonState === 'error'
+  const isProcessing = buttonState === 'processing'
+
+  const titleText = isProcessing
+    ? audioEnabled
+      ? 'Sending audio...'
+      : 'Transcribing...'
+    : buttonState === 'recording'
+    ? 'Recording... click to stop'
+    : showError
+    ? errorMsg || 'Error'
+    : audioEnabled
+    ? 'Click to record — audio will be sent directly to the model'
+    : 'Click to start recording'
 
   return (
     <div className="relative">
       <button
         onClick={handleClick}
-        disabled={disabled || buttonState === 'transcribing'}
-        title={
-          buttonState === 'recording'
-            ? 'Recording... click to stop'
-            : buttonState === 'transcribing'
-            ? 'Transcribing...'
-            : showError
-            ? errorMsg || 'Error'
-            : 'Click to start recording'
-        }
+        disabled={disabled || isProcessing}
+        title={titleText}
         className={`p-3 rounded-xl transition-colors relative ${
           buttonState === 'recording'
             ? 'bg-theme-danger hover:bg-theme-danger-hover animate-pulse'
             : showError
             ? 'bg-theme-amber hover:bg-theme-amber'
-            : buttonState === 'transcribing'
+            : isProcessing
             ? 'bg-theme-purple'
+            : audioEnabled
+            ? 'bg-theme-bg-elevated hover:bg-theme-bg-active ring-1 ring-theme-purple/40'
             : 'bg-theme-bg-elevated hover:bg-theme-bg-active'
         } disabled:opacity-50 disabled:cursor-not-allowed`}
       >
-        {buttonState === 'transcribing' ? (
+        {isProcessing ? (
           <Loader2 className="w-5 h-5 animate-spin text-theme-purple" />
         ) : buttonState === 'recording' ? (
           <MicOff className="w-5 h-5 text-white" />
         ) : showError ? (
           <AlertCircle className="w-5 h-5 text-white" />
         ) : (
-          <Mic className="w-5 h-5 text-theme-subtle" />
+          <Mic className={`w-5 h-5 ${audioEnabled ? 'text-theme-purple' : 'text-theme-subtle'}`} />
         )}
       </button>
       {showError && errorMsg && (

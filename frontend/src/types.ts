@@ -8,11 +8,15 @@ export interface User {
   image_usage: number;
   token_usage_by_model?: Record<number, { token_usage: number; image_usage: number }>;
   created_at: string;
+  extrovert_linked?: boolean;
+  // P9: merged entitlement flags of the user's effective plan (defaults all-on).
+  entitlements?: Record<string, boolean>;
 }
 
 export interface AuthStatus {
   needs_setup: boolean;
   registration_enabled: boolean;
+  extrovert_enabled?: boolean;
 }
 
 export interface AuthResponse {
@@ -33,6 +37,7 @@ export interface ModelConfig {
   thinking_enabled: boolean;
   thinking_budget_tokens: number | null;
   vision_enabled: boolean;
+  audio_enabled: boolean;
   tools_enabled: boolean;
   enabled: boolean;
   sort_order: number | null;
@@ -60,6 +65,8 @@ export interface Message {
   reasoning_content?: string | null;
   status?: string;
   created_at: string;
+  memory_saved?: MemorySavedItem[] | null;
+  thinking_json?: ThinkingEntry[] | null;
 }
 
 export interface GenerateStatus {
@@ -77,8 +84,19 @@ export interface ToolCall {
   arguments: Record<string, unknown>;
 }
 
+export interface MemorySavedItem {
+  kind: string;
+  text: string;
+}
+
+export interface ThinkingEntry {
+  type: 'reasoning' | 'tool';
+  text?: string;
+  id?: string;
+}
+
 export interface StreamEvent {
-  type: 'content' | 'content_delta' | 'reasoning_delta' | 'tool_calls' | 'tool_start' | 'tool_result' | 'error' | 'image_result';
+  type: 'content' | 'content_delta' | 'reasoning_delta' | 'tool_calls' | 'tool_start' | 'tool_result' | 'error' | 'image_result' | 'memory_saved';
   content?: string;
   reasoning_content_delta?: string;
   reasoning_content?: string;
@@ -91,6 +109,8 @@ export interface StreamEvent {
   revised_prompt?: string;
   prompt?: string;
   size?: string;
+  items?: MemorySavedItem[];
+  thinking_json?: ThinkingEntry[] | null;
 }
 
 export interface ConfigStatus {
@@ -109,6 +129,7 @@ export interface ScannedModel {
   name: string;
   suggested_type: string;
   supports_vision: boolean;
+  supports_audio?: boolean;
 }
 
 export interface ScannedProvider {
@@ -146,6 +167,8 @@ export interface SubscriptionPlan {
   image_limit: number | null;
   enabled: boolean;
   created_at: string;
+  // P9: full merged entitlement dict (defaults + plan overrides).
+  entitlements: Record<string, boolean>;
 }
 
 export interface PlanModelLimit {
@@ -155,6 +178,7 @@ export interface PlanModelLimit {
   model_name: string;
   token_limit: number | null;
   image_limit: number | null;
+  allowed: boolean;
 }
 
 export interface UserSubscription {
@@ -174,6 +198,50 @@ export interface UserSubscription {
   created_at: string;
 }
 
+// P11 — skill manifest + per-user state (GET /api/skills).
+export interface SkillInfo {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+  version: string;
+  author: string;
+  source: 'builtin' | 'user' | 'marketplace';
+  category: string;
+  scopes: string[];
+  entitlement: string | null;
+  user_enabled: boolean;
+  config: Record<string, unknown>;
+}
+
+// P12 — skill marketplace.
+export interface MarketplaceCatalogEntry {
+  name: string;
+  description: string;
+  version: string;
+  author: string;
+  category: string;
+  scopes: string[];
+  install_url: string;
+}
+
+export interface MarketplaceInstalled {
+  name: string;
+  version: string;
+  author: string;
+  description: string;
+  category: string;
+  scopes: string[];
+  entitlement: string | null;
+  source_url: string;
+  approved: boolean;
+  installed_at: string;
+}
+
+export interface MarketplaceOverview {
+  catalog: { schema: string; entries: MarketplaceCatalogEntry[] };
+  installed: MarketplaceInstalled[];
+}
+
 export interface SubscribeResult {
   subscription_id: number;
   status: string;
@@ -189,6 +257,9 @@ export interface AttachmentRecord {
   file_path: string;
   ocr_text?: string | null;
   image_included?: boolean;
+  audio_included?: boolean;
+  audio_format?: string;
+  transcription?: string;
 }
 
 export interface UploadResponse {
@@ -204,4 +275,122 @@ export interface FileUploadSettings {
   ocr_enabled: boolean;
   ocr_strategy: string;
   whisper_model: string;
+  whisper_compute_type: string;
+  whisper_device: string;
+  whisper_language: string | null;
+  whisper_beam_size: number;
+  whisper_provider: string;
+  whisper_openrouter_model: string;
+}
+
+export interface Document {
+  id: number;
+  filename: string;
+  format: string;
+  version: number;
+  file_path: string;
+  file_size: number;
+  content: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DocumentVersion {
+  version: number;
+  file_size: number;
+  content: string | null;
+  created_at: string;
+}
+
+export interface ThemeSpec {
+  preset: string;
+  tokens: Record<string, Record<string, string | number>>;
+  components: Record<string, Record<string, string>>;
+}
+
+export interface ThemeInfo {
+  spec: ThemeSpec;
+  css: string;
+  presets: string[];
+  default_preset: string;
+}
+
+export interface ThemeHistoryEntry {
+  id: number;
+  created_at: string;
+  spec: ThemeSpec | null;
+  css: string | null;
+}
+
+export interface MemoryAtom {
+  id: string;
+  text: string;
+  entity: string;
+  kind: string;
+  tags: string[];
+  confidence?: number;
+  confirmed: boolean;
+  salience?: number;
+  created?: string;
+  superseded?: string | null;
+}
+
+export interface MemoryScenario {
+  id: string;
+  title: string;
+  summary: string;
+  tags: string[];
+}
+
+export interface MemoryStatus {
+  atoms_count: number;
+  confirmed_count: number;
+  scenarios_count: number;
+  pages_count: number;
+  inbox_pending: number;
+  persona: string[];
+  active: string[];
+  atoms: MemoryAtom[];
+  scenarios: MemoryScenario[];
+  log: string[];
+}
+
+export interface LintFinding {
+  severity: string;
+  check: string;
+  detail: string;
+}
+
+export interface GitRepo {
+  id: number;
+  name: string;
+  clone_url: string;
+  host: string;
+  access: 'read' | 'write';
+  auth_type: 'none' | 'ssh_key' | 'token';
+  credential_set: boolean;
+  default_branch: string;
+  pr_preferred: boolean;
+  enabled: boolean;
+  scope: 'global' | 'personal';
+  user_id: number | null;
+  created_at: string;
+}
+
+export interface GitInfo {
+  bot_name: string;
+  bot_email: string;
+  git_bot_name_env: string;
+  git_bot_email_env: string;
+  note: string;
+}
+
+export interface GitAuditEntry {
+  id: number;
+  user_id: number | null;
+  repo_id: number | null;
+  action: string;
+  detail: string | null;
+  success: boolean;
+  created_at: string;
 }

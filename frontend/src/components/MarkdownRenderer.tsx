@@ -1,21 +1,24 @@
-import React, { memo, useCallback, useState } from 'react'
+import React, { memo, useCallback, useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
-import { Check, Copy, Download } from 'lucide-react'
+import rehypeRaw from 'rehype-raw'
+import rehypeSanitize from 'rehype-sanitize'
+import { Check, Copy, Download, Image, Play, Youtube } from 'lucide-react'
 
 function CodeBlock({ language, children }: { language?: string; children: React.ReactNode }) {
   const [copied, setCopied] = useState(false)
+  const codeRef = useRef<HTMLElement>(null)
 
   const handleCopy = useCallback(async () => {
-    const text = String(children).replace(/\n$/, '')
+    const text = codeRef.current?.textContent?.replace(/\n$/, '') ?? ''
     await navigator.clipboard.writeText(text)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
-  }, [children])
+  }, [])
 
   return (
-    <div className="my-3 rounded-lg overflow-hidden border border-theme-border-light/50">
+    <div className="llm-code-block my-3 rounded-lg overflow-hidden border border-theme-border-light/50">
       <div className="flex items-center justify-between px-3 py-1.5 bg-theme-bg-secondary/80 text-xs text-theme-subtle">
         <span className="font-mono">{language || 'text'}</span>
         <button
@@ -36,17 +39,139 @@ function CodeBlock({ language, children }: { language?: string; children: React.
         </button>
       </div>
       <pre className="p-4 overflow-x-auto bg-theme-code-bg text-sm">
-        <code className={`hljs${language ? ` language-${language}` : ''}`}>{children}</code>
+        <code ref={codeRef} className={`hljs${language ? ` language-${language}` : ''}`}>{children}</code>
       </pre>
     </div>
   )
 }
 
-const MarkdownRenderer = memo(function MarkdownRenderer({ content }: { content: string }) {
+function preprocessSvgBlocks(markdown: string): string {
+  return markdown.replace(/```svg\+?xml?\n?([\s\S]*?)```/g, (_, code) => {
+    return code.trim()
+  })
+}
+
+// --- P8: YouTube link previews ---
+
+const YT_ID_RE = /^[A-Za-z0-9_-]{11}$/
+
+export function youtubeIdFromUrl(url: string): string | null {
+  try {
+    const u = new URL(url)
+    const host = u.hostname.replace(/^(www|m)\./, '')
+    if (host === 'youtu.be') {
+      const id = u.pathname.slice(1).split('/')[0] || ''
+      return YT_ID_RE.test(id) ? id : null
+    }
+    if (host !== 'youtube.com') return null
+    if (u.pathname === '/watch') {
+      const v = u.searchParams.get('v')
+      return v && YT_ID_RE.test(v) ? v : null
+    }
+    const m = u.pathname.match(/^\/(shorts|embed)\/([A-Za-z0-9_-]{11})/)
+    return m ? m[2] : null
+  } catch {
+    return null
+  }
+}
+
+// Bare-URL autolinking: wrap YouTube URLs that are NOT already inside markdown
+// link syntax `(...)` or angle brackets `<...>` so react-markdown links them
+// and the `a` override can render a preview card. Code spans (fenced blocks and
+// inline backticks) are protected so code samples are never rewritten.
+const BARE_URL_RE = /(?<![(<])(https?:\/\/[^\s<)"']+)/g
+const CODE_SPAN_RE = /```[\s\S]*?```|`[^`\n]*`/g
+
+export function preprocessYoutubeLinks(markdown: string): string {
+  const protectedSpans: string[] = []
+  const withoutCode = markdown.replace(CODE_SPAN_RE, m => {
+    protectedSpans.push(m)
+    return `\u0000${protectedSpans.length - 1}\u0000`
+  })
+  const linked = withoutCode.replace(BARE_URL_RE, m => (youtubeIdFromUrl(m) ? `<${m}>` : m))
+  return linked.replace(/\u0000(\d+)\u0000/g, (_, i) => protectedSpans[Number(i)])
+}
+
+function YouTubeCard({ id }: { id: string }) {
+  const [meta, setMeta] = useState<{ title: string; thumbnail: string; author: string } | null>(null)
+  const [failed, setFailed] = useState(false)
+  const [embed, setEmbed] = useState(false)
+
+  useEffect(() => {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 6000)
+    fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${id}`)}&format=json`, { signal: ctrl.signal })
+      .then(r => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then(d => setMeta({
+        title: String(d.title || ''),
+        thumbnail: String(d.thumbnail_url || ''),
+        author: String(d.author_name || ''),
+      }))
+      .catch(() => setFailed(true))
+      .finally(() => clearTimeout(timer))
+    return () => { clearTimeout(timer); ctrl.abort() }
+  }, [id])
+
+  if (embed) {
+    return (
+      <div className="my-2 rounded-lg overflow-hidden border border-theme-border-light aspect-video">
+        <iframe
+          src={`https://www.youtube.com/embed/${id}?autoplay=1`}
+          title="YouTube video player"
+          className="w-full h-full"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          allowFullScreen
+        />
+      </div>
+    )
+  }
+
+  const thumbnail = meta?.thumbnail || (failed ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : undefined)
+  const title = meta?.title || (failed ? 'YouTube video' : '')
+  const author = meta?.author || ''
+
+  return (
+    <a
+      href={`https://www.youtube.com/watch?v=${id}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={e => { e.preventDefault(); setEmbed(true) }}
+      className="block my-2 rounded-lg overflow-hidden border border-theme-border-light bg-theme-bg-elevated/50 group"
+    >
+      <div className="relative">
+        {thumbnail ? (
+          <img src={thumbnail} alt={title} className="w-full object-cover" style={{ maxHeight: 200 }} loading="lazy" />
+        ) : (
+          <div className="w-full aspect-video bg-theme-bg-active flex items-center justify-center text-theme-muted text-xs">Loading…</div>
+        )}
+        <span className="absolute inset-0 flex items-center justify-center">
+          <span className="w-12 h-12 rounded-full bg-black/60 flex items-center justify-center group-hover:bg-black/80 transition-colors">
+            <Play className="w-5 h-5 text-white fill-white" />
+          </span>
+        </span>
+      </div>
+      <div className="px-3 py-2">
+        <p className="text-sm font-medium line-clamp-2">{title || 'YouTube video'}</p>
+        {author && <p className="text-xs text-theme-muted mt-0.5">{author}</p>}
+        <p className="text-xs text-theme-accent-text mt-1 flex items-center gap-1">
+          <Youtube className="w-3.5 h-3.5" /> Watch on YouTube
+        </p>
+      </div>
+    </a>
+  )
+}
+
+interface MarkdownRendererProps {
+  content: string
+  youtubePreviewsEnabled?: boolean
+}
+
+const MarkdownRenderer = memo(function MarkdownRenderer({ content, youtubePreviewsEnabled = true }: MarkdownRendererProps) {
+  const processed = preprocessYoutubeLinks(preprocessSvgBlocks(content))
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
-      rehypePlugins={[rehypeHighlight]}
+      rehypePlugins={[rehypeRaw, rehypeSanitize, rehypeHighlight]}
       components={{
         code({ className, children, ...props }) {
           const match = /language-(\w+)/.exec(className || '')
@@ -97,6 +222,12 @@ const MarkdownRenderer = memo(function MarkdownRenderer({ content }: { content: 
                 {children}
               </button>
             )
+          }
+          if (youtubePreviewsEnabled && typeof href === 'string') {
+            const ytId = youtubeIdFromUrl(href)
+            if (ytId) {
+              return <YouTubeCard id={ytId} />
+            }
           }
           return (
             <a href={href} target="_blank" rel="noopener noreferrer" className="text-theme-accent-text hover:text-theme-accent-dim underline">
@@ -149,7 +280,7 @@ const MarkdownRenderer = memo(function MarkdownRenderer({ content }: { content: 
         },
       }}
     >
-      {content}
+      {processed}
     </ReactMarkdown>
   )
 })

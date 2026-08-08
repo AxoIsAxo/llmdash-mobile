@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { X, Eye, RotateCcw, Maximize2, Minimize2 } from 'lucide-react'
+import { X, Eye, RotateCcw, Maximize2, Minimize2, History, Loader2 } from 'lucide-react'
 import { api } from '../api'
 import { DEFAULT_CSS } from '../css-preset'
+import type { ThemeHistoryEntry } from '../types'
 
 const STYLE_ID = 'llmdash-user-css'
 
@@ -9,6 +10,7 @@ function injectCss(css: string) {
   const el = document.getElementById(STYLE_ID) as HTMLStyleElement | null
   if (el) {
     el.textContent = css || DEFAULT_CSS
+    ;(window as any).__syncPwaTheme?.()
   }
 }
 
@@ -16,18 +18,39 @@ interface Props {
   currentCss: string
   onClose: () => void
   onSaved: (css: string) => void
+  embedded?: boolean
+  autoScroll?: boolean
+  onAutoScrollChange?: (v: boolean) => void
 }
 
-export default function CustomCssPanel({ currentCss, onClose, onSaved }: Props) {
+export default function CustomCssPanel({ currentCss, onClose, onSaved, embedded, autoScroll, onAutoScrollChange }: Props) {
   const [css, setCss] = useState(currentCss || DEFAULT_CSS)
   const [fullscreen, setFullscreen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
+  const [presets, setPresets] = useState<string[]>([])
+  const [applyingPreset, setApplyingPreset] = useState(false)
+  const [presetError, setPresetError] = useState('')
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [history, setHistory] = useState<ThemeHistoryEntry[]>([])
+  const [restoringId, setRestoringId] = useState<number | null>(null)
+
   useEffect(() => {
     setCss(currentCss || DEFAULT_CSS)
   }, [currentCss])
+
+  useEffect(() => {
+    api.auth.theme.get().then(t => setPresets(t.presets || [])).catch(() => {})
+  }, [])
+
+  const loadHistory = async () => {
+    try {
+      const rows = await api.auth.theme.history()
+      setHistory(rows || [])
+    } catch {}
+  }
 
   const handlePreview = () => {
     injectCss(css)
@@ -60,19 +83,59 @@ export default function CustomCssPanel({ currentCss, onClose, onSaved }: Props) 
     }
   }
 
+  const handleApplyPreset = async (preset: string) => {
+    setApplyingPreset(true)
+    setPresetError('')
+    try {
+      const res = await api.auth.theme.reset(preset)
+      setCss(res.css)
+      injectCss(res.css)
+      onSaved(res.css)
+    } catch (e: any) {
+      setPresetError(e.message || 'Failed to apply preset')
+    } finally {
+      setApplyingPreset(false)
+    }
+  }
+
+  const handleRestore = async (id: number) => {
+    setRestoringId(id)
+    try {
+      const res = await api.auth.theme.restore(id)
+      setCss(res.css)
+      injectCss(res.css)
+      onSaved(res.css)
+      setHistoryOpen(false)
+    } catch (e: any) {
+      alert('Failed to restore: ' + e.message)
+    } finally {
+      setRestoringId(null)
+    }
+  }
+
   const previewText = css.slice(0, 60).replace(/\s+/g, ' ')
 
   return (
-    <div className="fixed inset-0 bg-theme-overlay/60 flex items-center justify-center z-50" onClick={onClose}>
+    <div className={embedded ? 'flex-1 flex flex-col min-h-0 overflow-hidden' : 'fixed inset-0 bg-theme-overlay/60 flex items-center justify-center z-50'} onClick={embedded ? undefined : onClose}>
       <div
-        className={`bg-theme-bg-secondary rounded-2xl border border-theme-border-light flex flex-col ${
-          fullscreen ? 'fixed inset-4 w-auto h-auto max-w-none max-h-none' : 'w-full max-w-3xl max-h-[85vh]'
-        }`}
+        className={embedded
+          ? 'flex-1 flex flex-col min-h-0'
+          : `llm-modal bg-theme-bg-secondary rounded-2xl border border-theme-border-light flex flex-col ${
+              fullscreen ? 'fixed inset-4 w-auto h-auto max-w-none max-h-none' : 'w-full max-w-3xl max-h-[85vh]'
+            }`}
         onClick={e => e.stopPropagation()}
       >
+        {!embedded && (
         <div className="p-4 border-b border-theme-border flex items-center justify-between shrink-0">
-          <h2 className="text-lg font-semibold">Custom CSS</h2>
+          <h2 className="text-lg font-semibold">Custom CSS & Theme</h2>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => { setHistoryOpen(!historyOpen); if (!historyOpen) loadHistory() }}
+              className="p-1.5 hover:bg-theme-bg-hover rounded-lg text-theme-subtle hover:text-theme-text"
+              title="Theme history (undo)"
+            >
+              <History className="w-4 h-4" />
+            </button>
             <button
               onClick={() => setFullscreen(!fullscreen)}
               className="p-1.5 hover:bg-theme-bg-hover rounded-lg text-theme-subtle hover:text-theme-text"
@@ -83,11 +146,83 @@ export default function CustomCssPanel({ currentCss, onClose, onSaved }: Props) 
             <button onClick={onClose} className="px-3 py-1.5 hover:bg-theme-bg-hover rounded-lg text-sm">Close</button>
           </div>
         </div>
+        )}
+
+        {historyOpen && (
+          <div className="shrink-0 max-h-40 overflow-y-auto border-b border-theme-border bg-theme-bg-elevated/40 px-4 py-3 space-y-1">
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-xs font-semibold text-theme-subtle uppercase tracking-wider">Theme History</h3>
+              <button onClick={() => setHistoryOpen(false)} className="text-xs text-theme-muted hover:text-theme-text">Close</button>
+            </div>
+            {history.length === 0 && <p className="text-xs text-theme-muted">No saved theme versions yet.</p>}
+            {history.map(h => (
+              <div key={h.id} className="flex items-center justify-between gap-2">
+                <span className="text-xs text-theme-muted font-mono">
+                  {new Date(h.created_at).toLocaleString()}
+                  {h.spec ? ` — ${h.spec.preset || 'custom'}` : ''}
+                </span>
+                <button
+                  onClick={() => handleRestore(h.id)}
+                  disabled={restoringId === h.id}
+                  className="px-2 py-0.5 bg-theme-accent hover:bg-theme-accent-hover rounded text-xs disabled:opacity-50"
+                >
+                  {restoringId === h.id ? 'Restoring...' : 'Restore'}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           <p className="text-xs text-theme-muted">
             Customize the appearance of LLMDash. Changes apply immediately on preview or save.
             The default CSS is used as fallback.
           </p>
+
+          {typeof autoScroll === 'boolean' && onAutoScrollChange && (
+            <div className="flex items-center justify-between gap-4 bg-theme-bg-elevated/40 border border-theme-border-light rounded-lg px-4 py-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">Auto-scroll to latest</p>
+                <p className="text-xs text-theme-muted mt-0.5">
+                  Keep the view pinned to the newest reply while it generates. Turn off to stay
+                  where you are when you scroll up to read — a "Latest" button jumps back down.
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={autoScroll}
+                onClick={() => onAutoScrollChange(!autoScroll)}
+                className={`relative w-10 h-6 rounded-full transition-colors shrink-0 ${
+                  autoScroll ? 'bg-theme-accent' : 'bg-theme-bg-active border border-theme-border-light'
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
+                    autoScroll ? 'translate-x-4' : ''
+                  }`}
+                />
+              </button>
+            </div>
+          )}
+
+          {presets.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-theme-muted">Theme presets:</span>
+              {presets.map(p => (
+                <button
+                  key={p}
+                  onClick={() => handleApplyPreset(p)}
+                  disabled={applyingPreset}
+                  className="px-3 py-1 bg-theme-bg-hover hover:bg-theme-bg-active rounded-lg text-xs capitalize transition-colors disabled:opacity-50"
+                >
+                  {applyingPreset ? 'Applying...' : p}
+                </button>
+              ))}
+            </div>
+          )}
+          {presetError && <p className="text-xs text-theme-danger-text">{presetError}</p>}
+
           <textarea
             ref={textareaRef}
             value={css}

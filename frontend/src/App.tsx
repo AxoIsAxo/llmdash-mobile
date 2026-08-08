@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { api } from './api'
-import type { ModelConfig, Conversation, Message, StreamEvent, ToolCall, User, AuthStatus, GenerateStatus, AttachmentRecord } from './types'
+import type { ModelConfig, Conversation, Message, StreamEvent, ToolCall, User, AuthStatus, GenerateStatus, AttachmentRecord, MemorySavedItem } from './types'
 
 const LAST_ACTIVE_CONV_KEY = 'llmdash_active_conv'
 
@@ -13,15 +13,16 @@ import {
   Send, Plus, Key, MessageSquare, Trash2, ChevronLeft,
   ChevronRight, Wrench, Bot, Loader2, Terminal, Globe, FileText, Eye, Search,
   Copy, Check, RefreshCw, Square, ChevronUp, ChevronDown, Download,
-  Shield, LogOut, Settings, Minus, CreditCard, Brain, Image, Paperclip, X, File, Palette
+  Shield, LogOut, Settings, Minus, CreditCard, Brain, Image, Paperclip, X, File as FileIcon, Mic, UserRound, Sparkles, Volume2
 } from 'lucide-react'
 import MarkdownRenderer from './components/MarkdownRenderer'
 import SetupWizard from './components/SetupWizard'
 import LoginPage from './components/LoginPage'
 import AdminPanel from './components/AdminPanel'
-import SubscriptionPage from './components/SubscriptionPage'
-import CustomCssPanel from './components/CustomCssPanel'
+import AgentPanel from './components/AgentPanel'
+import AccountPanel from './components/AccountPanel'
 import VoiceButton from './components/VoiceButton'
+import DOMPurify from 'dompurify'
 import { DEFAULT_CSS } from './css-preset'
 
 const STYLE_ID = 'llmdash-user-css'
@@ -30,6 +31,7 @@ function injectUserCss(css: string) {
   const el = document.getElementById(STYLE_ID) as HTMLStyleElement | null
   if (el) {
     el.textContent = css || DEFAULT_CSS
+    ;(window as any).__syncPwaTheme?.()
   }
 }
 
@@ -146,16 +148,21 @@ function App() {
   const [imageGenSize, setImageGenSize] = useState('1024x1024')
   const [showSidebar, setShowSidebar] = useState(true)
   const [showAdmin, setShowAdmin] = useState(false)
-  const [showSubscription, setShowSubscription] = useState(false)
-  const [showCustomCss, setShowCustomCss] = useState(false)
+  const [showAgent, setShowAgent] = useState(false)
+  const [showAccount, setShowAccount] = useState(false)
   const [cssUndoToast, setCssUndoToast] = useState<{ previousCss: string } | null>(null)
   const cssPreviousRef = useRef<string>(DEFAULT_CSS)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => {
+    if (!input && textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+    }
+  }, [input])
   const [showModelPickerFooter, setShowModelPickerFooter] = useState(false)
   const [showModelPickerEmpty, setShowModelPickerEmpty] = useState(false)
   const closeModelPickers = () => { setShowModelPickerFooter(false); setShowModelPickerEmpty(false) }
   const [abortController, setAbortController] = useState<AbortController | null>(null)
   const [branchSiblings, setBranchSiblings] = useState<Record<string, number[]>>({})
-  const [branchConvToKey, setBranchConvToKey] = useState<Record<number, string>>({})
   const [copiedId, setCopiedId] = useState<number | null>(null)
   const [executingTools, setExecutingTools] = useState<Set<string>>(new Set())
   const [expandedToolCalls, setExpandedToolCalls] = useState<Set<string>>(new Set())
@@ -174,7 +181,56 @@ function App() {
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const messagesEndRef = useRef<HTMLDivElement>(null)
+  // P5 — smart auto-scroll: only follow the newest content while the user is
+  // already at the bottom; a floating "jump to latest" button appears otherwise.
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const [autoScroll, setAutoScroll] = useState(true)
+  const autoScrollRef = useRef(true)
+  const [atBottom, setAtBottom] = useState(true)
+  const atBottomRef = useRef(true)
+  // "A generation finished since the user was last at the bottom" — keeps the
+  // jump button visible after streaming stops, until the user returns to bottom.
+  const [justFinished, setJustFinished] = useState(false)
+  // Guards the async auto-scroll prefetch from clobbering a user toggle.
+  const autoScrollTouchedRef = useRef(false)
+
+  useEffect(() => { autoScrollRef.current = autoScroll }, [autoScroll])
+
+  useEffect(() => {
+    // A freshly opened conversation starts "at the bottom".
+    atBottomRef.current = true
+    setAtBottom(true)
+    setJustFinished(false)
+  }, [activeConv?.id])
+
+  const handleScroll = useCallback(() => {
+    const el = scrollContainerRef.current
+    if (!el) return
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 100
+    atBottomRef.current = nearBottom
+    setAtBottom(nearBottom)
+    if (nearBottom) setJustFinished(false)
+  }, [])
+
+  const scrollToLatest = useCallback(() => {
+    const el = scrollContainerRef.current
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    atBottomRef.current = true
+    setAtBottom(true)
+    setJustFinished(false)
+  }, [])
+
+  const handleAutoScrollChange = (v: boolean) => {
+    autoScrollTouchedRef.current = true
+    setAutoScroll(v)
+    api.auth.autoScroll.put(v)
+      .then(() => { if (v) scrollToLatest() })
+      .catch(() => {
+        // Persist failed — revert the optimistic toggle so the UI matches the server.
+        setAutoScroll(!v)
+      })
+  }
 
   const loadConversations = useCallback(async () => {
     try {
@@ -244,11 +300,47 @@ function App() {
           cssPreviousRef.current = res.css
         }
       }).catch(() => {})
+      api.auth.autoScroll.get().then(res => {
+        if (!autoScrollTouchedRef.current) setAutoScroll(res.auto_scroll !== false)
+      }).catch(() => {})
     }
   }, [currentUser, loadConversations, loadModels])  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const el = scrollContainerRef.current
+    if (!el) return
+    // Follow the stream only while the user is already at the bottom (and
+    // hasn't disabled auto-scroll). If they scrolled up, leave the viewport
+    // alone — the "jump to latest" button is the escape hatch.
+    if (autoScrollRef.current && atBottomRef.current) {
+      el.scrollTop = el.scrollHeight
+      atBottomRef.current = true
+      setAtBottom(true)
+      return
+    }
+    // Not following: content may have grown below the fold (e.g. auto-scroll
+    // is off), so refresh the at-bottom state without moving the viewport.
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 100
+    if (nearBottom !== atBottomRef.current) {
+      atBottomRef.current = nearBottom
+      setAtBottom(nearBottom)
+    }
+  }, [messages])
+
+  useEffect(() => {
+    setExpandedToolCalls(prev => {
+      let updated = false
+      const next = new Set(prev)
+      for (const msg of messages) {
+        if (msg.role === 'tool' && msg.tool_call_id && !next.has(msg.tool_call_id)) {
+          if (msg.content?.startsWith('SVG_RENDER:') || msg.content?.startsWith('HTML_RENDER:')) {
+            next.add(msg.tool_call_id)
+            updated = true
+          }
+        }
+      }
+      return updated ? next : prev
+    })
   }, [messages])
 
   useEffect(() => {
@@ -267,6 +359,9 @@ function App() {
   const handleAuthDone = (user: User) => {
     setCurrentUser(user)
     setAuthStatus(null)
+    // P9: the login/setup response carries no entitlements — fetch /me so the
+    // UI hides locked features immediately (server enforces regardless).
+    api.auth.me().then(u => setCurrentUser(u)).catch(() => {})
   }
 
   const handleLogout = async () => {
@@ -275,6 +370,8 @@ function App() {
     setConversations([])
     setActiveConv(null)
     setMessages([])
+    autoScrollTouchedRef.current = false
+    setAutoScroll(true)
     localStorage.removeItem(LAST_ACTIVE_CONV_KEY)
     try {
       const status = await api.auth.status()
@@ -333,11 +430,19 @@ function App() {
         if (event.type === 'content') {
           const content = event.content || ''
           const reasoning = event.reasoning_content || null
+          const isFinal = !!(event as any).done
           setMessages(prev => {
             const idx = prev.findIndex(m => m.role === 'assistant' && m.status === 'generating')
             if (idx >= 0) {
               const updated = [...prev]
-              updated[idx] = { ...updated[idx], content, reasoning_content: reasoning || updated[idx].reasoning_content, tool_calls_json: event.tool_calls || null }
+              updated[idx] = {
+                ...updated[idx],
+                content,
+                reasoning_content: reasoning || updated[idx].reasoning_content,
+                ...(event.tool_calls ? { tool_calls_json: event.tool_calls } : {}),
+                ...(event.thinking_json ? { thinking_json: event.thinking_json } : {}),
+                ...(isFinal ? { status: 'done' as const } : {}),
+              }
               return updated
             }
             return prev
@@ -388,8 +493,12 @@ function App() {
               created_at: new Date().toISOString()
             }]
           })
+          const tcs = (event as any).tool_calls
+          if (tcs && Array.isArray(tcs)) {
+            setExecutingTools(prev => { const next = new Set(prev); tcs.forEach((tc: any) => next.add(tc.id)); return next })
+          }
           const cssTool = (event as any).tool_calls?.find((tc: any) =>
-            tc.name === 'set_user_css' || tc.name === 'patch_user_css' || tc.name === 'append_user_css'
+            tc.name === 'set_user_css' || tc.name === 'patch_user_css' || tc.name === 'append_user_css' || tc.name === 'patch_theme' || tc.name === 'reset_theme'
           )
           if (cssTool) {
             const cur = (document.getElementById(STYLE_ID) as HTMLStyleElement)?.textContent || DEFAULT_CSS
@@ -402,9 +511,14 @@ function App() {
           }
         } else if (event.type === 'tool_start') {
           if (event.id) setExecutingTools(prev => new Set(prev).add(event.id!))
-        } else if (event.type === 'tool_result') {
-          if (event.id) setExecutingTools(prev => { const next = new Set(prev); next.delete(event.id!); return next })
-          if (event.name === 'set_user_css' || event.name === 'patch_user_css' || event.name === 'append_user_css') {
+          } else if (event.type === 'tool_result') {
+            if (event.id) {
+              setExecutingTools(prev => { const next = new Set(prev); next.delete(event.id!); return next })
+              if (event.name === 'render_svg' || event.name === 'render_html') {
+                setExpandedToolCalls(prev => new Set(prev).add(event.id!))
+              }
+            }
+            if (event.name === 'set_user_css' || event.name === 'patch_user_css' || event.name === 'append_user_css' || event.name === 'patch_theme' || event.name === 'reset_theme') {
             const authoritative = extractNewCssMarker(event.result)
             if (authoritative !== null) {
               const cur = (document.getElementById(STYLE_ID) as HTMLStyleElement)?.textContent || DEFAULT_CSS
@@ -419,6 +533,19 @@ function App() {
             tool_calls_json: null, tool_call_id: event.id || null,
             tool_name: event.name || null, created_at: new Date().toISOString()
           }])
+        } else if (event.type === 'memory_saved') {
+          const memItems = (event as any).items || []
+          if (memItems.length > 0) {
+            setMessages(prev => {
+              const rev = [...prev].reverse().findIndex(m => m.role === 'assistant')
+              if (rev < 0) return prev
+              const idx = prev.length - 1 - rev
+              const updated = [...prev]
+              updated[idx] = { ...updated[idx], memory_saved: memItems }
+              return updated
+            })
+          }
+
         } else if (event.type === 'error') {
           setMessages(prev => [...prev, {
             id: Date.now(), role: 'assistant' as const,
@@ -435,6 +562,7 @@ function App() {
     } finally {
       setExecutingTools(new Set())
       setStreaming(false)
+      setJustFinished(true)
       setAbortController(null)
       loadConversations()
       if (currentUser) {
@@ -489,6 +617,7 @@ function App() {
         }])
       } finally {
         setStreaming(false)
+        setJustFinished(true)
         setAbortController(null)
         loadConversations()
         if (currentUser) {
@@ -556,19 +685,28 @@ function App() {
               }]
             })
           } else if (event.type === 'content') {
-            assistantContent = event.content || ''
+            assistantContent = event.content || assistantContent
             assistantReasoning = event.reasoning_content || assistantReasoning
+            const isFinal = !!(event as any).done
             setMessages(prev => {
               const idx = prev.findIndex(m => m.id === (conv?.id || 0) * -1)
               if (idx >= 0) {
                 const updated = [...prev]
-                updated[idx] = { ...updated[idx], content: assistantContent, reasoning_content: assistantReasoning || updated[idx].reasoning_content }
+                updated[idx] = {
+                  ...updated[idx],
+                  content: assistantContent,
+                  reasoning_content: assistantReasoning || updated[idx].reasoning_content,
+                  ...(event.tool_calls ? { tool_calls_json: event.tool_calls } : {}),
+                  ...(event.thinking_json ? { thinking_json: event.thinking_json } : {}),
+                  ...(isFinal ? { status: 'done' as const } : {}),
+                }
                 return updated
               }
               return [...prev, {
                 id: (conv?.id || 0) * -1, role: 'assistant' as const,
-                content: assistantContent, reasoning_content: assistantReasoning, tool_calls_json: null,
-                tool_call_id: null, tool_name: null, status: 'generating', created_at: new Date().toISOString()
+                content: assistantContent, reasoning_content: assistantReasoning, tool_calls_json: event.tool_calls || null,
+                thinking_json: (event as any).thinking_json || null,
+                tool_call_id: null, tool_name: null, status: isFinal ? 'done' as const : 'generating' as const, created_at: new Date().toISOString()
               }]
             })
           } else if (event.type === 'tool_calls') {
@@ -587,8 +725,12 @@ function App() {
                 tool_call_id: null, tool_name: null, status: 'generating', created_at: new Date().toISOString()
               }]
             })
+            const tcs2 = event.tool_calls
+            if (tcs2 && Array.isArray(tcs2)) {
+              setExecutingTools(prev => { const next = new Set(prev); tcs2.forEach((tc: any) => next.add(tc.id)); return next })
+            }
             const cssTool2 = event.tool_calls?.find((tc: any) =>
-              tc.name === 'set_user_css' || tc.name === 'patch_user_css' || tc.name === 'append_user_css'
+              tc.name === 'set_user_css' || tc.name === 'patch_user_css' || tc.name === 'append_user_css' || tc.name === 'patch_theme' || tc.name === 'reset_theme'
             )
             if (cssTool2) {
               const cur = (document.getElementById(STYLE_ID) as HTMLStyleElement)?.textContent || DEFAULT_CSS
@@ -602,8 +744,13 @@ function App() {
           } else if (event.type === 'tool_start') {
             if (event.id) setExecutingTools(prev => new Set(prev).add(event.id!))
           } else if (event.type === 'tool_result') {
-            if (event.id) setExecutingTools(prev => { const next = new Set(prev); next.delete(event.id!); return next })
-            if (event.name === 'set_user_css' || event.name === 'patch_user_css' || event.name === 'append_user_css') {
+            if (event.id) {
+              setExecutingTools(prev => { const next = new Set(prev); next.delete(event.id!); return next })
+              if (event.name === 'render_svg' || event.name === 'render_html') {
+                setExpandedToolCalls(prev => new Set(prev).add(event.id!))
+              }
+            }
+            if (event.name === 'set_user_css' || event.name === 'patch_user_css' || event.name === 'append_user_css' || event.name === 'patch_theme' || event.name === 'reset_theme') {
               const authoritative = extractNewCssMarker(event.result)
               if (authoritative !== null) {
                 const cur = (document.getElementById(STYLE_ID) as HTMLStyleElement)?.textContent || DEFAULT_CSS
@@ -631,6 +778,19 @@ function App() {
               tool_calls_json: null, tool_call_id: event.id || null,
               tool_name: event.name || null, created_at: new Date().toISOString()
             }])
+          } else if (event.type === 'memory_saved') {
+            const memItems = (event as any).items || []
+            if (memItems.length > 0) {
+              setMessages(prev => {
+                const rev = [...prev].reverse().findIndex(m => m.role === 'assistant')
+                if (rev < 0) return prev
+                const idx = prev.length - 1 - rev
+                const updated = [...prev]
+                updated[idx] = { ...updated[idx], memory_saved: memItems }
+                return updated
+              })
+            }
+
           } else if (event.type === 'error') {
             setMessages(prev => [...prev, {
               id: Date.now(), role: 'assistant' as const,
@@ -661,6 +821,7 @@ function App() {
     } finally {
       setExecutingTools(new Set())
       setStreaming(false)
+      setJustFinished(true)
       setAbortController(null)
       loadConversations()
       if (currentUser) {
@@ -680,6 +841,7 @@ function App() {
           if (convId === activeConv?.id) {
             setStreaming(false)
             setExecutingTools(new Set())
+            setJustFinished(true)
           }
           const full = await api.conversations.messages(convId)
           setMessages(prev => mergeMessages(prev, full))
@@ -700,7 +862,7 @@ function App() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
   }
 
-  const ALLOWED_FILE_EXTS = ['.png','.jpg','.jpeg','.gif','.webp','.bmp','.tiff','.tif','.txt','.csv','.json','.xml','.yaml','.yml','.toml','.ini','.cfg','.log','.md','.py','.js','.ts','.jsx','.tsx','.html','.css','.scss','.less','.sh','.bash','.zsh','.rs','.go','.java','.c','.cpp','.h','.hpp','.sql','.r','.rb','.php','.lua','.swift','.kt','.tf','.env','.gitignore','.dockerfile','.makefile','.conf','.cnf','.gradle','.properties','.lock','.pdf']
+  const ALLOWED_FILE_EXTS = ['.png','.jpg','.jpeg','.gif','.webp','.bmp','.tiff','.tif','.txt','.csv','.json','.xml','.yaml','.yml','.toml','.ini','.cfg','.log','.md','.py','.js','.ts','.jsx','.tsx','.html','.css','.scss','.less','.sh','.bash','.zsh','.rs','.go','.java','.c','.cpp','.h','.hpp','.sql','.r','.rb','.php','.lua','.swift','.kt','.tf','.env','.gitignore','.dockerfile','.makefile','.conf','.cnf','.gradle','.properties','.lock','.pdf','.wav','.mp3','.mpeg','.m4a','.mp4','.aac','.flac','.ogg','.oga','.webm']
 
   const handleFileUpload = async (files: FileList | null) => {
     if (!files || files.length === 0 || uploading) return
@@ -731,6 +893,37 @@ function App() {
 
   const removeAttachment = (index: number) => {
     setAttachments(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const handleAudioCaptured = async (audioBlob: Blob, mimeType: string) => {
+    const extMap: Record<string, string> = {
+      'audio/webm': 'webm',
+      'audio/webm;codecs=opus': 'webm',
+      'audio/ogg': 'ogg',
+      'audio/ogg;codecs=opus': 'ogg',
+      'audio/mp4': 'm4a',
+      'audio/mp4;codecs=mp4a.40.2': 'm4a',
+      'audio/mpeg': 'mp3',
+      'audio/wav': 'wav',
+      'audio/x-wav': 'wav',
+    }
+    const ext = extMap[mimeType.toLowerCase()] || 'webm'
+    const filename = `recording-${Date.now()}.${ext}`
+    const file = new File([audioBlob], filename, { type: mimeType })
+    setUploading(true)
+    try {
+      const result = await api.chat.upload(file)
+      setAttachments(prev => [...prev, {
+        filename: result.filename || filename,
+        file_type: result.file_type,
+        file_path: result.file_path,
+        audio_included: true,
+      }])
+    } catch (e: any) {
+      alert(`Audio upload failed: ${e.message}`)
+    } finally {
+      setUploading(false)
+    }
   }
 
   const handleCancel = async () => {
@@ -766,7 +959,6 @@ function App() {
         if (existing.includes(branch.id)) return prev
         return { ...prev, [key]: [...existing, branch.id] }
       })
-      setBranchConvToKey(prev => ({ ...prev, [branch.id]: key }))
       setConversations(prev => [branch, ...prev])
       setActiveConv(branch)
       const branchMsgs = await api.conversations.messages(branch.id)
@@ -813,7 +1005,7 @@ function App() {
               }]
             })
           } else if (event.type === 'content') {
-            assistantContent = event.content || ''
+            assistantContent = event.content || assistantContent
             assistantReasoning = event.reasoning_content || assistantReasoning
             setMessages(prev => {
               const idx = prev.findIndex(m => m.id === branch.id * -1)
@@ -844,8 +1036,12 @@ function App() {
                 tool_call_id: null, tool_name: null, status: 'generating', created_at: new Date().toISOString()
               }]
             })
+            const tcs3 = event.tool_calls
+            if (tcs3 && Array.isArray(tcs3)) {
+              setExecutingTools(prev => { const next = new Set(prev); tcs3.forEach((tc: any) => next.add(tc.id)); return next })
+            }
             const cssTool3 = event.tool_calls?.find((tc: any) =>
-              tc.name === 'set_user_css' || tc.name === 'patch_user_css' || tc.name === 'append_user_css'
+              tc.name === 'set_user_css' || tc.name === 'patch_user_css' || tc.name === 'append_user_css' || tc.name === 'patch_theme' || tc.name === 'reset_theme'
             )
             if (cssTool3) {
               const cur = (document.getElementById(STYLE_ID) as HTMLStyleElement)?.textContent || DEFAULT_CSS
@@ -859,8 +1055,13 @@ function App() {
           } else if (event.type === 'tool_start') {
             if (event.id) setExecutingTools(prev => new Set(prev).add(event.id!))
           } else if (event.type === 'tool_result') {
-            if (event.id) setExecutingTools(prev => { const next = new Set(prev); next.delete(event.id!); return next })
-            if (event.name === 'set_user_css' || event.name === 'patch_user_css' || event.name === 'append_user_css') {
+            if (event.id) {
+              setExecutingTools(prev => { const next = new Set(prev); next.delete(event.id!); return next })
+              if (event.name === 'render_svg' || event.name === 'render_html') {
+                setExpandedToolCalls(prev => new Set(prev).add(event.id!))
+              }
+            }
+            if (event.name === 'set_user_css' || event.name === 'patch_user_css' || event.name === 'append_user_css' || event.name === 'patch_theme' || event.name === 'reset_theme') {
               const authoritative = extractNewCssMarker(event.result)
               if (authoritative !== null) {
                 const cur = (document.getElementById(STYLE_ID) as HTMLStyleElement)?.textContent || DEFAULT_CSS
@@ -888,6 +1089,19 @@ function App() {
               tool_calls_json: null, tool_call_id: event.id || null,
               tool_name: event.name || null, created_at: new Date().toISOString()
             }])
+          } else if (event.type === 'memory_saved') {
+            const memItems = (event as any).items || []
+            if (memItems.length > 0) {
+              setMessages(prev => {
+                const rev = [...prev].reverse().findIndex(m => m.role === 'assistant')
+                if (rev < 0) return prev
+                const idx = prev.length - 1 - rev
+                const updated = [...prev]
+                updated[idx] = { ...updated[idx], memory_saved: memItems }
+                return updated
+              })
+            }
+
           } else if (event.type === 'error') {
             setMessages(prev => [...prev, {
               id: Date.now(), role: 'assistant' as const,
@@ -917,6 +1131,7 @@ function App() {
       } finally {
         setExecutingTools(new Set())
         setStreaming(false)
+        setJustFinished(true)
         setAbortController(null)
         loadConversations()
       }
@@ -945,7 +1160,7 @@ function App() {
   return (
     <div className="h-screen flex bg-theme-bg text-theme-text overflow-hidden">
       {/* Sidebar */}
-      <div className={`${showSidebar ? 'w-72' : 'w-0'} transition-all duration-200 border-r border-theme-border flex flex-col overflow-hidden bg-theme-bg-secondary`}>
+      <div className={`llm-sidebar ${showSidebar ? 'w-72' : 'w-0'} transition-all duration-200 border-r border-theme-border flex flex-col overflow-hidden bg-theme-bg-secondary`}>
         <div className="pt-[env(safe-area-inset-top)] px-3 pb-3 border-b border-theme-border flex items-center justify-between">
           <h1 className="font-bold text-lg flex items-center gap-2">
             <Bot className="w-5 h-5 text-theme-accent-text" />
@@ -994,11 +1209,11 @@ function App() {
               <Shield className="w-4 h-4 text-theme-accent-text" /> Admin Panel
             </button>
           )}
-          <button onClick={() => setShowSubscription(true)} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-theme-bg-elevated rounded-lg text-sm">
-            <CreditCard className="w-4 h-4 text-theme-accent-text" /> Subscription
+          <button onClick={() => setShowAgent(true)} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-theme-bg-elevated rounded-lg text-sm">
+            <Sparkles className="w-4 h-4 text-theme-accent-text" /> Agent
           </button>
-          <button onClick={() => setShowCustomCss(true)} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-theme-bg-elevated rounded-lg text-sm">
-            <Palette className="w-4 h-4 text-theme-accent-text" /> Custom CSS
+          <button onClick={() => setShowAccount(true)} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-theme-bg-elevated rounded-lg text-sm">
+            <UserRound className="w-4 h-4 text-theme-accent-text" /> Account
           </button>
           <div className="flex items-center gap-2 px-3 py-2 text-xs text-theme-muted">
             <span className="truncate flex-1">
@@ -1047,7 +1262,7 @@ function App() {
         )}
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto">
+        <div ref={scrollContainerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto relative">
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-theme-muted p-8">
               <Bot className="w-16 h-16 mb-4 text-theme-icon-muted" />
@@ -1109,6 +1324,8 @@ function App() {
                       expandedToolCalls={expandedToolCalls}
                       onToggleToolCall={toggleToolCall}
                       setSidePanel={setSidePanel}
+                      ttsEnabled={currentUser.entitlements?.tts !== false}
+                      youtubePreviewsEnabled={currentUser.entitlements?.youtube_previews !== false}
                     />
                     {siblings.length > 1 && (
                       <div className="flex items-center justify-center gap-1 mt-1 text-xs text-theme-muted">
@@ -1124,7 +1341,17 @@ function App() {
                   </div>
                 )
               })}
-              <div ref={messagesEndRef} />
+            </div>
+          )}
+          {!atBottom && (streaming || justFinished) && (
+            <div className="sticky bottom-4 flex justify-end px-4 pointer-events-none">
+              <button
+                onClick={scrollToLatest}
+                className="pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-theme-accent hover:bg-theme-accent-hover text-theme-accent-text text-xs font-medium shadow-lg transition-colors"
+                title="Jump to latest"
+              >
+                <ChevronDown className="w-3.5 h-3.5" /> Latest
+              </button>
             </div>
           )}
         </div>
@@ -1134,37 +1361,44 @@ function App() {
           <div className="max-w-4xl mx-auto">
             {attachments.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-2">
-                {attachments.map((att, i) => (
-                  <div key={i} className="flex items-center gap-1.5 bg-theme-bg-elevated rounded-lg px-3 py-1.5 text-xs border border-theme-border-light">
-                    {['.png','.jpg','.jpeg','.gif','.webp','.bmp'].includes(att.file_type.toLowerCase()) ? (
-                      <Image className="w-3.5 h-3.5 text-theme-purple" />
-                    ) : (
-                      <File className="w-3.5 h-3.5 text-theme-accent-text" />
-                    )}
-                    <span className="text-theme-text-secondary truncate max-w-[150px]">{att.filename}</span>
-                    <button
-                      onClick={() => removeAttachment(i)}
-                      className="p-0.5 hover:bg-theme-danger/20 rounded text-theme-muted hover:text-theme-danger-text"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                ))}
+                {attachments.map((att, i) => {
+                  const ft = att.file_type.toLowerCase()
+                  const isImg = ['.png','.jpg','.jpeg','.gif','.webp','.bmp'].includes(ft)
+                  const isAudio = ['.wav','.mp3','.mpeg','.m4a','.mp4','.aac','.flac','.ogg','.oga','.webm'].includes(ft)
+                  return (
+                    <div key={i} className="flex items-center gap-1.5 bg-theme-bg-elevated rounded-lg px-3 py-1.5 text-xs border border-theme-border-light">
+                      {isImg ? (
+                        <Image className="w-3.5 h-3.5 text-theme-purple" />
+                      ) : isAudio ? (
+                        <Mic className="w-3.5 h-3.5 text-theme-purple" />
+                      ) : (
+                        <FileIcon className="w-3.5 h-3.5 text-theme-accent-text" />
+                      )}
+                      <span className="text-theme-text-secondary truncate max-w-[150px]">{att.filename}</span>
+                      <button
+                        onClick={() => removeAttachment(i)}
+                        className="p-0.5 hover:bg-theme-danger/20 rounded text-theme-muted hover:text-theme-danger-text"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )
+                })}
               </div>
             )}
-            <div className="flex gap-2 items-end">
+            <div className="llm-input flex gap-2 items-end">
               <input
                 ref={fileInputRef}
                 type="file"
                 multiple
-                accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.tiff,.tif,.txt,.csv,.json,.xml,.yaml,.yml,.toml,.ini,.cfg,.log,.md,.py,.js,.ts,.jsx,.tsx,.html,.css,.scss,.less,.sh,.bash,.zsh,.rs,.go,.java,.c,.cpp,.h,.hpp,.sql,.r,.rb,.php,.lua,.swift,.kt,.tf,.env,.gitignore,.dockerfile,.makefile,.conf,.cnf,.gradle,.properties,.lock,.pdf"
+                accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.tiff,.tif,.txt,.csv,.json,.xml,.yaml,.yml,.toml,.ini,.cfg,.log,.md,.py,.js,.ts,.jsx,.tsx,.html,.css,.scss,.less,.sh,.bash,.zsh,.rs,.go,.java,.c,.cpp,.h,.hpp,.sql,.r,.rb,.php,.lua,.swift,.kt,.tf,.env,.gitignore,.dockerfile,.makefile,.conf,.cnf,.gradle,.properties,.lock,.pdf,.wav,.mp3,.mpeg,.m4a,.mp4,.aac,.flac,.ogg,.oga,.webm"
                 onChange={e => handleFileUpload(e.target.files)}
                 className="hidden"
               />
               <button
                 onClick={() => fileInputRef.current?.click()}
-                disabled={streaming || uploading}
-                title="Upload files (images, documents, code)"
+                disabled={streaming || uploading || !(currentUser.entitlements?.file_upload ?? true)}
+                title={currentUser.entitlements?.file_upload === false ? 'File uploads are not included in your plan' : 'Upload files (images, documents, code, audio)'}
                 className={`p-3 rounded-xl transition-colors ${
                   uploading ? 'bg-theme-purple/50' : 'bg-theme-bg-elevated hover:bg-theme-bg-hover'
                 } disabled:opacity-50 disabled:cursor-not-allowed`}
@@ -1173,6 +1407,7 @@ function App() {
               </button>
               <div className="flex-1 relative">
                 <textarea
+                  ref={textareaRef}
                   value={input}
                   onChange={e => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
@@ -1189,7 +1424,9 @@ function App() {
               </div>
               <VoiceButton
                 onTranscribed={(text) => setInput(prev => prev + text)}
-                disabled={streaming || uploading}
+                onAudioCaptured={handleAudioCaptured}
+                audioEnabled={!!models.find(m => m.id === selectedModelId)?.audio_enabled}
+                disabled={streaming || uploading || !(currentUser.entitlements?.voice_input ?? true)}
               />
               <button
                 onClick={streaming ? handleCancel : handleSend}
@@ -1249,7 +1486,7 @@ function App() {
 
       {/* Document Preview Side Panel */}
       {sidePanel && (
-        <div className="w-[420px] border-l border-theme-border-light bg-theme-bg-secondary flex flex-col overflow-hidden">
+        <div className="llm-preview-panel w-[var(--theme-side-panel-width)] border-l border-theme-border-light bg-theme-bg-secondary flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-3 py-2 bg-theme-bg-elevated border-b border-theme-border-light shrink-0">
             <div className="flex items-center gap-2 text-xs min-w-0">
               <FileText className="w-3.5 h-3.5 text-theme-accent-text shrink-0" />
@@ -1284,20 +1521,24 @@ function App() {
         />
       )}
 
-      {/* Subscription Page Modal */}
-      {showSubscription && (
-        <SubscriptionPage
+      {/* Agent Modal — Documents, Memory, Appearance, Git */}
+      {showAgent && (
+        <AgentPanel
           currentUser={currentUser}
-          onClose={() => setShowSubscription(false)}
+          onClose={() => setShowAgent(false)}
+          currentCss={cssPreviousRef.current}
+          onCssSaved={(css) => { cssPreviousRef.current = css }}
+          autoScroll={autoScroll}
+          onAutoScrollChange={handleAutoScrollChange}
         />
       )}
 
-      {/* Custom CSS Modal */}
-      {showCustomCss && (
-        <CustomCssPanel
-          currentCss={cssPreviousRef.current}
-          onClose={() => setShowCustomCss(false)}
-          onSaved={(css) => { cssPreviousRef.current = css }}
+      {/* Account Modal */}
+      {showAccount && (
+        <AccountPanel
+          currentUser={currentUser}
+          onClose={() => setShowAccount(false)}
+          onRefreshUser={() => window.location.reload()}
         />
       )}
 
@@ -1324,9 +1565,372 @@ function App() {
   )
 }
 
+// --- Tool Execution Indicator ---
+
+// --- Tool Result Content ---
+
+function MemoryPills({ items }: { items: MemorySavedItem[] }) {
+  if (!items || items.length === 0) return null
+  return (
+    <div className="flex flex-wrap gap-2 mt-2">
+      {items.map((mem, i) => (
+        <div key={i} className="llm-tool-pill flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium bg-theme-bg-elevated border-theme-border-light">
+          <Brain className="w-3.5 h-3.5 text-theme-accent-text shrink-0" />
+          <span className="font-mono text-theme-accent-text">remember</span>
+          <span className="text-theme-muted truncate max-w-[320px]">{mem.text}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function ToolResultContent({ content, toolCall, setSidePanel }: {
+  content: string
+  toolCall: ToolCall
+  setSidePanel: (panel: SidePanel | null) => void
+}) {
+  const downloadMatch = content.match(/Download:\s*(\/api\/files\/\S+)/)
+
+  async function handleDownload(url: string) {
+    try {
+      const token = localStorage.getItem('llmdash_token')
+      const headers: Record<string, string> = {}
+      if (token) headers['Authorization'] = `Bearer ${token}`
+      const res = await fetch(url, { headers })
+      if (!res.ok) throw new Error(`Download failed: ${res.status}`)
+      const blob = await res.blob()
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = url.split('/').pop() || 'download'
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+    } catch (e) {
+      console.error('Download error:', e)
+    }
+  }
+
+  if (content.startsWith('SVG_RENDER:')) {
+    const rest = content.slice(11)
+    const parenIdx = rest.indexOf(' (')
+    const b64 = parenIdx > 0 ? rest.slice(0, parenIdx) : rest
+    const svg = DOMPurify.sanitize(atob(b64))
+    return (
+      <div className="max-w-full rounded-xl border border-theme-border-light bg-theme-bg-secondary overflow-hidden">
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-theme-bg-elevated text-xs text-theme-subtle border-b border-theme-border-light">
+          <Image className="w-3.5 h-3.5 text-theme-accent-text" />
+          <span>Vector Graphic</span>
+        </div>
+        <div className="p-3 flex justify-center bg-white dark:bg-gray-800" dangerouslySetInnerHTML={{ __html: svg }} />
+      </div>
+    )
+  }
+
+  if (content.startsWith('HTML_RENDER:') && toolCall.name !== 'edit_document') {
+    const html = atob(content.slice(12))
+    return (
+      <div className="max-w-full rounded-xl overflow-hidden border border-theme-border-light bg-theme-bg-secondary">
+        <div className="flex items-center gap-2 px-3 py-2 bg-theme-bg-elevated text-xs text-theme-subtle border-b border-theme-border-light">
+          <Eye className="w-3.5 h-3.5" /> HTML Preview
+        </div>
+        <iframe srcDoc={html} sandbox="allow-scripts" className="w-full h-[var(--theme-preview-height)] bg-theme-preview-bg" title="HTML Preview" />
+      </div>
+    )
+  }
+
+  if (toolCall.name === 'edit_document') {
+    const htmlRenderMatch = content.match(/HTML_RENDER:([A-Za-z0-9+/=]+)/)
+    const visualFormat = htmlRenderMatch !== null
+    const docFormat = (toolCall.arguments.format as string) || ''
+    const docFilename = (toolCall.arguments.filename as string) || ''
+    const docContent = (toolCall.arguments.content as string) || ''
+    const isCode = ['py','js','ts','html','css','json','xml','yaml','toml','sh','rs','go','java','c','cpp','sql','r','rb','php','lua','swift','kt','tf','ini','cfg','env','Dockerfile','Makefile'].includes(docFormat)
+    return (
+      <div className="max-w-3xl rounded-xl border border-theme-border-light bg-theme-bg-elevated overflow-hidden">
+        <div className="flex items-center gap-2 px-3 py-2 bg-theme-bg-elevated text-xs text-theme-subtle border-b border-theme-border-light">
+          <FileText className="w-3.5 h-3.5 text-theme-accent-text" />
+          <span className="font-mono text-theme-accent-dim">{docFilename}.{docFormat}</span>
+          <span className="text-theme-muted">({docFormat.toUpperCase()})</span>
+        </div>
+        {visualFormat ? (
+          <div className="p-3 bg-theme-bg-secondary flex flex-col items-center gap-2">
+            <p className="text-xs text-theme-subtle">Document preview available</p>
+            <button
+              onClick={() => setSidePanel({
+                html: atob(htmlRenderMatch![1]),
+                filename: docFilename,
+                format: docFormat,
+              })}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-theme-accent hover:bg-theme-accent-hover rounded-lg text-sm font-medium transition-colors cursor-pointer border-0"
+            >
+              <Eye className="w-4 h-4" />
+              Open Preview
+            </button>
+          </div>
+        ) : docContent ? (
+          <div className="p-3 bg-theme-bg-secondary">
+            {isCode ? (
+              <MarkdownRenderer content={'```' + docFormat + '\n' + docContent.slice(0, 8000) + (docContent.length > 8000 ? '\n\n... (truncated)' : '') + '\n```'} />
+            ) : (
+              <pre className="text-xs text-theme-text-secondary whitespace-pre-wrap font-mono max-h-96 overflow-y-auto">
+                {docContent.length > 8000 ? docContent.slice(0, 8000) + '\n\n... (truncated)' : docContent}
+              </pre>
+            )}
+          </div>
+        ) : null}
+        <div className="px-3 py-2 bg-theme-bg-elevated/50 text-xs text-theme-muted border-t border-theme-border-light/50 truncate">
+          {content.replace(/\n?HTML_RENDER:[A-Za-z0-9+/=]+/, '').trim()}
+        </div>
+        {downloadMatch && (
+          <div className="px-3 pb-2 bg-theme-bg-elevated/50">
+            <button
+              onClick={() => handleDownload(downloadMatch[1])}
+              className="inline-flex items-center gap-2 px-3 py-1.5 bg-theme-accent hover:bg-theme-accent-hover rounded-lg text-xs font-medium transition-colors cursor-pointer border-0"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Download {downloadMatch[1].split('/').pop()}
+            </button>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  const cleaned = stripNewCssLineForDisplay(content, toolCall.name)
+  return (
+    <div className="rounded-xl bg-theme-bg-elevated/50 border border-theme-border-light/50 px-4 py-2 max-h-96 overflow-y-auto">
+      <pre className="text-xs text-theme-text-secondary whitespace-pre-wrap font-mono">
+        {cleaned}
+      </pre>
+      {downloadMatch && (
+        <div className="mt-2">
+          <button
+            onClick={() => handleDownload(downloadMatch[1])}
+            className="inline-flex items-center gap-2 px-3 py-1.5 bg-theme-accent hover:bg-theme-accent-hover rounded-lg text-xs font-medium transition-colors cursor-pointer border-0"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Download {downloadMatch[1].split('/').pop()}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// --- Thinking section: reasoning + tool activity, one collapsible block ---
+
+function ThinkingSection({ message, messages, executingTools, expandedToolCalls, onToggleToolCall, setSidePanel }: {
+  message: Message
+  messages: Message[]
+  executingTools: Set<string>
+  expandedToolCalls: Set<string>
+  onToggleToolCall: (id: string) => void
+  setSidePanel: (panel: SidePanel | null) => void
+}) {
+  const toolCalls = message.tool_calls_json
+  const hasTools = toolCalls && Array.isArray(toolCalls) && toolCalls.length > 0
+  const reasoning = message.reasoning_content || ''
+  const timeline = message.thinking_json
+  const hasTimeline = timeline && Array.isArray(timeline) && timeline.length > 0
+  const [thinkingExpanded, setThinkingExpanded] = useState(false)
+
+  useEffect(() => {
+    if (message.status === 'generating' && (reasoning || hasTools)) {
+      setThinkingExpanded(true)
+    } else if (message.status !== 'generating' && message.status !== undefined) {
+      setThinkingExpanded(false)
+    }
+  }, [message.status, reasoning, hasTools])
+
+  if (!reasoning && !hasTools && !hasTimeline) return null
+
+  const toolLine = (tc: any, key: number) => {
+    const isExecuting = executingTools.has(tc.id)
+    const resultMsg = messages.find(m => m.role === 'tool' && m.tool_call_id === tc.id)
+    const hasResult = !isExecuting && !!resultMsg
+    const isExpanded = expandedToolCalls.has(tc.id)
+    const canExpand = isExecuting || hasResult
+    const summary = isExecuting
+      ? 'executing...'
+      : hasResult
+        ? (tc.name === 'web_search' || tc.name === 'web_scrape')
+          ? (() => {
+              const count = (resultMsg!.content!.match(/^\d+\.\s/gm) || []).length
+              return count > 0 ? `${count} result${count === 1 ? '' : 's'}` : 'done'
+            })()
+          : 'done'
+        : 'done'
+    return (
+      <div key={key}>
+        <button
+          onClick={() => { if (canExpand) onToggleToolCall(tc.id) }}
+          className={`flex items-center gap-1 w-full text-left px-2 py-1 rounded-lg border font-mono text-xs transition-colors cursor-pointer ${
+            isExecuting
+              ? 'bg-theme-accent/10 border-theme-accent-text/40 text-theme-accent-text'
+              : 'bg-theme-bg-secondary/60 border-theme-border-light/60 text-theme-text-secondary hover:bg-theme-bg-hover'
+          }`}
+        >
+          <span className="text-theme-muted">[</span>
+          <span className="text-theme-accent-text">{tc.name}</span>
+          <span className="text-theme-muted">]</span>
+          <span className={`ml-1 ${isExecuting ? 'text-theme-accent-text' : 'text-theme-muted'}`}>{summary}</span>
+          <span className="ml-auto flex items-center gap-1">
+            {isExecuting && <Loader2 className="w-3 h-3 animate-spin text-theme-accent-text" />}
+            {canExpand && (isExpanded
+              ? <ChevronDown className="w-3 h-3 text-theme-muted" />
+              : <ChevronRight className="w-3 h-3 text-theme-muted" />)}
+          </span>
+        </button>
+        {isExpanded && isExecuting && (
+          <div className="mt-1 rounded-xl bg-theme-bg-elevated/50 border border-theme-accent-text/20 px-3 py-2">
+            <div className="flex items-center gap-2 mb-1.5 text-xs text-theme-accent-text">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              <span className="font-medium">Executing {tc.name}...</span>
+            </div>
+            <div className="text-xs text-theme-muted mb-0.5 font-medium">Arguments:</div>
+            <pre className="text-xs text-theme-text-secondary whitespace-pre-wrap font-mono bg-theme-bg-secondary/50 rounded-lg p-2 max-h-60 overflow-y-auto">
+              {JSON.stringify(tc.arguments, null, 2)}
+            </pre>
+          </div>
+        )}
+        {isExpanded && resultMsg && (
+          <div className="mt-1">
+            <ToolResultContent content={resultMsg.content || ''} toolCall={tc} setSidePanel={setSidePanel} />
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  const toolLineForId = (id: string | undefined, key: number) => {
+    const tc = (toolCalls || []).find((t: any) => t.id === id)
+    return tc ? toolLine(tc, key) : null
+  }
+
+  return (
+    <div className="flex justify-start mb-1">
+      <div className="w-8 shrink-0" />
+      <div className="llm-bubble llm-bubble-assistant max-w-[var(--theme-bubble-max-width)] min-w-0">
+        <button
+          onClick={() => setThinkingExpanded(!thinkingExpanded)}
+          className="flex items-center gap-1.5 text-xs text-theme-muted hover:text-theme-text transition-colors py-0.5 w-full"
+        >
+          {message.status === 'generating' ? (
+            <><Loader2 className="w-3 h-3 animate-spin text-theme-purple" /><span className="text-theme-purple">Thinking...</span></>
+          ) : (
+            <><Brain className="w-3 h-3 text-theme-purple" /><span>Thinking</span></>
+          )}
+          {hasTools && <span className="text-theme-muted/70">· {toolCalls.length} tool call{toolCalls.length > 1 ? 's' : ''}</span>}
+          {thinkingExpanded ? <ChevronUp className="w-3 h-3 ml-auto" /> : <ChevronDown className="w-3 h-3 ml-auto" />}
+        </button>
+        {thinkingExpanded && (
+          <div className="mt-1 rounded-xl bg-theme-bg-elevated/50 border border-theme-border-light/50 px-3 py-2 text-sm space-y-2">
+            {hasTimeline ? (
+              // Chronological: reasoning and tool markers exactly where they
+              // happened during the thinking process.
+              timeline.map((entry, i) => entry.type === 'reasoning'
+                ? (entry.text ? (
+                    <div key={i} className="text-theme-subtle italic">
+                      <MarkdownRenderer content={entry.text} />
+                    </div>
+                  ) : null)
+                : toolLineForId(entry.id, i))
+            ) : (
+              // Fallback for old messages without a stored timeline.
+              <>
+                {reasoning && (
+                  <div className="text-theme-subtle italic">
+                    <MarkdownRenderer content={reasoning} />
+                  </div>
+                )}
+                {toolCalls && toolCalls.map((tc, i) => toolLine(tc, i))}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // --- Message Bubble ---
 
-function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCopy, copiedId, executingTools, expandedToolCalls, onToggleToolCall, setSidePanel }: {
+// P7 — TTS cache (message id -> blob URL) so replaying doesn't re-synthesize.
+const ttsAudioCache = new Map<string, string>()
+let ttsCurrentAudio: HTMLAudioElement | null = null
+let ttsStopCurrent: (() => void) | null = null
+const TTS_CACHE_MAX = 100
+
+function TtsPlayButton({ messageId, text }: { messageId: number; text: string }) {
+  const [state, setState] = useState<'idle' | 'loading' | 'playing'>('idle')
+  const inflightRef = useRef(false)
+
+  const play = async () => {
+    if (inflightRef.current) return
+    const key = `msg:${messageId}`
+    let url = ttsAudioCache.get(key)
+    if (!url) {
+      inflightRef.current = true
+      setState('loading')
+      try {
+        const blob = await api.chat.tts(text)
+        url = URL.createObjectURL(blob)
+        ttsAudioCache.set(key, url)
+        if (ttsAudioCache.size > TTS_CACHE_MAX) {
+          const oldest = ttsAudioCache.keys().next().value
+          if (oldest !== undefined) {
+            const oldUrl = ttsAudioCache.get(oldest)
+            if (oldUrl) URL.revokeObjectURL(oldUrl)
+            ttsAudioCache.delete(oldest)
+          }
+        }
+      } catch (e: any) {
+        console.error('TTS failed:', e)
+        alert('Speech synthesis failed: ' + (e.message || 'Unknown error'))
+        setState('idle')
+        inflightRef.current = false
+        return
+      }
+      inflightRef.current = false
+    }
+
+    // Stop whatever is playing (pauses it and resets that button's state).
+    if (ttsStopCurrent) ttsStopCurrent()
+    const audio = new Audio(url)
+    ttsCurrentAudio = audio
+    const cleanup = () => {
+      if (ttsCurrentAudio === audio) ttsCurrentAudio = null
+      if (ttsStopCurrent === stop) ttsStopCurrent = null
+      setState('idle')
+    }
+    const stop = () => {
+      if (ttsCurrentAudio === audio) ttsCurrentAudio?.pause()
+      cleanup()
+    }
+    ttsStopCurrent = stop
+    setState('playing')
+    audio.onended = cleanup
+    audio.onerror = cleanup
+    audio.play().catch(cleanup)
+  }
+
+  return (
+    <button
+      onClick={play}
+      disabled={state === 'loading'}
+      className="p-1 hover:bg-theme-bg-hover rounded transition-colors text-theme-muted hover:text-theme-accent-text disabled:opacity-50"
+      title={state === 'playing' ? 'Playing…' : 'Speak this reply'}
+    >
+      {state === 'loading' ? (
+        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+      ) : (
+        <Volume2 className={`w-3.5 h-3.5 ${state === 'playing' ? 'text-theme-accent-text' : ''}`} />
+      )}
+    </button>
+  )
+}
+
+function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCopy, copiedId, executingTools, expandedToolCalls, onToggleToolCall, setSidePanel, ttsEnabled, youtubePreviewsEnabled }: {
   message: Message
   msgIndex: number
   messages: Message[]
@@ -1338,283 +1942,83 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
   expandedToolCalls: Set<string>
   onToggleToolCall: (id: string) => void
   setSidePanel: (panel: SidePanel | null) => void
+  ttsEnabled: boolean
+  youtubePreviewsEnabled: boolean
 }) {
-  if (message.role === 'tool') {
-    const isWebTool = message.tool_name === 'web_search' || message.tool_name === 'web_scrape'
-    let matchedWebCall = false
-    if (!isWebTool && message.tool_call_id) {
-      for (let i = msgIndex - 1; i >= 0; i--) {
-        const prev = messages[i]
-        if (prev?.role === 'assistant' && prev.tool_calls_json) {
-          const tc = prev.tool_calls_json.find(t => t.id === message.tool_call_id)
-          if (tc) {
-            if (tc.name === 'web_search' || tc.name === 'web_scrape') matchedWebCall = true
-            break
-          }
-        }
-      }
-    }
-    if (isWebTool || matchedWebCall) return null
-  }
+  if (message.role === 'tool') return null
 
   const isUser = message.role === 'user'
-  const isTool = message.role === 'tool'
   const isAssistant = message.role === 'assistant'
   const toolCalls = message.tool_calls_json
-  const [thinkingExpanded, setThinkingExpanded] = useState(false)
+  const isGenerating = message.status === 'generating'
 
-  useEffect(() => {
-    if (message.status === 'generating' && message.reasoning_content) {
-      setThinkingExpanded(true)
-    } else if (message.status !== 'generating' && message.status !== undefined) {
-      setThinkingExpanded(false)
-    }
-  }, [message.status, message.reasoning_content])
-
-  if (isTool && message.content) {
-    const isHtmlRender = message.content.startsWith('HTML_RENDER:')
-    const downloadMatch = message.content.match(/Download:\s*(\/api\/files\/\S+)/)
-    if (isHtmlRender) {
-      const html = atob(message.content.slice(12))
-      return (
-        <div>
-          <div className="flex justify-start">
-            <div className="max-w-full rounded-xl overflow-hidden border border-theme-border-light bg-theme-bg-secondary">
-              <div className="flex items-center gap-2 px-3 py-2 bg-theme-bg-elevated text-xs text-theme-subtle border-b border-theme-border-light">
-                <Eye className="w-3.5 h-3.5" /> HTML Preview
-              </div>
-              <iframe srcDoc={html} sandbox="allow-scripts" className="w-full h-96 bg-theme-preview-bg" title="HTML Preview" />
-            </div>
-          </div>
-        </div>
-      )
-    }
-    if (message.tool_name === 'edit_document') {
-      const htmlRenderMatch = message.content.match(/HTML_RENDER:([A-Za-z0-9+/=]+)/)
-      const visualFormat = htmlRenderMatch !== null
-
-      let docFormat = ''
-      let docFilename = ''
-      let docContent = ''
-      if (msgIndex > 0) {
-        const prevMsg = messages[msgIndex - 1]
-        if (prevMsg?.role === 'assistant' && prevMsg.tool_calls_json) {
-          const matchingCall = prevMsg.tool_calls_json.find(tc => tc.id === message.tool_call_id)
-          if (matchingCall) {
-            docFormat = (matchingCall.arguments.format as string) || ''
-            docFilename = (matchingCall.arguments.filename as string) || ''
-            docContent = (matchingCall.arguments.content as string) || ''
-          }
-        }
-      }
-      const isCode = ['py','js','ts','html','css','json','xml','yaml','toml','sh','rs','go','java','c','cpp','sql','r','rb','php','lua','swift','kt','tf','ini','cfg','env','Dockerfile','Makefile'].includes(docFormat)
-      return (
-        <div>
-          <div className="flex justify-start">
-            <div className="max-w-3xl rounded-xl border border-theme-border-light bg-theme-bg-elevated overflow-hidden">
-              <div className="flex items-center gap-2 px-3 py-2 bg-theme-bg-elevated text-xs text-theme-subtle border-b border-theme-border-light">
-                <FileText className="w-3.5 h-3.5 text-theme-accent-text" />
-                <span className="font-mono text-theme-accent-dim">{docFilename}.{docFormat}</span>
-                <span className="text-theme-muted">({docFormat.toUpperCase()})</span>
-              </div>
-              {visualFormat ? (
-                <div className="p-3 bg-theme-bg-secondary flex flex-col items-center gap-2">
-                  <p className="text-xs text-theme-subtle">Document preview available</p>
-                  <button
-                    onClick={() => setSidePanel({
-                      html: atob(htmlRenderMatch![1]),
-                      filename: docFilename,
-                      format: docFormat,
-                    })}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-theme-accent hover:bg-theme-accent-hover rounded-lg text-sm font-medium transition-colors cursor-pointer border-0"
-                  >
-                    <Eye className="w-4 h-4" />
-                    Open Preview
-                  </button>
-                </div>
-              ) : docContent ? (
-                <div className="p-3 bg-theme-bg-secondary">
-                  {isCode ? (
-                    <MarkdownRenderer content={'```' + docFormat + '\n' + docContent.slice(0, 8000) + (docContent.length > 8000 ? '\n\n... (truncated)' : '') + '\n```'} />
-                  ) : (
-                    <pre className="text-xs text-theme-text-secondary whitespace-pre-wrap font-mono max-h-96 overflow-y-auto">
-                      {docContent.length > 8000 ? docContent.slice(0, 8000) + '\n\n... (truncated)' : docContent}
-                    </pre>
-                  )}
-                </div>
-              ) : null}
-              <div className="px-3 py-2 bg-theme-bg-elevated/50 text-xs text-theme-muted border-t border-theme-border-light/50 truncate">
-                {message.content.replace(/\n?HTML_RENDER:[A-Za-z0-9+/=]+/, '').trim()}
-              </div>
-              {downloadMatch && (
-                <div className="px-3 pb-2 bg-theme-bg-elevated/50">
-                  <button
-                    onClick={async () => {
-                      try {
-                        const token = localStorage.getItem('llmdash_token');
-                        const headers: Record<string, string> = {};
-                        if (token) headers['Authorization'] = `Bearer ${token}`;
-                        const res = await fetch(downloadMatch![1], { headers });
-                        if (!res.ok) throw new Error(`Download failed: ${res.status}`);
-                        const blob = await res.blob();
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = downloadMatch![1].split('/').pop() || 'download';
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(url);
-                      } catch (e) {
-                        console.error('Download error:', e);
-                      }
-                    }}
-                    className="inline-flex items-center gap-2 px-3 py-1.5 bg-theme-accent hover:bg-theme-accent-hover rounded-lg text-xs font-medium transition-colors cursor-pointer border-0"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    Download {downloadMatch![1].split('/').pop()}
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )
-    }
+  if (toolCalls && Array.isArray(toolCalls) && toolCalls.length > 0) {
     return (
       <div>
+        <ThinkingSection message={message} messages={messages} executingTools={executingTools} expandedToolCalls={expandedToolCalls} onToggleToolCall={onToggleToolCall} setSidePanel={setSidePanel} />
         <div className="flex justify-start">
-          <div className="max-w-2xl rounded-xl bg-theme-bg-elevated/50 border border-theme-border-light/50 px-4 py-2">
-            <div className="flex items-center gap-2 text-xs text-theme-muted mb-1">
-              {message.tool_name === 'web_search' && <Globe className="w-3 h-3" />}
-              {message.tool_name === 'web_scrape' && <Search className="w-3 h-3" />}
-              {message.tool_name === 'run_command' && <Terminal className="w-3 h-3" />}
-              {message.tool_name === 'render_html' && <Eye className="w-3 h-3" />}
-              <span className="font-mono">{message.tool_name}</span>
+          {isAssistant && (
+            <div className="llm-avatar w-[var(--theme-avatar-size)] h-[var(--theme-avatar-size)] rounded-full bg-theme-accent flex items-center justify-center mr-2 mt-0.5 shrink-0">
+              <Bot className="w-4 h-4" />
             </div>
-            <pre className="text-xs text-theme-text-secondary whitespace-pre-wrap font-mono">
-              {(() => {
-                const cleaned = stripNewCssLineForDisplay(message.content, message.tool_name)
-                return cleaned.length > 500 ? cleaned.slice(0, 500) + '...' : cleaned
-              })()}
-            </pre>
-            {downloadMatch && (
-              <button
-                onClick={async () => {
-                  try {
-                    const token = localStorage.getItem('llmdash_token');
-                    const headers: Record<string, string> = {};
-                    if (token) headers['Authorization'] = `Bearer ${token}`;
-                    const res = await fetch(downloadMatch[1], { headers });
-                    if (!res.ok) throw new Error(`Download failed: ${res.status}`);
-                    const blob = await res.blob();
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = downloadMatch[1].split('/').pop() || 'download';
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                  } catch (e) {
-                    console.error('Download error:', e);
-                  }
-                }}
-                className="mt-2 inline-flex items-center gap-2 px-3 py-1.5 bg-theme-accent hover:bg-theme-accent-hover rounded-lg text-xs font-medium transition-colors cursor-pointer border-0"
-              >
-                <Download className="w-3.5 h-3.5" />
-                Download {downloadMatch[1].split('/').pop()}
-              </button>
+          )}
+          <div className="llm-bubble llm-bubble-assistant max-w-[var(--theme-bubble-max-width)] min-w-0 space-y-2">
+            {isGenerating && isAssistant && !message.content && toolCalls.every(
+              (tc: any) => !executingTools.has(tc.id) && messages.find(m => m.role === 'tool' && m.tool_call_id === tc.id)
+            ) && (
+              <div className="flex items-center gap-2 text-xs text-theme-purple ml-1">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Generating response...</span>
+              </div>
             )}
+            {message.content && (
+              <div className="bg-theme-bg-elevated rounded-xl px-4 py-2.5">
+                <MarkdownRenderer content={message.content} youtubePreviewsEnabled={youtubePreviewsEnabled} />
+              </div>
+            )}
+            <MemoryPills items={message.memory_saved || []} />
           </div>
+        </div>
+        <div className={`flex gap-1 mt-0.5 ${isUser ? 'justify-end mr-10' : 'justify-start ml-10'}`}>
+          {isAssistant && !isGenerating && ttsEnabled && (
+            <TtsPlayButton messageId={message.id} text={message.content || ''} />
+          )}
+          <button onClick={() => onCopy(message.content || '', message.id)} className="p-1 hover:bg-theme-bg-hover rounded transition-colors text-theme-muted hover:text-theme-text" title="Copy">
+            {copiedId === message.id ? <Check className="w-3.5 h-3.5 text-theme-accent-text" /> : <Copy className="w-3.5 h-3.5" />}
+          </button>
+          {isUser && (
+            <button onClick={() => onRegenerate(msgIndex)} className="p-1 hover:bg-theme-bg-hover rounded transition-colors text-theme-muted hover:text-theme-accent-text" title="Regenerate">
+              <RefreshCw className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
     )
   }
 
-  if (toolCalls && Array.isArray(toolCalls) && toolCalls.length > 0) {
+  if (isGenerating && isAssistant && !toolCalls?.length) {
     return (
       <div>
-        {isAssistant && message.reasoning_content && (
-          <div className="flex justify-start mb-1">
-            <div className="w-8 shrink-0" />
-            <div className="max-w-[75%] min-w-0">
-              <button
-                onClick={() => setThinkingExpanded(!thinkingExpanded)}
-                className="flex items-center gap-1.5 text-xs text-theme-muted hover:text-theme-text transition-colors py-0.5 w-full"
-              >
-                {message.status === 'generating' ? (
-                  <><Loader2 className="w-3 h-3 animate-spin text-theme-purple" /><span className="text-theme-purple">Thinking...</span></>
-                ) : (
-                  <><Brain className="w-3 h-3 text-theme-purple" /><span>Reasoning</span></>
-                )}
-                {thinkingExpanded ? <ChevronUp className="w-3 h-3 ml-auto" /> : <ChevronDown className="w-3 h-3 ml-auto" />}
-              </button>
-              {thinkingExpanded && (
-                <div className="mt-1 rounded-xl bg-theme-bg-elevated/50 border border-theme-border-light/50 px-3 py-2 text-sm text-theme-subtle italic">
-                  <MarkdownRenderer content={message.reasoning_content || ''} />
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+        <ThinkingSection message={message} messages={messages} executingTools={executingTools} expandedToolCalls={expandedToolCalls} onToggleToolCall={onToggleToolCall} setSidePanel={setSidePanel} />
         <div className="flex justify-start">
-          {isAssistant && (
-            <div className="w-8 h-8 rounded-full bg-theme-accent flex items-center justify-center mr-2 mt-0.5 shrink-0">
-              <Bot className="w-4 h-4" />
-            </div>
-          )}
-          <div className="max-w-[75%] min-w-0 space-y-2">
-            <div className="flex flex-wrap gap-2">
-              {toolCalls.map((tc, i) => {
-                const isExecuting = executingTools.has(tc.id)
-                const resultMsg = messages.find(m => m.role === 'tool' && m.tool_call_id === tc.id)
-                const isCollapsibleWebCall = !isExecuting && (tc.name === 'web_search' || tc.name === 'web_scrape') && !!resultMsg
-                const callExpanded = isCollapsibleWebCall && expandedToolCalls.has(tc.id)
-                const summary = isExecuting
-                  ? 'executing...'
-                  : isCollapsibleWebCall
-                    ? (() => {
-                        const count = (resultMsg!.content!.match(/^\d+\.\s/gm) || []).length
-                        return count > 0 ? `${count} result${count === 1 ? '' : 's'}` : 'done'
-                      })()
-                    : 'done'
-                return (
-                  <div key={i} className="flex flex-col">
-                    <button
-                      onClick={() => { if (isCollapsibleWebCall) onToggleToolCall(tc.id) }}
-                      disabled={!isCollapsibleWebCall}
-                      className={`flex items-center gap-2 px-3 py-2 bg-theme-bg-elevated rounded-lg border text-xs ${isExecuting ? 'border-theme-focus-ring/40 animate-pulse' : 'border-theme-border-light'} ${isCollapsibleWebCall ? 'cursor-pointer hover:bg-theme-bg-hover' : 'cursor-default'}`}
-                    >
-                      {isExecuting ? (
-                        <Loader2 className="w-3.5 h-3.5 text-theme-accent-text animate-spin" />
-                      ) : (
-                        <Bot className="w-3.5 h-3.5 text-theme-accent-text" />
-                      )}
-                      <span className="font-mono text-theme-accent-dim">{tc.name}</span>
-                      <span className={isExecuting ? 'text-theme-accent-text' : 'text-theme-muted'}>{summary}</span>
-                      {isCollapsibleWebCall && (
-                        callExpanded
-                          ? <ChevronDown className="w-3 h-3 ml-1 text-theme-muted" />
-                          : <ChevronRight className="w-3 h-3 ml-1 text-theme-muted" />
-                      )}
-                    </button>
-                    {isCollapsibleWebCall && callExpanded && resultMsg && (
-                      <div className="mt-1 rounded-xl bg-theme-bg-elevated/50 border border-theme-border-light/50 px-4 py-2 max-h-96 overflow-y-auto">
-                        <pre className="text-xs text-theme-text-secondary whitespace-pre-wrap font-mono">
-                          {resultMsg.content}
-                        </pre>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
+          <div className="llm-avatar w-[var(--theme-avatar-size)] h-[var(--theme-avatar-size)] rounded-full bg-theme-accent flex items-center justify-center mr-2 mt-0.5 shrink-0">
+            <Bot className="w-4 h-4" />
+          </div>
+          <div className="llm-bubble llm-bubble-assistant max-w-[var(--theme-bubble-max-width)] min-w-0 space-y-2">
             {message.content && (
               <div className="bg-theme-bg-elevated rounded-xl px-4 py-2.5">
-                <MarkdownRenderer content={message.content} />
+                <MarkdownRenderer content={message.content} youtubePreviewsEnabled={youtubePreviewsEnabled} />
               </div>
             )}
+            <div className="flex items-center gap-2 text-xs text-theme-purple ml-1">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <span>Working on it...</span>
+              <span className="flex gap-0.5">
+                <span className="w-1 h-1 rounded-full bg-theme-purple animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="w-1 h-1 rounded-full bg-theme-purple animate-bounce" style={{ animationDelay: '150ms' }} />
+                <span className="w-1 h-1 rounded-full bg-theme-purple animate-bounce" style={{ animationDelay: '300ms' }} />
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -1638,7 +2042,7 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
     return (
       <div>
         <div className="flex justify-start">
-          <div className="max-w-[80%] bg-theme-bg-elevated rounded-xl px-4 py-3 space-y-3">
+          <div className="llm-bubble llm-bubble-assistant max-w-[var(--theme-bubble-max-width)] bg-theme-bg-elevated rounded-xl px-4 py-3 space-y-3">
             <div className="flex items-center gap-2 text-xs text-theme-subtle">
               <Image className="w-3.5 h-3.5 text-theme-purple" />
               <span>Image Generation{imageData.size ? ` (${imageData.size})` : ''}</span>
@@ -1652,7 +2056,11 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
             <div className="flex flex-wrap gap-2">
               {imageData.images.map((img, i) => (
                 <div key={i} className="rounded-lg overflow-hidden border border-theme-border-light max-w-sm">
-                  <img src={img} alt={`Generated ${i + 1}`} className="w-full object-contain" />
+                  <img
+                    src={img.startsWith('data:') || img.startsWith('http') ? img : `data:image/png;base64,${img}`}
+                    alt={`Generated ${i + 1}`}
+                    className="w-full object-contain"
+                  />
                 </div>
               ))}
             </div>
@@ -1667,7 +2075,7 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
     return (
       <div>
         <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
-          <div className={`max-w-[80%] ${isUser ? 'bg-theme-msg-user' : 'bg-theme-bg-elevated'} rounded-xl px-4 py-2`}>
+          <div className={`llm-bubble ${isUser ? 'llm-bubble-user' : 'llm-bubble-assistant'} max-w-[var(--theme-bubble-max-width)] ${isUser ? 'bg-theme-msg-user' : 'bg-theme-bg-elevated'} rounded-xl px-4 py-2`}>
             {parts.map((part, i) => {
               if (part.startsWith('HTML_RENDER:')) {
                 try {
@@ -1677,12 +2085,12 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
                       <div className="flex items-center gap-2 px-3 py-1.5 bg-theme-bg-secondary text-xs text-theme-subtle border-b border-theme-border-light">
                         <Eye className="w-3 h-3" /> Preview
                       </div>
-                      <iframe srcDoc={html} sandbox="allow-scripts" className="w-full h-96 bg-theme-preview-bg" title="Preview" />
+                      <iframe srcDoc={html} sandbox="allow-scripts" className="w-full h-[var(--theme-preview-height)] bg-theme-preview-bg" title="Preview" />
                     </div>
                   )
                 } catch { return <span key={i}>{part}</span> }
               }
-              return <MarkdownRenderer key={i} content={part} />
+              return <MarkdownRenderer key={i} content={part} youtubePreviewsEnabled={youtubePreviewsEnabled} />
             })}
           </div>
         </div>
@@ -1726,12 +2134,12 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
                   ) : (
                     fileUrl ? (
                       <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 hover:opacity-80">
-                        <File className="w-3.5 h-3.5 text-theme-accent-text" />
+                        <FileIcon className="w-3.5 h-3.5 text-theme-accent-text" />
                         <span className="text-theme-text-secondary truncate max-w-[120px]">{att.filename}</span>
                       </a>
                     ) : (
                       <>
-                        <File className="w-3.5 h-3.5 text-theme-accent-text" />
+                        <FileIcon className="w-3.5 h-3.5 text-theme-accent-text" />
                         <span className="text-theme-text-secondary truncate max-w-[120px]">{att.filename}</span>
                       </>
                     )
@@ -1742,45 +2150,31 @@ function MessageBubble({ message, msgIndex, messages, convId, onRegenerate, onCo
           </div>
         </div>
       )}
-      {isAssistant && message.reasoning_content && (
-        <div className="flex justify-start mb-1">
-          <div className="w-8 shrink-0" />
-          <div className="max-w-[75%] min-w-0">
-            <button
-              onClick={() => setThinkingExpanded(!thinkingExpanded)}
-              className="flex items-center gap-1.5 text-xs text-theme-muted hover:text-theme-text transition-colors py-0.5 w-full"
-            >
-              {message.status === 'generating' ? (
-                <><Loader2 className="w-3 h-3 animate-spin text-theme-purple" /><span className="text-theme-purple">Thinking...</span></>
-              ) : (
-                <><Brain className="w-3 h-3 text-theme-purple" /><span>Reasoning</span></>
-              )}
-              {thinkingExpanded ? <ChevronUp className="w-3 h-3 ml-auto" /> : <ChevronDown className="w-3 h-3 ml-auto" />}
-            </button>
-            {thinkingExpanded && (
-              <div className="mt-1 rounded-xl bg-theme-bg-elevated/50 border border-theme-border-light/50 px-3 py-2 text-sm text-theme-subtle italic">
-                <MarkdownRenderer content={message.reasoning_content || ''} />
-              </div>
-            )}
-          </div>
-        </div>
+      {isAssistant && (
+        <ThinkingSection message={message} messages={messages} executingTools={executingTools} expandedToolCalls={expandedToolCalls} onToggleToolCall={onToggleToolCall} setSidePanel={setSidePanel} />
       )}
       <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
         {isAssistant && (
-          <div className="w-8 h-8 rounded-full bg-theme-accent flex items-center justify-center mr-2 mt-0.5 shrink-0">
+          <div className="llm-avatar w-[var(--theme-avatar-size)] h-[var(--theme-avatar-size)] rounded-full bg-theme-accent flex items-center justify-center mr-2 mt-0.5 shrink-0">
             <Bot className="w-4 h-4" />
           </div>
         )}
-        <div className={`max-w-[75%] ${isUser ? 'bg-theme-msg-user' : 'bg-theme-bg-elevated'} rounded-xl px-4 py-2.5`}>
-          <MarkdownRenderer content={content} />
+        <div className={`llm-bubble ${isUser ? 'llm-bubble-user' : 'llm-bubble-assistant'} max-w-[var(--theme-bubble-max-width)] ${isUser ? 'bg-theme-msg-user' : 'bg-theme-bg-elevated'} rounded-xl px-4 py-2.5`}>
+          <MarkdownRenderer content={content} youtubePreviewsEnabled={youtubePreviewsEnabled} />
         </div>
+        {isAssistant && message.memory_saved && message.memory_saved.length > 0 && (
+          <MemoryPills items={message.memory_saved} />
+        )}
         {isUser && (
-          <div className="w-8 h-8 rounded-full bg-theme-icon-user flex items-center justify-center ml-2 mt-0.5 shrink-0">
+          <div className="llm-avatar w-[var(--theme-avatar-size)] h-[var(--theme-avatar-size)] rounded-full bg-theme-icon-user flex items-center justify-center ml-2 mt-0.5 shrink-0">
             <span className="text-xs font-bold">U</span>
           </div>
         )}
       </div>
       <div className={`flex gap-1 mt-0.5 ${isUser ? 'justify-end mr-10' : 'justify-start ml-10'}`}>
+        {isAssistant && !isGenerating && ttsEnabled && (
+          <TtsPlayButton messageId={message.id} text={content} />
+        )}
         <button onClick={() => onCopy(content, message.id)} className="p-1 hover:bg-theme-bg-hover rounded transition-colors text-theme-muted hover:text-theme-text" title="Copy">
           {copiedId === message.id ? <Check className="w-3.5 h-3.5 text-theme-accent-text" /> : <Copy className="w-3.5 h-3.5" />}
         </button>
