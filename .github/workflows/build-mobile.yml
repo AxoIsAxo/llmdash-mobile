@@ -1,6 +1,10 @@
 name: Build Mobile APK
 
 on:
+  # Fresh APK after every push to the default branch (mobile).
+  push:
+    branches:
+      - mobile
   # Nightly build — runs at 04:00 UTC every day on the default branch (mobile).
   schedule:
     - cron: '0 4 * * *'
@@ -10,6 +14,12 @@ on:
         description: 'LLMDash server URL to bake into the APK (e.g. https://ai.redforged.eu/). Leave empty to use the LLMDASH_SERVER_URL repository secret.'
         required: false
         type: string
+
+# A newer push supersedes an in-flight build for the same branch instead of
+# queueing behind it.
+concurrency:
+  group: build-mobile-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-android:

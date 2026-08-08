@@ -109,8 +109,9 @@ Point `LLMDASH_SERVER_URL` at `http://10.0.2.2:8000/` (Android emulator's view o
 
 A GitHub Actions workflow at `.github/workflows/build-mobile.yml` builds the debug APK:
 
+- **On every push to `mobile` (automatic)** — a fresh APK is built from each commit. Push builds use the **`LLMDASH_SERVER_URL` repository secret**; if it's missing the run fails with a clear message. A newer push cancels any in-flight build for the branch.
 - **On demand** — go to **Actions → Build Mobile APK → Run workflow**, enter your LLMDash server URL, then download the `llmdash-debug-apk` artifact from the completed run.
-- **Nightly (automatic)** — the workflow also runs every day at 04:00 UTC. Scheduled runs can't prompt for a URL, so it reads the **`LLMDASH_SERVER_URL` repository secret** (Settings → Secrets and variables → Actions). If the secret is missing, the run fails with a clear message; set it once and nightlies will keep producing a fresh APK from the latest `mobile` commit.
+- **Nightly (automatic)** — the workflow also runs every day at 04:00 UTC as a safety net. Scheduled runs can't prompt for a URL, so they read the same **`LLMDASH_SERVER_URL` repository secret** (Settings → Secrets and variables → Actions); set it once and all automatic builds keep producing a fresh APK from the latest `mobile` commit.
 
 ---
 
