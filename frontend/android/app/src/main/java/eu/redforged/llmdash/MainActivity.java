@@ -40,6 +40,47 @@ public class MainActivity extends BridgeActivity {
     private static final String TOKEN_KEY = "llmdash_token";
     private static final long OAUTH_TIMEOUT_MS = 10 * 60 * 1000L;
 
+    /**
+     * Extrovert's consent page renders its hidden _csrf field empty on a fresh
+     * session (the server generates the CSRF token lazily — only when some page
+     * of the session renders a CSRF form — and the session is regenerated at
+     * login), so clicking "Authorize" POSTs _csrf= and the provider answers
+     * "CSRF token missing or invalid. Re-open the authorization request.".
+     * This fetches a same-origin page that renders a CSRF form (the homepage),
+     * which makes the server mint the token for this session, then fills the
+     * consent form with it before submit.
+     */
+    private static final String CONSENT_CSRF_JS =
+            "(function(){"
+            + "function findForm(){"
+            + "var f=document.querySelector('form[action=\"/api/v1/oauth/authorize\"]');"
+            + "if(f)return f;"
+            + "var fs=document.querySelectorAll('form');"
+            + "for(var i=0;i<fs.length;i++){"
+            + "if(fs[i].querySelector('input[name=\"approve\"]'))return fs[i];"
+            + "}"
+            + "return null;"
+            + "}"
+            + "var form=findForm();"
+            + "if(!form)return;"
+            + "var input=form.querySelector('input[name=\"_csrf\"]');"
+            + "if(!input||input.value)return;"
+            + "function fill(){"
+            + "if(input.value)return Promise.resolve();"
+            + "return fetch('/',{credentials:'include'})"
+            + ".then(function(r){return r.text();})"
+            + ".then(function(h){"
+            + "var m=h.match(/name=\"_csrf\" value=\"([0-9a-f]+)\"/);"
+            + "if(m)input.value=m[1];"
+            + "})"
+            + ".catch(function(){});"
+            + "}"
+            + "fill();"
+            + "form.addEventListener('submit',function(e){"
+            + "if(!input.value){e.preventDefault();fill().then(function(){form.submit();});}"
+            + "});"
+            + "})();";
+
     private LlmdashWebViewClient webViewClient;
 
     @Override
@@ -53,6 +94,7 @@ public class MainActivity extends BridgeActivity {
 
         private boolean oauthMode = false;
         private String oauthServerHost = null;
+        private String oauthProviderHost = null;
         private long oauthStartedAt = 0L;
 
         LlmdashWebViewClient() {
@@ -115,6 +157,7 @@ public class MainActivity extends BridgeActivity {
             if (target == null || !isHttp(Uri.parse(target))) {
                 return;
             }
+            oauthProviderHost = Uri.parse(target).getHost();
 
             // Start from a clean slate. The provider's session cookie
             // (connect.sid) persists in the WebView across app restarts and
@@ -147,6 +190,7 @@ public class MainActivity extends BridgeActivity {
             if (oauthMode && appHost != null && appHost.equals(safeHost(url))) {
                 oauthMode = false;
                 oauthServerHost = null;
+                oauthProviderHost = null;
                 oauthStartedAt = 0L;
             }
         }
@@ -160,7 +204,15 @@ public class MainActivity extends BridgeActivity {
                 return;
             }
 
-            if (oauthServerHost == null || !oauthServerHost.equals(safeHost(url))) {
+            String host = safeHost(url);
+            if (oauthProviderHost != null && oauthProviderHost.equals(host)
+                    && url.contains("/api/v1/oauth/authorize")) {
+                // Provider consent page — fill its missing CSRF token and keep waiting.
+                primeConsentCsrf(view);
+                return;
+            }
+
+            if (oauthServerHost == null || !oauthServerHost.equals(host)) {
                 return; // still on the OIDC provider or an unrelated page — keep waiting
             }
 
@@ -189,8 +241,13 @@ public class MainActivity extends BridgeActivity {
         private void endOAuthFlow(WebView view) {
             oauthMode = false;
             oauthServerHost = null;
+            oauthProviderHost = null;
             oauthStartedAt = 0L;
             view.post(() -> view.loadUrl(homeUrl()));
+        }
+
+        private void primeConsentCsrf(WebView view) {
+            view.evaluateJavascript(CONSENT_CSRF_JS, null);
         }
 
         private boolean isHttp(Uri url) {
