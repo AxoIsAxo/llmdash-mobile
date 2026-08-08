@@ -1,11 +1,14 @@
 name: Build Mobile APK
 
 on:
+  # Nightly build — runs at 04:00 UTC every day on the default branch (mobile).
+  schedule:
+    - cron: '0 4 * * *'
   workflow_dispatch:
     inputs:
       url:
-        description: 'LLMDash server URL to bake into the APK (e.g. https://ai.redforged.eu/)'
-        required: true
+        description: 'LLMDash server URL to bake into the APK (e.g. https://ai.redforged.eu/). Leave empty to use the LLMDASH_SERVER_URL repository secret.'
+        required: false
         type: string
 
 jobs:
@@ -46,11 +49,23 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
+      # Scheduled runs can't prompt for a URL: use the manually entered input
+      # when dispatching, otherwise fall back to the LLMDASH_SERVER_URL secret.
+      - name: Resolve server URL
+        id: url
+        run: |
+          URL="${{ inputs.url || secrets.LLMDASH_SERVER_URL }}"
+          if [ -z "$URL" ]; then
+            echo "::error::No LLMDash server URL. Set the LLMDASH_SERVER_URL repository secret (Settings → Secrets and variables → Actions) so nightly builds can run, or run this workflow manually and enter a URL."
+            exit 1
+          fi
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
       - name: Write build-time .env
         working-directory: frontend
         run: |
           cd ..
-          echo "LLMDASH_SERVER_URL=${{ inputs.url }}" > .env
+          echo "LLMDASH_SERVER_URL=${{ steps.url.outputs.url }}" > .env
           cat .env
 
       - name: Install npm dependencies

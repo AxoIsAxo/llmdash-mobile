@@ -107,12 +107,10 @@ Point `LLMDASH_SERVER_URL` at `http://10.0.2.2:8000/` (Android emulator's view o
 
 ## Build via CI
 
-A GitHub Actions workflow at `.github/workflows/build-mobile.yml` builds the debug APK on demand:
+A GitHub Actions workflow at `.github/workflows/build-mobile.yml` builds the debug APK:
 
-1. Push this repo (or a fork) to GitHub
-2. Go to **Actions → Build Mobile APK → Run workflow**
-3. Enter your LLMDash server URL
-4. Download the `llmdash-debug-apk` artifact from the completed run
+- **On demand** — go to **Actions → Build Mobile APK → Run workflow**, enter your LLMDash server URL, then download the `llmdash-debug-apk` artifact from the completed run.
+- **Nightly (automatic)** — the workflow also runs every day at 04:00 UTC. Scheduled runs can't prompt for a URL, so it reads the **`LLMDASH_SERVER_URL` repository secret** (Settings → Secrets and variables → Actions). If the secret is missing, the run fails with a clear message; set it once and nightlies will keep producing a fresh APK from the latest `mobile` commit.
 
 ---
 
