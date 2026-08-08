@@ -243,13 +243,15 @@ public class MainActivity extends BridgeActivity {
             oauthStartedAt = 0L;
             view.stopLoading();
             new Thread(() -> {
-                final String token = fetchCallbackToken(callbackUrl);
+                final CallbackResult res = fetchCallbackResult(callbackUrl);
                 runOnUiThread(() -> {
-                    if (token != null && !token.isEmpty()) {
-                        Log.d(LOG_TAG, "callback token len " + token.length());
-                        storeToken(token);
+                    if (res.token != null) {
+                        Log.d(LOG_TAG, "callback token len " + res.token.length());
+                        storeToken(res.token);
+                        toast("Signed in via Extrovert ✓");
                     } else {
-                        Log.d(LOG_TAG, "callback returned no token (error/expired page)");
+                        Log.d(LOG_TAG, "callback returned no token: " + res.error);
+                        toast("Extrovert login failed: " + res.error);
                     }
                     try {
                         view.loadUrl(homeUrl());
@@ -260,8 +262,18 @@ public class MainActivity extends BridgeActivity {
             }).start();
         }
 
-        /** GET the callback URL and pull the JWT out of its HTML (or null). */
-        private String fetchCallbackToken(String callbackUrl) {
+        /** Result of fetching the callback: a JWT, or the error the server rendered. */
+        private static final class CallbackResult {
+            final String token;
+            final String error;
+            CallbackResult(String token, String error) {
+                this.token = token;
+                this.error = error;
+            }
+        }
+
+        /** GET the callback URL: extract the JWT, or the error text, from its HTML. */
+        private CallbackResult fetchCallbackResult(String callbackUrl) {
             try {
                 java.net.URL u = new java.net.URL(callbackUrl);
                 java.net.HttpURLConnection conn = (java.net.HttpURLConnection) u.openConnection();
@@ -278,14 +290,27 @@ public class MainActivity extends BridgeActivity {
                 java.util.regex.Matcher m = java.util.regex.Pattern
                         .compile("setItem\\('llmdash_token', \"([^\"]+)\"\\)")
                         .matcher(body);
-                if (!m.find()) return null;
-                String token = m.group(1);
-                // Only accept a well-formed JWT (header.payload.signature).
-                return token.split("\\.").length == 3 ? token : null;
+                if (m.find()) {
+                    String token = m.group(1);
+                    // Only accept a well-formed JWT (header.payload.signature).
+                    if (token.split("\\.").length == 3) {
+                        return new CallbackResult(token, null);
+                    }
+                }
+                // Error page — pull out the message the server rendered.
+                java.util.regex.Matcher em = java.util.regex.Pattern
+                        .compile("<p style=\"color:#ff5d6c\">([^<]+)</p>")
+                        .matcher(body);
+                String err = em.find() ? em.group(1).trim() : "no token in callback page";
+                return new CallbackResult(null, err);
             } catch (Exception e) {
                 Log.d(LOG_TAG, "callback fetch failed: " + e);
-                return null;
+                return new CallbackResult(null, "callback request failed: " + e);
             }
+        }
+
+        private void toast(String msg) {
+            android.widget.Toast.makeText(MainActivity.this, msg, android.widget.Toast.LENGTH_LONG).show();
         }
 
         /** Read an InputStream to a UTF-8 string (works on API 23+, unlike readAllBytes). */
@@ -338,6 +363,7 @@ public class MainActivity extends BridgeActivity {
                         } else if (pageUrl.contains("/api/auth/extrovert/callback")) {
                             // Error / expired / cancelled login — drop back into the app.
                             Log.d(LOG_TAG, "callback page without token — ending flow (login failed)");
+                            toast("Extrovert login failed: no token in callback page");
                             endOAuthFlow(view);
                         }
                     });
