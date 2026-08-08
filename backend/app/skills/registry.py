@@ -19,12 +19,17 @@ class SkillRegistry:
     def get(self, name: str) -> Optional[Skill]:
         return self._skills.get(name)
 
-    def get_tool_definitions(self) -> list[dict]:
+    def get_tool_definitions(self, entitlements: dict | None = None) -> list[dict]:
         return [
             skill.to_tool_def()
             for skill in self._skills.values()
             if getattr(skill, "enabled", True)
+            and (not skill.entitlement or not entitlements or entitlements.get(skill.entitlement, True))
         ]
+
+    def entitlement_of(self, name: str) -> Optional[str]:
+        skill = self._skills.get(name)
+        return getattr(skill, "entitlement", None) if skill else None
 
     async def execute(self, name: str, arguments: dict, **context) -> str:
         skill = self._skills.get(name)

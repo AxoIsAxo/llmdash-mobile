@@ -100,6 +100,7 @@ def _make_browser_headers(url: str) -> dict[str, str]:
 
 class WebSearchSkill(Skill):
     name = "web_search"
+    entitlement = "web_search"
     description = "Search the web via SearXNG. Returns search results with snippets and URLs."
     input_schema = {
         "type": "object",
@@ -144,6 +145,7 @@ class WebSearchSkill(Skill):
 
 class WebScrapeSkill(Skill):
     name = "web_scrape"
+    entitlement = "web_search"
     description = "Fetch a web page URL and extract its readable content as clean text. Use this when you need the actual content of a page (not just a search snippet). Handles most websites without being blocked."
     input_schema = {
         "type": "object",

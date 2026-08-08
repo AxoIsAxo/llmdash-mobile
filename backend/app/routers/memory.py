@@ -15,9 +15,13 @@ from ..memory.consolidate import consolidate, delete_atom
 from ..memory.lint import lint
 from ..memory.scheduler import MemoryScheduler
 from ..memory.store import Store
-from .auth import get_current_user
+from .auth import get_current_user, require_entitlement
 
-router = APIRouter(prefix="/api/memory", tags=["memory"])
+router = APIRouter(
+    prefix="/api/memory",
+    tags=["memory"],
+    dependencies=[Depends(require_entitlement("memory"))],
+)
 
 
 def _store() -> Store:

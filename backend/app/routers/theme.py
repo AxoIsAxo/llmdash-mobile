@@ -13,7 +13,7 @@ from ..theme import (
     ALLOWED_PRESETS, DEFAULT_SPEC, get_preset,
     theme_spec_to_css, validate_theme_spec,
 )
-from .auth import get_current_user
+from .auth import get_current_user, require_entitlement
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +95,7 @@ async def get_theme(current_user: dict = Depends(get_current_user), db: AsyncSes
 
 
 @router.put("")
-async def put_theme(req: ThemePutRequest, current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def put_theme(req: ThemePutRequest, current_user: dict = Depends(require_entitlement("theme_editing")), db: AsyncSession = Depends(get_db)):
     user = await _load_user(current_user["user_id"], db)
     spec_json = _spec_json(req.spec)
     if len(spec_json) > 200_000:
@@ -108,7 +108,7 @@ async def put_theme(req: ThemePutRequest, current_user: dict = Depends(get_curre
 
 
 @router.post("/reset")
-async def reset_theme(req: ThemeResetRequest, current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def reset_theme(req: ThemeResetRequest, current_user: dict = Depends(require_entitlement("theme_editing")), db: AsyncSession = Depends(get_db)):
     user = await _load_user(current_user["user_id"], db)
     preset_spec = get_preset(req.preset)
     if preset_spec is None:
@@ -141,7 +141,7 @@ async def theme_history(current_user: dict = Depends(get_current_user), db: Asyn
 
 
 @router.post("/restore/{history_id}")
-async def restore_theme(history_id: int, current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def restore_theme(history_id: int, current_user: dict = Depends(require_entitlement("theme_editing")), db: AsyncSession = Depends(get_db)):
     user = await _load_user(current_user["user_id"], db)
     result = await db.execute(
         select(ThemeHistory).where(

@@ -27,6 +27,7 @@ def _generate_preview(content: str, filename: str, fmt: str) -> str:
 
 class EditDocumentSkill(Skill):
     name = "edit_document"
+    entitlement = "document_editor"
     description = "Create a downloadable file artifact. Supports rich document formats (docx, pdf, odt, tex) and any text-based file type (py, js, ts, html, css, json, xml, yaml, toml, txt, csv, sh, rs, go, java, etc.). Returns a file path and download link. Only use when the user explicitly asks to save, download, or export a file."
     input_schema = {
         "type": "object",

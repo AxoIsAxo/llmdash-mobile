@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -16,6 +17,7 @@ from ..models import (
     PlanModelLimitResponse, PlanModelLimitSet,
     UserSubscriptionResponse, SubscribeRequest,
 )
+from ..entitlements import merge_entitlements
 from .auth import get_current_user, require_role
 
 router = APIRouter(prefix="/api/subscriptions", tags=["subscriptions"])
@@ -52,6 +54,7 @@ async def list_plans(current_user: dict = Depends(get_current_user), db: AsyncSe
             duration_days=p.duration_days, token_limit=p.token_limit,
             image_limit=getattr(p, "image_limit", None),
             enabled=p.enabled,
+            entitlements=merge_entitlements(getattr(p, "entitlements", None)),
             created_at=p.created_at.isoformat() if p.created_at else "",
         )
         for p in plans
@@ -70,6 +73,7 @@ async def list_public_plans(db: AsyncSession = Depends(get_db)):
             duration_days=p.duration_days, token_limit=p.token_limit,
             image_limit=getattr(p, "image_limit", None),
             enabled=p.enabled,
+            entitlements=merge_entitlements(getattr(p, "entitlements", None)),
             created_at=p.created_at.isoformat() if p.created_at else "",
         )
         for p in plans
@@ -90,6 +94,7 @@ async def create_plan(
         duration_days=req.duration_days, token_limit=req.token_limit,
         image_limit=getattr(req, "image_limit", None),
         enabled=req.enabled,
+        entitlements=json.dumps(req.entitlements) if req.entitlements else None,
     )
     db.add(plan)
     await db.commit()
@@ -118,7 +123,11 @@ async def update_plan(
             raise HTTPException(409, "Plan name already exists")
 
     for key, value in update_data.items():
-        setattr(plan, key, value)
+        if key == "entitlements":
+            # entitlements is a dict on the wire but a JSON string in the DB.
+            plan.entitlements = json.dumps(value) if value else None
+        else:
+            setattr(plan, key, value)
     await db.commit()
     return {"status": "updated"}
 
@@ -159,6 +168,7 @@ async def list_plan_limits(
             model_name=model_name or f"Model #{limit.model_id}",
             token_limit=limit.token_limit,
             image_limit=getattr(limit, "image_limit", None),
+            allowed=(getattr(limit, "allowed", True) is not False),
         )
         for limit, model_name in rows
     ]
@@ -179,7 +189,11 @@ async def set_plan_limits(
     await db.execute(delete(PlanModelLimit).where(PlanModelLimit.plan_id == plan_id))
 
     for item in req:
-        limit = PlanModelLimit(plan_id=plan_id, model_id=item.model_id, token_limit=item.token_limit, image_limit=getattr(item, "image_limit", None))
+        limit = PlanModelLimit(
+            plan_id=plan_id, model_id=item.model_id, token_limit=item.token_limit,
+            image_limit=getattr(item, "image_limit", None),
+            allowed=item.allowed if item.allowed is not None else True,
+        )
         db.add(limit)
 
     await db.commit()

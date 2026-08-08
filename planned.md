@@ -222,8 +222,7 @@ per-plan, fully-configurable entitlements — not just token/image limits.
 check runs against the user's *active* subscription (`user_subscriptions` status/expiry, same
 lookup as `chat_stream`), and the owner can always see/override every flag.
 
-**Effort:** 🔲 ~1 week (entitlements schema + registry/endpoint checks + per-plan admin UI +
-Free-plan defaults).
+**Effort:** 🟢 implemented.
 
 ---
 
@@ -334,6 +333,19 @@ review gate).
 
 ## Status notes
 
+- **P9 shipped as:** per-plan `entitlements` JSON on `subscription_plans` (19 feature keys —
+  all existing features plus every planned one (P1/P2/P3/P7/P8/P10/P11/P12), enforced as each
+  feature ships) and a per-model access gate `plan_model_limits.allowed`. Defaults are
+  **all-on for every plan, including Free** — Free is the implicit fallback plan for users
+  without a subscription (including the owner of a self-hosted instance), so locking
+  features by default would break the primary use case; nothing is locked until an admin
+  turns a flag off in Admin Panel → Subscriptions. Enforcement is server-side first: the
+  tool registry hides disallowed skills from the model (each skill carries an `entitlement`
+  tag, with a defense-in-depth check at execution time), endpoints 403 via
+  `require_entitlement` (upload, transcribe, image, branch, documents, git, memory, theme/css
+  writes), `chat_stream` skips memory injection/capture when `memory` is off and rejects
+  denied models, non-admin model lists hide denied models, and `/api/auth/me` carries the
+  merged entitlements so the UI hides locked features (upload/voice buttons, Agent tabs).
 - **P5 shipped as:** smart auto-scroll — the viewport only follows the newest content while
   the user is already at the bottom (100px threshold); if the user has scrolled up, the
   viewport is left alone mid-generation. A sticky "Latest" button appears whenever the user

@@ -251,12 +251,12 @@ export const api = {
     plans: {
       list: () => request<import('./types').SubscriptionPlan[]>('/subscriptions/plans'),
       public: () => request<import('./types').SubscriptionPlan[]>('/subscriptions/plans/public'),
-      create: (data: { name: string; price_sats: number; duration_days: number; token_limit?: number | null; image_limit?: number | null; enabled?: boolean }) =>
+      create: (data: { name: string; price_sats: number; duration_days: number; token_limit?: number | null; image_limit?: number | null; enabled?: boolean; entitlements?: Record<string, boolean> }) =>
         request<{ id: number; status: string }>('/subscriptions/plans', {
           method: 'POST',
           body: JSON.stringify(data),
         }),
-      update: (id: number, data: { name?: string; price_sats?: number; duration_days?: number; token_limit?: number | null; image_limit?: number | null; enabled?: boolean }) =>
+      update: (id: number, data: { name?: string; price_sats?: number; duration_days?: number; token_limit?: number | null; image_limit?: number | null; enabled?: boolean; entitlements?: Record<string, boolean> }) =>
         request<{ status: string }>(`/subscriptions/plans/${id}`, {
           method: 'PUT',
           body: JSON.stringify(data),
@@ -264,7 +264,7 @@ export const api = {
       delete: (id: number) =>
         request<{ status: string }>(`/subscriptions/plans/${id}`, { method: 'DELETE' }),
       limits: (planId: number) => request<import('./types').PlanModelLimit[]>(`/subscriptions/plans/${planId}/limits`),
-      setLimits: (planId: number, limits: { model_id: number; token_limit: number | null; image_limit?: number | null }[]) =>
+      setLimits: (planId: number, limits: { model_id: number; token_limit: number | null; image_limit?: number | null; allowed: boolean }[]) =>
         request<{ status: string }>(`/subscriptions/plans/${planId}/limits`, {
           method: 'PUT',
           body: JSON.stringify(limits),

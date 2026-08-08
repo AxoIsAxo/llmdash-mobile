@@ -259,6 +259,8 @@ class SubscriptionPlanCreate(BaseModel):
     token_limit: Optional[int] = None
     image_limit: Optional[int] = None
     enabled: bool = True
+    # P9: optional per-feature entitlement overrides (defaults all-on).
+    entitlements: Optional[dict[str, bool]] = None
 
 
 class SubscriptionPlanUpdate(BaseModel):
@@ -268,6 +270,7 @@ class SubscriptionPlanUpdate(BaseModel):
     token_limit: Optional[int] = None
     image_limit: Optional[int] = None
     enabled: Optional[bool] = None
+    entitlements: Optional[dict[str, bool]] = None
 
 
 class SubscriptionPlanResponse(BaseModel):
@@ -279,6 +282,8 @@ class SubscriptionPlanResponse(BaseModel):
     image_limit: Optional[int] = None
     enabled: bool
     created_at: str
+    # P9: full merged entitlement dict (defaults + plan overrides).
+    entitlements: dict[str, bool] = {}
 
 
 class PlanModelLimitResponse(BaseModel):
@@ -288,12 +293,14 @@ class PlanModelLimitResponse(BaseModel):
     model_name: str
     token_limit: Optional[int] = None
     image_limit: Optional[int] = None
+    allowed: bool = True
 
 
 class PlanModelLimitSet(BaseModel):
     model_id: int
     token_limit: Optional[int] = None
     image_limit: Optional[int] = None
+    allowed: bool = True
 
 
 class UserSubscriptionResponse(BaseModel):

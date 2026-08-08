@@ -141,6 +141,8 @@ class SubscriptionPlan(Base):
     token_limit = Column(Integer, nullable=True)
     image_limit = Column(Integer, nullable=True)
     enabled = Column(Boolean, default=True)
+    # P9: per-feature boolean entitlements as a JSON object (see entitlements.py).
+    entitlements = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
@@ -152,6 +154,8 @@ class PlanModelLimit(Base):
     model_id = Column(Integer, ForeignKey("model_configs.id", ondelete="CASCADE"), nullable=False)
     token_limit = Column(Integer, nullable=True)
     image_limit = Column(Integer, nullable=True)
+    # P9: per-model access gate (default allowed; absence of a row = allowed).
+    allowed = Column(Boolean, nullable=False, default=True)
 
 
 class UserModelUsage(Base):
@@ -430,10 +434,14 @@ def _migrate(conn):
         sub_plan_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(subscription_plans)").fetchall()}
         if "image_limit" not in sub_plan_cols:
             conn.exec_driver_sql("ALTER TABLE subscription_plans ADD COLUMN image_limit INTEGER")
+        if "entitlements" not in sub_plan_cols:
+            conn.exec_driver_sql("ALTER TABLE subscription_plans ADD COLUMN entitlements TEXT")
 
         plan_limit_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(plan_model_limits)").fetchall()}
         if "image_limit" not in plan_limit_cols:
             conn.exec_driver_sql("ALTER TABLE plan_model_limits ADD COLUMN image_limit INTEGER")
+        if "allowed" not in plan_limit_cols:
+            conn.exec_driver_sql("ALTER TABLE plan_model_limits ADD COLUMN allowed BOOLEAN NOT NULL DEFAULT 1")
         if "skill_configs" not in existing_tables:
             conn.exec_driver_sql("""
                 CREATE TABLE IF NOT EXISTS skill_configs (

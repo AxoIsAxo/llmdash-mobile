@@ -41,7 +41,7 @@ class SkillConfigResponse(BaseModel):
 
 @router.get("")
 async def list_skills(current_user: dict = Depends(get_current_user)):
-    builtin_defs = skill_registry.get_tool_definitions()
+    builtin_defs = skill_registry.get_tool_definitions(current_user.get("entitlements") or {})
     async with async_session() as sess:
         result = await sess.execute(
             select(SkillConfigDB).where(

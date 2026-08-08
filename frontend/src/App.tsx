@@ -359,6 +359,9 @@ function App() {
   const handleAuthDone = (user: User) => {
     setCurrentUser(user)
     setAuthStatus(null)
+    // P9: the login/setup response carries no entitlements — fetch /me so the
+    // UI hides locked features immediately (server enforces regardless).
+    api.auth.me().then(u => setCurrentUser(u)).catch(() => {})
   }
 
   const handleLogout = async () => {
@@ -1392,8 +1395,8 @@ function App() {
               />
               <button
                 onClick={() => fileInputRef.current?.click()}
-                disabled={streaming || uploading}
-                title="Upload files (images, documents, code, audio)"
+                disabled={streaming || uploading || !(currentUser.entitlements?.file_upload ?? true)}
+                title={currentUser.entitlements?.file_upload === false ? 'File uploads are not included in your plan' : 'Upload files (images, documents, code, audio)'}
                 className={`p-3 rounded-xl transition-colors ${
                   uploading ? 'bg-theme-purple/50' : 'bg-theme-bg-elevated hover:bg-theme-bg-hover'
                 } disabled:opacity-50 disabled:cursor-not-allowed`}
@@ -1421,7 +1424,7 @@ function App() {
                 onTranscribed={(text) => setInput(prev => prev + text)}
                 onAudioCaptured={handleAudioCaptured}
                 audioEnabled={!!models.find(m => m.id === selectedModelId)?.audio_enabled}
-                disabled={streaming || uploading}
+                disabled={streaming || uploading || !(currentUser.entitlements?.voice_input ?? true)}
               />
               <button
                 onClick={streaming ? handleCancel : handleSend}

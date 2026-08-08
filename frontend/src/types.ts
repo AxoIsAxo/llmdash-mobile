@@ -9,6 +9,8 @@ export interface User {
   token_usage_by_model?: Record<number, { token_usage: number; image_usage: number }>;
   created_at: string;
   extrovert_linked?: boolean;
+  // P9: merged entitlement flags of the user's effective plan (defaults all-on).
+  entitlements?: Record<string, boolean>;
 }
 
 export interface AuthStatus {
@@ -165,6 +167,8 @@ export interface SubscriptionPlan {
   image_limit: number | null;
   enabled: boolean;
   created_at: string;
+  // P9: full merged entitlement dict (defaults + plan overrides).
+  entitlements: Record<string, boolean>;
 }
 
 export interface PlanModelLimit {
@@ -174,6 +178,7 @@ export interface PlanModelLimit {
   model_name: string;
   token_limit: number | null;
   image_limit: number | null;
+  allowed: boolean;
 }
 
 export interface UserSubscription {

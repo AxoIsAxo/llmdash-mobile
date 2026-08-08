@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react'
 import {
   Users, UserPlus, Trash2, Key, Wrench, Shield, Globe,
   Loader2, X, Check, Settings, RotateCcw, CreditCard, Plus, Edit3, Brain,
-  ArrowUp, ArrowDown, Upload, File, Eye, Mic, Sparkles
+  ArrowUp, ArrowDown, Upload, File, Eye, Mic, Sparkles, SlidersHorizontal
 } from 'lucide-react'
 import { api } from '../api'
+import { ENTITLEMENT_META, ENTITLEMENT_GROUPS } from '../entitlements'
 import type { User, ProviderConfig, ScannedProvider, ModelConfig, SubscriptionPlan, PlanModelLimit, UserSubscription as UserSub } from '../types'
 
 interface Props {
@@ -899,7 +900,11 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
   const [limits, setLimits] = useState<PlanModelLimit[]>([])
   const [limitValues, setLimitValues] = useState<Record<number, string>>({})
   const [limitImageValues, setLimitImageValues] = useState<Record<number, string>>({})
+  const [limitAllowed, setLimitAllowed] = useState<Record<number, boolean>>({})
   const [savingLimits, setSavingLimits] = useState(false)
+  const [entPlan, setEntPlan] = useState<number | null>(null)
+  const [entEdit, setEntEdit] = useState<Record<string, boolean>>({})
+  const [savingEnt, setSavingEnt] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -923,9 +928,15 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
       setLimits(data)
       const vals: Record<number, string> = {}
       const imgVals: Record<number, string> = {}
-      data.forEach(l => { vals[l.model_id] = l.token_limit?.toString() || ''; imgVals[l.model_id] = l.image_limit?.toString() || '' })
+      const allowed: Record<number, boolean> = {}
+      data.forEach(l => {
+        vals[l.model_id] = l.token_limit?.toString() || ''
+        imgVals[l.model_id] = l.image_limit?.toString() || ''
+        allowed[l.model_id] = l.allowed !== false
+      })
       setLimitValues(vals)
       setLimitImageValues(imgVals)
+      setLimitAllowed(allowed)
     } catch (e) { console.error('loadLimits failed:', e) }
   }
 
@@ -980,11 +991,29 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
         model_id: m.id,
         token_limit: limitValues[m.id] ? parseInt(limitValues[m.id]) : null,
         image_limit: limitImageValues[m.id] ? parseInt(limitImageValues[m.id]) : null,
+        allowed: limitAllowed[m.id] !== false,
       }))
       await api.subscriptions.plans.setLimits(limitsPlan!, entries)
       setLimitsPlan(null)
     } catch (e: any) { setError(e.message) }
     setSavingLimits(false)
+  }
+
+  const openEntitlements = (plan: SubscriptionPlan) => {
+    setEntPlan(plan.id)
+    setEntEdit({ ...(plan.entitlements || {}) })
+  }
+
+  const handleSaveEntitlements = async () => {
+    if (entPlan === null) return
+    setSavingEnt(true)
+    setError('')
+    try {
+      await api.subscriptions.plans.update(entPlan, { entitlements: entEdit })
+      setEntPlan(null)
+      load()
+    } catch (e: any) { setError(e.message) }
+    setSavingEnt(false)
   }
 
   const handleSubStatus = async (subId: number, status: string) => {
@@ -1155,6 +1184,13 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
                         <Wrench className="w-3.5 h-3.5" />
                       </button>
                       <button
+                        onClick={() => entPlan === plan.id ? setEntPlan(null) : openEntitlements(plan)}
+                        className={`p-1.5 rounded text-xs ${entPlan === plan.id ? 'bg-theme-accent/30 text-theme-accent-text' : 'hover:bg-theme-bg-active text-theme-muted hover:text-theme-text'}`}
+                        title="Feature entitlements"
+                      >
+                        <SlidersHorizontal className="w-3.5 h-3.5" />
+                      </button>
+                      <button
                         onClick={() => {
                           setEditingPlan(plan.id)
                           setEditPlanData({
@@ -1190,6 +1226,22 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
                           {models.map(m => (
                             <div key={m.id} className="flex items-center gap-2">
                               <span className="text-xs text-theme-subtle w-32 truncate">{m.name}</span>
+                              <button
+                                type="button"
+                                role="switch"
+                                aria-checked={limitAllowed[m.id] !== false}
+                                onClick={() => setLimitAllowed(a => ({ ...a, [m.id]: a[m.id] !== false ? false : true }))}
+                                className={`relative w-8 h-5 rounded-full transition-colors shrink-0 ${
+                                  limitAllowed[m.id] !== false ? 'bg-theme-accent' : 'bg-theme-bg-active border border-theme-border-light'
+                                }`}
+                                title={limitAllowed[m.id] !== false ? 'Allowed — click to deny this model for this plan' : 'Denied — click to allow'}
+                              >
+                                <span
+                                  className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                                    limitAllowed[m.id] !== false ? 'translate-x-3' : ''
+                                  }`}
+                                />
+                              </button>
                               <input
                                 type="number"
                                 value={limitValues[m.id] || ''}
@@ -1211,6 +1263,50 @@ function SubscriptionsTab({ currentUser }: { currentUser: User }) {
                           </button>
                         </>
                       )}
+                    </div>
+                  )}
+
+                  {entPlan === plan.id && (
+                    <div className="mt-3 pt-3 border-t border-theme-border-light space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs text-theme-muted">
+                          Feature entitlements for <span className="text-theme-accent-text">{plan.name}</span>.
+                          All default to enabled — turn a feature off to lock it for users of this plan.
+                        </p>
+                      </div>
+                      {ENTITLEMENT_GROUPS.map(g => (
+                        <div key={g.key}>
+                          <p className="text-xs font-semibold text-theme-subtle uppercase tracking-wider mb-1.5">{g.label}</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            {ENTITLEMENT_META.filter(e => e.group === g.key).map(e => (
+                              <div key={e.key} className="flex items-center justify-between gap-2 bg-theme-bg-elevated/30 rounded-lg px-3 py-2" title={e.hint}>
+                                <span className="text-xs min-w-0 truncate">{e.label}</span>
+                                <button
+                                  type="button"
+                                  role="switch"
+                                  aria-checked={entEdit[e.key] !== false}
+                                  onClick={() => setEntEdit(prev => ({ ...prev, [e.key]: prev[e.key] !== false ? false : true }))}
+                                  className={`relative w-8 h-5 rounded-full transition-colors shrink-0 ${
+                                    entEdit[e.key] !== false ? 'bg-theme-accent' : 'bg-theme-bg-active border border-theme-border-light'
+                                  }`}
+                                >
+                                  <span
+                                    className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                                      entEdit[e.key] !== false ? 'translate-x-3' : ''
+                                    }`}
+                                  />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                      <div className="flex gap-2">
+                        <button onClick={handleSaveEntitlements} disabled={savingEnt} className="px-4 py-1.5 bg-theme-accent hover:bg-theme-accent-hover rounded text-sm disabled:opacity-50">
+                          {savingEnt ? 'Saving...' : 'Save Entitlements'}
+                        </button>
+                        <button onClick={() => setEntPlan(null)} className="px-4 py-1.5 hover:bg-theme-bg-active rounded text-sm">Cancel</button>
+                      </div>
                     </div>
                   )}
                 </div>

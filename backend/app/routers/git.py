@@ -18,9 +18,13 @@ from sqlalchemy import select, desc, or_
 from .. import config as app_config
 from .. import git_tools
 from ..database import async_session, GitRepo, GitActionLog
-from ..routers.auth import get_current_user, require_role
+from ..routers.auth import get_current_user, require_role, require_entitlement
 
-router = APIRouter(prefix="/api/git", tags=["git"])
+router = APIRouter(
+    prefix="/api/git",
+    tags=["git"],
+    dependencies=[Depends(require_entitlement("git_access"))],
+)
 
 VALID_ACCESS = {"read", "write"}
 VALID_AUTH = {"none", "ssh_key", "token"}

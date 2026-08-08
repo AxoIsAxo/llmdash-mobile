@@ -45,11 +45,12 @@ from .sandbox import is_docker_available, remove_sandbox, cleanup_all, start_swe
 from .ocr import process_uploaded_file, is_allowed_file, is_image_file, is_audio_file, ocr_image, is_ocr_available
 from .whisper_stt import transcribe_audio, transcribe_audio_openrouter, VALID_PROVIDERS, DEFAULT_PROVIDER, DEFAULT_OPENROUTER_MODEL, VALID_MODEL_SIZES, VALID_COMPUTE_TYPES, get_model as get_whisper_model
 from .audio_convert import prepare_audio_for_provider
-from .routers.auth import router as auth_router, get_current_user, require_role, load_provider_configs
+from .routers.auth import router as auth_router, get_current_user, require_role, require_entitlement, load_provider_configs
 from .routers.subscriptions import router as subscriptions_router
 from .routers.theme import router as theme_router
 from .routers.memory import router as memory_router
 from .routers.git import router as git_router
+from .entitlements import get_denied_model_ids
 from .memory.capture import assistant_turn_summary, capture_assistant_reply, capture_user_message
 from .memory import config as mem_cfg
 from .memory.commands import maybe_run_command as memory_maybe_run_command
@@ -176,6 +177,11 @@ async def list_models(current_user: dict = Depends(get_current_user), db: AsyncS
         query = query.where(ModelConfig.enabled == True)
     result = await db.execute(query)
     models = result.scalars().all()
+    # P9: non-admins only see models their effective plan allows.
+    if current_user.get("role") not in ("owner", "admin"):
+        denied = await get_denied_model_ids(db, current_user["user_id"])
+        if denied:
+            models = [m for m in models if m.id not in denied]
     return [
         ModelConfigResponse(
             id=m.id, name=m.name, provider=m.provider,
@@ -636,7 +642,7 @@ async def clear_messages(conv_id: int, current_user: dict = Depends(get_current_
 
 
 @router.post("/conversations/{conv_id}/branch")
-async def branch_conversation(conv_id: int, req: BranchRequest, current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def branch_conversation(conv_id: int, req: BranchRequest, current_user: dict = Depends(require_entitlement("conversation_branching")), db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Conversation).where(Conversation.id == conv_id, Conversation.user_id == current_user["user_id"])
     )
@@ -831,7 +837,7 @@ async def get_whisper_config(current_user: dict = Depends(get_current_user)):
 
 
 @router.post("/chat/upload", response_model=UploadResponse)
-async def upload_file(file: UploadFile = File(...), request: Request = None, current_user: dict = Depends(get_current_user)):
+async def upload_file(file: UploadFile = File(...), request: Request = None, current_user: dict = Depends(require_entitlement("file_upload"))):
     if not app_config.settings.file_upload_enabled:
         raise HTTPException(403, "File uploads are disabled by the admin")
 
@@ -877,7 +883,7 @@ async def upload_file(file: UploadFile = File(...), request: Request = None, cur
 
 
 @router.post("/chat/transcribe")
-async def transcribe_voice(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
+async def transcribe_voice(file: UploadFile = File(...), current_user: dict = Depends(require_entitlement("voice_input"))):
     if not file.filename:
         raise HTTPException(400, "No audio file provided")
     content = await file.read()
@@ -1147,6 +1153,13 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
     if not model.enabled:
         raise HTTPException(400, "Model is disabled")
 
+    # P9: entitlement flags + per-model allowlist of the effective plan.
+    # Admins/owner are never locked out of models (they manage them).
+    user_entitlements = current_user.get("entitlements") or {}
+    if current_user.get("role") not in ("owner", "admin"):
+        if model_id in await get_denied_model_ids(db, current_user["user_id"]):
+            raise HTTPException(403, "This model is not included in your current plan")
+
     model_type = getattr(model, "model_type", "chat") or "chat"
     if model_type != "chat":
         raise HTTPException(400, "This model is not a chat model. Use /api/chat/image for image generation models.")
@@ -1257,7 +1270,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
 
     # --- Cross-session memory: inject a [MEMORY] block into the system prompt.
     memory_block = None
-    if memory_worker is not None:
+    if memory_worker is not None and user_entitlements.get("memory", True):
         try:
             cmd_report = await memory_maybe_run_command(
                 MemoryStore(app_config.settings.memory_dir), current_user["user_id"], req.message or ""
@@ -1456,7 +1469,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
         db.add(user_msg)
         await db.commit()
 
-        if memory_worker is not None:
+        if memory_worker is not None and user_entitlements.get("memory", True):
             await asyncio.to_thread(
                 capture_user_message,
                 MemoryStore(app_config.settings.memory_dir),
@@ -1477,7 +1490,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
         db.add(user_msg)
         await db.commit()
 
-        if memory_worker is not None:
+        if memory_worker is not None and user_entitlements.get("memory", True):
             await asyncio.to_thread(
                 capture_user_message,
                 MemoryStore(app_config.settings.memory_dir),
@@ -1490,7 +1503,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
         messages.append({"role": "user", "content": req.message})
 
     if getattr(model, "tools_enabled", True):
-        tool_defs = skill_registry.get_tool_definitions()
+        tool_defs = skill_registry.get_tool_definitions(user_entitlements)
         tools = [ToolDef(**t) for t in tool_defs]
     else:
         tools = []
@@ -1734,10 +1747,14 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                         # Execute one tool call; the result maps back by id.
                         await push_event("tool_start", name=tc["name"], id=tc["id"])
                         try:
-                            result = await skill_registry.execute(
-                                tc["name"], tc["arguments"],
-                                _current_user=current_user, _conversation_id=req.conversation_id,
-                            )
+                            ent = skill_registry.entitlement_of(tc["name"])
+                            if ent and not user_entitlements.get(ent, True):
+                                result = f"__TOOL_ERROR__: Tool '{tc['name']}' is not included in your current plan."
+                            else:
+                                result = await skill_registry.execute(
+                                    tc["name"], tc["arguments"],
+                                    _current_user=current_user, _conversation_id=req.conversation_id,
+                                )
                         except Exception as e:
                             result = f"__TOOL_ERROR__: Tool execution error: {e}"
                         await push_event("tool_result", name=tc["name"], id=tc["id"], result=result)
@@ -1934,7 +1951,7 @@ async def chat_stream(req: ChatRequest, current_user: dict = Depends(get_current
                 # the model produced, even on error/cancel) and nudge the
                 # extraction scheduler. Runs BEFORE [DONE] so the client can
                 # never observe an uncaptured turn.
-                if memory_worker is not None:
+                if memory_worker is not None and user_entitlements.get("memory", True):
                     try:
                         _capture_content = assistant_turn_summary(
                             accumulated_content or "",
@@ -2134,7 +2151,7 @@ async def generation_status(conv_id: int, current_user: dict = Depends(get_curre
 # --- Image Generation ---
 
 @router.post("/chat/image", response_model=ImageGenerationResponse)
-async def generate_image(req: ImageGenerationRequest, current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def generate_image(req: ImageGenerationRequest, current_user: dict = Depends(require_entitlement("image_generation")), db: AsyncSession = Depends(get_db)):
     conv_result = await db.execute(
         select(Conversation).where(Conversation.id == req.conversation_id, Conversation.user_id == current_user["user_id"])
     )
@@ -2148,6 +2165,9 @@ async def generate_image(req: ImageGenerationRequest, current_user: dict = Depen
         raise HTTPException(404, "Model not found")
     if not model.enabled:
         raise HTTPException(400, "Model is disabled")
+    if current_user.get("role") not in ("owner", "admin"):
+        if req.model_id in await get_denied_model_ids(db, current_user["user_id"]):
+            raise HTTPException(403, "This model is not included in your current plan")
     model_type = getattr(model, "model_type", "chat") or "chat"
     if model_type != "image":
         raise HTTPException(400, "This model is not an image generation model")
@@ -2287,7 +2307,7 @@ def _file_size(path: str) -> int:
 
 
 @router.get("/documents")
-async def list_documents(current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def list_documents(current_user: dict = Depends(require_entitlement("document_editor")), db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Document)
         .where(Document.user_id == current_user["user_id"])
@@ -2311,7 +2331,7 @@ async def list_documents(current_user: dict = Depends(get_current_user), db: Asy
 
 
 @router.get("/documents/{doc_id}")
-async def get_document(doc_id: int, current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def get_document(doc_id: int, current_user: dict = Depends(require_entitlement("document_editor")), db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Document).where(Document.id == doc_id, Document.user_id == current_user["user_id"])
     )
@@ -2332,7 +2352,7 @@ async def get_document(doc_id: int, current_user: dict = Depends(get_current_use
 
 
 @router.get("/documents/{doc_id}/download")
-async def download_document(doc_id: int, current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def download_document(doc_id: int, current_user: dict = Depends(require_entitlement("document_editor")), db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Document).where(Document.id == doc_id, Document.user_id == current_user["user_id"])
     )
@@ -2343,7 +2363,7 @@ async def download_document(doc_id: int, current_user: dict = Depends(get_curren
 
 
 @router.put("/documents/{doc_id}")
-async def update_document_meta(doc_id: int, body: dict, current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def update_document_meta(doc_id: int, body: dict, current_user: dict = Depends(require_entitlement("document_editor")), db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Document).where(Document.id == doc_id, Document.user_id == current_user["user_id"])
     )
@@ -2358,7 +2378,7 @@ async def update_document_meta(doc_id: int, body: dict, current_user: dict = Dep
 
 
 @router.delete("/documents/{doc_id}")
-async def delete_document(doc_id: int, current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def delete_document(doc_id: int, current_user: dict = Depends(require_entitlement("document_editor")), db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Document).where(Document.id == doc_id, Document.user_id == current_user["user_id"])
     )
@@ -2373,7 +2393,7 @@ async def delete_document(doc_id: int, current_user: dict = Depends(get_current_
 
 
 @router.get("/documents/{doc_id}/versions")
-async def list_document_versions(doc_id: int, current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def list_document_versions(doc_id: int, current_user: dict = Depends(require_entitlement("document_editor")), db: AsyncSession = Depends(get_db)):
     doc_result = await db.execute(
         select(Document).where(Document.id == doc_id, Document.user_id == current_user["user_id"])
     )
@@ -2404,7 +2424,7 @@ async def list_document_versions(doc_id: int, current_user: dict = Depends(get_c
 
 
 @router.post("/documents/upload")
-async def upload_document(file: UploadFile = File(...), current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def upload_document(file: UploadFile = File(...), current_user: dict = Depends(require_entitlement("document_editor")), db: AsyncSession = Depends(get_db)):
     if not file.filename:
         raise HTTPException(400, "No filename provided")
     safe_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in file.filename)
@@ -2503,7 +2523,7 @@ async def serve_file(filename: str, current_user: dict = Depends(get_current_use
 
 @router.get("/tools")
 async def list_tools(current_user: dict = Depends(get_current_user)):
-    return skill_registry.get_tool_definitions()
+    return skill_registry.get_tool_definitions(current_user.get("entitlements") or {})
 
 
 app.include_router(router)

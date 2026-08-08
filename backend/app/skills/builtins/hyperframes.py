@@ -14,6 +14,7 @@ from ...database import async_session, Document as DocModel
 
 class RenderVideoSkill(Skill):
     name = "render_video"
+    entitlement = "render"
     description = (
         "Create an MP4 video from an HTML composition using HyperFrames. "
         "Provide the complete HTML with HyperFrames data-* attributes for timing and tracks. "

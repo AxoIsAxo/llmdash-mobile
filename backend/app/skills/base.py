@@ -25,6 +25,9 @@ class Skill(ABC):
     description: str
     input_schema: dict
     enabled: bool = True
+    # P9: entitlement key (see entitlements.py) this skill is gated by.
+    # None = always available regardless of plan.
+    entitlement: Optional[str] = None
 
     @abstractmethod
     async def execute(self, arguments: dict, **context) -> str:

@@ -18,15 +18,27 @@ interface Props {
 type AgentTab = 'documents' | 'memory' | 'css' | 'git'
 
 export default function AgentPanel({ currentUser, onClose, currentCss, onCssSaved, autoScroll, onAutoScrollChange }: Props) {
-  const [tab, setTab] = useState<AgentTab>('documents')
   const isAdmin = currentUser.role === 'owner' || currentUser.role === 'admin'
+  const ent = currentUser.entitlements || {}
 
+  // P9: hide tabs the user's plan locks (server also enforces).
+  const tabGate: Record<AgentTab, string | null> = {
+    documents: 'document_editor',
+    memory: 'memory',
+    css: 'theme_editing',
+    git: 'git_access',
+  }
   const tabs = [
     { key: 'documents' as AgentTab, icon: FileText, label: 'Documents' },
     { key: 'memory' as AgentTab, icon: Brain, label: 'Memory' },
     { key: 'css' as AgentTab, icon: Palette, label: 'Appearance' },
     { key: 'git' as AgentTab, icon: GitBranch, label: 'Git' },
-  ]
+  ].filter(t => ent[tabGate[t.key]!] !== false)
+
+  const [tab, setTab] = useState<AgentTab>(() => {
+    const first = tabs.find(t => ent[tabGate[t.key]!] !== false)
+    return first ? first.key : 'documents'
+  })
 
   return (
     <div className="fixed inset-0 bg-theme-overlay/60 flex items-center justify-center z-50" onClick={onClose}>
@@ -51,10 +63,16 @@ export default function AgentPanel({ currentUser, onClose, currentCss, onCssSave
           ))}
         </div>
         <div className="flex-1 overflow-y-auto p-4">
-          {tab === 'documents' && <DocumentManager currentUser={currentUser} onClose={onClose} embedded />}
-          {tab === 'memory' && <MemoryPanel currentUser={currentUser} onClose={onClose} embedded />}
-          {tab === 'css' && <CustomCssPanel currentCss={currentCss} onClose={onClose} onSaved={onCssSaved} embedded autoScroll={autoScroll} onAutoScrollChange={onAutoScrollChange} />}
-          {tab === 'git' && <GitPanel isAdmin={isAdmin} />}
+          {tabs.length === 0 ? (
+            <p className="text-xs text-theme-muted">No agent features are included in your current plan.</p>
+          ) : (
+            <>
+              {tab === 'documents' && <DocumentManager currentUser={currentUser} onClose={onClose} embedded />}
+              {tab === 'memory' && <MemoryPanel currentUser={currentUser} onClose={onClose} embedded />}
+              {tab === 'css' && <CustomCssPanel currentCss={currentCss} onClose={onClose} onSaved={onCssSaved} embedded autoScroll={autoScroll} onAutoScrollChange={onAutoScrollChange} />}
+              {tab === 'git' && <GitPanel isAdmin={isAdmin} />}
+            </>
+          )}
         </div>
       </div>
     </div>

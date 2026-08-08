@@ -28,6 +28,7 @@ def _current_spec(user) -> dict:
 
 class GetThemeSkill(Skill):
     name = "get_theme"
+    entitlement = "theme_editing"
     description = (
         "Get the user's current UI theme as a structured JSON spec (tokens + components). "
         "This is the PRIMARY way to read the theme state. The spec has 'tokens' (colors, fonts, "
@@ -56,6 +57,7 @@ class GetThemeSkill(Skill):
 
 class PatchThemeSkill(Skill):
     name = "patch_theme"
+    entitlement = "theme_editing"
     description = (
         "Apply a JSON merge patch to the user's theme spec and save it. This is the PRIMARY "
         "theme editing tool — use it for ANY style/layout change (colors, fonts, radii, shadows, "
@@ -105,6 +107,7 @@ class PatchThemeSkill(Skill):
 
 class ResetThemeSkill(Skill):
     name = "reset_theme"
+    entitlement = "theme_editing"
     description = (
         "Reset the user's theme to a built-in preset. Presets: 'default' (original LLMDash dark "
         "theme), 'compact' (denser UI), 'glassmorphism' (frosted translucent surfaces), "
@@ -149,6 +152,7 @@ class ResetThemeSkill(Skill):
 
 class GetUserCssSkill(Skill):
     name = "get_user_css"
+    entitlement = "theme_editing"
     description = "Get the current user's custom stylesheet. Returns the FULL CSS string the user has saved (or empty string if none). This stylesheet controls the entire LLMDash UI — not just colors. It can contain rules for colors, backgrounds, borders, border-radius, shadows, spacing, font family/size/weight, line-height, opacity, transitions, animations, layout widths, z-index, and any other CSS property. ALWAYS call this first before any styling edit so you operate on the real current state, not a stale memory."
     input_schema = {
         "type": "object",
@@ -169,6 +173,7 @@ class GetUserCssSkill(Skill):
 
 class PatchUserCssSkill(Skill):
     name = "patch_user_css"
+    entitlement = "theme_editing"
     description = "Make a targeted edit to the user's custom stylesheet by finding an exact block of text and replacing it. Use this for advanced raw-CSS tweaks that the theme tokens don't cover. For most styling work prefer patch_theme (structured, validated). Always call get_user_css first so old_str matches the real current state. Provide enough surrounding lines in old_str to make it unique. Matching tries (in order): 1) exact match, 2) trim leading/trailing whitespace per line, 3) collapse all whitespace runs to single space. On success, saves server-side and applies immediately. Note: url(), @import, @document, expression(), -moz-binding, behavior: and other at-rules except @media/@supports/@keyframes are blocked for security."
     input_schema = {
         "type": "object",
@@ -209,6 +214,7 @@ class PatchUserCssSkill(Skill):
 
 class AppendUserCssSkill(Skill):
     name = "append_user_css"
+    entitlement = "theme_editing"
     description = "Append new CSS rules to the END of the user's custom stylesheet. Use this for advanced raw-CSS additions not covered by theme tokens (prefer patch_theme for most work). Saves server-side and applies immediately. url(), @import, @document, expression(), -moz-binding, behavior: and at-rules other than @media/@supports/@keyframes are blocked for security."
     input_schema = {
         "type": "object",
@@ -248,6 +254,7 @@ class AppendUserCssSkill(Skill):
 
 class SetUserCssSkill(Skill):
     name = "set_user_css"
+    entitlement = "theme_editing"
     description = "FULL REPLACEMENT of the user's custom stylesheet. Do NOT use this for targeted edits — use patch_user_css instead. Only call this when the user explicitly asks to 'reset', 'completely redo', or 'overwrite' all styles. The replacement can target any CSS property (colors, fonts, spacing, borders, layout, animations, etc.), not just colors. Pass the COMPLETE CSS string (including any existing styles you want to keep)."
     input_schema = {
         "type": "object",

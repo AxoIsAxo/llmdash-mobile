@@ -6,6 +6,7 @@ from ...sandbox import run_in_alpine
 
 class RunCommandSkill(Skill):
     name = "run_command"
+    entitlement = "sandbox"
     description = (
         "Execute Linux commands in a secure Alpine Linux sandbox via Docker. Root access, "
         "network enabled. The sandbox is PERSISTENT for this whole conversation: anything "

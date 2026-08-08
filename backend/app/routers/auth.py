@@ -12,6 +12,7 @@ from .. import config as app_config
 from ..database import get_db, User, UserModelUsage
 from ..config_file import ConfigFileManager
 from .. import extrovert_auth
+from ..entitlements import get_user_entitlements
 from ..models import (
     AuthSetupRequest, AuthLoginRequest, AuthRegisterRequest,
     UserResponse, UserUpdateRequest, RegistrationToggleRequest,
@@ -98,6 +99,8 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
         "image_usage": getattr(user, "image_usage", 0) or 0, "image_limit": getattr(user, "image_limit", None),
         "extrovert_linked": bool(getattr(user, "oauth_sub", None)),
         "token_usage_by_model": usage_by_model,
+        # P9: merged entitlement flags of the user's effective plan.
+        "entitlements": await get_user_entitlements(db, user.id),
     }
 
 
@@ -105,6 +108,23 @@ def require_role(*roles: str):
     async def checker(current_user: dict = Depends(get_current_user)):
         if current_user["role"] not in roles:
             raise HTTPException(403, "Insufficient permissions")
+        return current_user
+    return checker
+
+
+def require_entitlement(feature: str):
+    """Dependency that 403s when the user's effective plan lacks `feature`.
+
+    Reads the entitlements dict already attached to current_user by
+    get_current_user, so no extra DB round-trip per request."""
+    async def checker(current_user: dict = Depends(get_current_user)):
+        ents = current_user.get("entitlements") or {}
+        if not ents.get(feature, True):
+            raise HTTPException(
+                403,
+                f"Your current plan does not include: {feature.replace('_', ' ')}. "
+                "Upgrade or contact an admin.",
+            )
         return current_user
     return checker
 
@@ -522,7 +542,11 @@ async def get_user_css(current_user: dict = Depends(get_current_user), db: Async
 
 
 @router.put("/css")
-async def save_user_css(req: CssUpdateRequest, current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def save_user_css(
+    req: CssUpdateRequest,
+    current_user: dict = Depends(require_entitlement("theme_editing")),
+    db: AsyncSession = Depends(get_db),
+):
     from ..theme import validate_raw_css
     ok, err = validate_raw_css(req.css)
     if not ok:
