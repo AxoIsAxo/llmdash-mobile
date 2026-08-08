@@ -175,6 +175,8 @@ JWT auth tokens are stored in `@capacitor/preferences` on Android (encrypted sha
 
 A plain `window.location.href` to the Extrovert authorization URL would make Capacitor hand the page to the OS browser, where the server callback stores the JWT — the app would never see it. Instead the frontend (`frontend/src/oauth.ts`) routes the flow through the custom `llmdash-oauth://` scheme, which `MainActivity`'s `WebViewClient` intercepts: the whole OIDC round-trip stays inside the WebView, the JWT is read from the server callback page's `localStorage` and written to the same `CapacitorStorage` prefs that `storage.ts` reads, then the app reloads into the bundled UI. Login and "Connect with Extrovert" (Account panel) both use this path.
 
+Each flow starts from a clean session: before opening the authorize URL, native code expires the WebView's cookies for the Extrovert provider and the LLMDash server. Otherwise a lingering session cookie (it persists across app restarts) makes the provider's authorize endpoint reject the request with `CSRF token missing or invalid. Re-open the authorization request.` — the CSRF token is only issued through a fresh login-page session.
+
 ### Native plugins enabled
 
 | Plugin | Purpose |

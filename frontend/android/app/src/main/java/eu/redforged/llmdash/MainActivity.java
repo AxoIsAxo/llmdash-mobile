@@ -4,6 +4,7 @@ import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Bundle;
+import android.webkit.CookieManager;
 import android.webkit.ValueCallback;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
@@ -98,15 +99,43 @@ public class MainActivity extends BridgeActivity {
 
         private void startOAuthFlow(WebView view, Uri url) {
             // llmdash-oauth://start?target=<extrovert authorize url>&server=<server origin>
-            String target = url.getQueryParameter("target");
-            if (target != null && isHttp(Uri.parse(target))) {
-                oauthMode = true;
-                oauthStartedAt = System.currentTimeMillis();
-                String server = url.getQueryParameter("server");
-                oauthServerHost = server != null ? Uri.parse(server).getHost() : null;
-                final String finalTarget = target;
-                view.post(() -> view.loadUrl(finalTarget));
+            if (oauthMode) {
+                if (isExpired()) {
+                    // The previous flow timed out (e.g. stranded on a provider
+                    // error page) — tear it down and fall through to restart.
+                    endOAuthFlow(view);
+                } else {
+                    // A flow is already running — ignore re-entrant callbacks
+                    // (double-tap, both shouldOverrideUrlLoading overloads) so
+                    // we never fire two parallel authorize requests.
+                    return;
+                }
             }
+            String target = url.getQueryParameter("target");
+            if (target == null || !isHttp(Uri.parse(target))) {
+                return;
+            }
+
+            // Start from a clean slate. The provider's session cookie
+            // (connect.sid) persists in the WebView across app restarts and
+            // retries; once it holds a stale session, the authorize endpoint
+            // rejects the request with "CSRF token missing or invalid. Re-open
+            // the authorization request." (the CSRF token is only issued to a
+            // fresh login-page session, and the login redirect echoes it back
+            // into the authorize URL). Clearing cookies for the provider and
+            // the LLMDash server origin forces every attempt through the login
+            // form again, so the CSRF pairing is always intact.
+            clearCookiesFor(target);
+            String server = url.getQueryParameter("server");
+            oauthServerHost = server != null ? Uri.parse(server).getHost() : null;
+            if (server != null && isHttp(Uri.parse(server))) {
+                clearCookiesFor(server);
+            }
+
+            oauthMode = true;
+            oauthStartedAt = System.currentTimeMillis();
+            final String finalTarget = target;
+            view.post(() -> view.loadUrl(finalTarget));
         }
 
         @Override
@@ -167,6 +196,35 @@ public class MainActivity extends BridgeActivity {
         private boolean isHttp(Uri url) {
             String s = url.getScheme();
             return "http".equals(s) || "https".equals(s);
+        }
+
+        /**
+         * Expire every cookie the WebView currently holds for the given origin
+         * (a full http(s) URL). CookieManager has no per-domain clear, so read
+         * the cookie header and overwrite each name with an expired value.
+         * Best-effort: never block the login flow on this.
+         */
+        private void clearCookiesFor(String url) {
+            try {
+                CookieManager cm = CookieManager.getInstance();
+                String cookies = cm.getCookie(url);
+                if (cookies == null || cookies.isEmpty()) {
+                    return;
+                }
+                for (String part : cookies.split(";")) {
+                    String name = part.split("=", 2)[0].trim();
+                    if (name.isEmpty()) {
+                        continue;
+                    }
+                    // Path=/ expiry replaces the stored cookie for the same
+                    // name + host (the provider's connect.sid is Path=/).
+                    cm.setCookie(url, name + "=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT");
+                    cm.setCookie(url, name + "=; Path=/; Max-Age=0");
+                }
+                cm.flush();
+            } catch (Exception e) {
+                // ignore — next attempt still goes through the login page
+            }
         }
     }
 
