@@ -43,24 +43,19 @@ public class MainActivity extends BridgeActivity {
     private static final String LOG_TAG = "LlmdashOAuth";
 
     /**
-     * Extrovert's consent page renders its hidden _csrf field empty on a fresh
-     * session (the server generates the CSRF token lazily — only when some page
-     * of the session renders a CSRF form — and the session is regenerated at
-     * login), so clicking "Authorize" POSTs _csrf= and the provider answers
-     * "CSRF token missing or invalid. Re-open the authorization request.".
-     * This fetches a same-origin page that renders a CSRF form (the homepage),
-     * which makes the server mint the token for this session, then fills the
-     * consent form with it.
+     * The provider's consent page renders its hidden _csrf field empty on a
+     * fresh session (the server generates the CSRF token lazily — only when
+     * some page of the session renders a CSRF form — and the session is
+     * regenerated at login), and its CSRF check only parses urlencoded bodies
+     * (multipart _csrf is ignored -> 403).
      *
-     * The submit is intercepted and done via fetch(), so the WebView itself
-     * never POSTs and never loads the callback page (whose JS redirects to
-     * "/" — the web SPA — which on Android boots with empty native prefs and
-     * shows the web login page instead of handing the token to the app).
-     * fetch() follows the 302 to the callback and reads the response text
-     * (the LLMDash server sends ACAO:*; default same-origin credentials keep
-     * the wildcard CORS response readable); the JWT — or the error the server
-     * rendered — is passed to native via the llmdash-oauth://token or
-     * llmdash-oauth://error scheme, which stores it and ends the flow.
+     * Instead of relying on in-page fetch() (which the WebView has repeatedly
+     * failed on — CSP/opaque-response/network quirks), this script's only job
+     * is to intercept the submit and hand the form fields + the clicked button
+     * to native via llmdash-oauth://consent. Native mints the CSRF token
+     * (GETs the provider homepage with the WebView's cookies), POSTs the form
+     * urlencoded, follows the redirect to the callback, extracts the JWT from
+     * the HTML and stores it — no in-page network calls at all.
      */
     private static final String CONSENT_CSRF_JS =
             "(function(){"
@@ -76,60 +71,21 @@ public class MainActivity extends BridgeActivity {
             + "}"
             + "var form=findForm();"
             + "if(!form)return;"
-            + "var input=form.querySelector('input[name=\"_csrf\"]');"
-            + "if(!input)return;"
             + "var submitting=false;"
-            + "function fill(){"
-            + "if(input.value)return Promise.resolve(true);"
-            + "return fetch('/',{credentials:'include'})"
-            + ".then(function(r){return r.text();})"
-            + ".then(function(h){"
-            + "var m=h.match(/name=\"_csrf\" value=\"([0-9a-f]+)\"/);"
-            + "if(!m)throw new Error('no _csrf on homepage');"
-            + "input.value=m[1];return true;"
-            + "});"
-            + "}"
-            + "function submitConsent(btn){"
+            + "form.addEventListener('submit',function(e){"
+            + "e.preventDefault();"
             + "if(submitting)return;submitting=true;"
             + "var action=form.getAttribute('action')||'/api/v1/oauth/authorize';"
-            + "var attempts=0;"
-            + "function attempt(){"
-            + "attempts++;"
-            + "return fill().then(function(){"
+            + "if(action.indexOf('/')===0)action=location.origin+action;"
             + "var fd=new FormData(form);"
             + "var params=new URLSearchParams();"
             + "fd.forEach(function(v,k){params.append(k,v);});"
-            + "/* FormData(form) omits the submit button, and the provider's CSRF"
-            + " * check only parses urlencoded bodies (multipart _csrf is ignored"
-            + " * -> 403), so send urlencoded + the clicked button's value */"
+            + "var btn=e.submitter||document.activeElement;"
             + "if(btn&&btn.name)params.append(btn.name,btn.value);"
             + "else params.append('approve','yes');"
-            + "return fetch(action,{method:'POST',"
-            + "headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},"
-            + "body:params.toString()});"
-            + "}).then(function(r){"
-            + "if(r.status===403&&attempts<2){input.value='';return attempt();}"
-            + "return r;"
+            + "window.location.href='llmdash-oauth://consent?action='+encodeURIComponent(action)"
+            + "+'&data='+encodeURIComponent(params.toString());"
             + "});"
-            + "}"
-            + "attempt().then(function(r){return r.text().then(function(html){return {status:r.status,url:r.url,html:html};});})"
-            + ".then(function(res){"
-            + "/* grab any eyJ... JWT in the callback HTML, whatever quoting the server uses */"
-            + "var m=res.html.match(/eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+/);"
-            + "if(m){window.location.href='llmdash-oauth://token?value='+encodeURIComponent(m[0]);return;}"
-            + "var e=res.html.match(/<p style=\"color:#ff5d6c\">([^<]+)<\\/p>/);"
-            + "if(e){window.location.href='llmdash-oauth://error?msg='+encodeURIComponent(e[1].trim());return;}"
-            + "var txt=res.html.replace(/<[^>]+>/g,' ').replace(/\\s+/g,' ').trim().slice(0,140);"
-            + "var diag='status='+res.status+' url='+res.url+' csrfFilled='+(input.value?'1':'0')+(txt?' body='+txt:'');"
-            + "window.location.href='llmdash-oauth://error?msg='+encodeURIComponent('unexpected callback response: '+diag);"
-            + "}).catch(function(err){submitting=false;window.location.href='llmdash-oauth://error?msg='+encodeURIComponent('consent failed: '+(err&&err.message?err.message:err));});"
-            + "}"
-            + "form.addEventListener('submit',function(e){"
-            + "e.preventDefault();"
-            + "var btn=e.submitter||document.activeElement;"
-            + "submitConsent(btn);"
-            + "});"
-            + "if(!input.value)fill().catch(function(){});"
             + "})();";
 
     private LlmdashWebViewClient webViewClient;
@@ -233,11 +189,174 @@ public class MainActivity extends BridgeActivity {
                     toast("Extrovert login failed: " + msg);
                 }
                 endOAuthFlow(view);
+            } else if ("consent".equals(host)) {
+                handleOAuthConsent(view, url);
             } else if ("callback".equals(host)) {
                 handleOAuthCallback(view, url);
             } else {
                 startOAuthFlow(view, url);
             }
+        }
+
+        /** llmdash-oauth://consent?action=<consent POST url>&data=<urlencoded form fields> */
+        private void handleOAuthConsent(WebView view, Uri url) {
+            String action = url.getQueryParameter("action");
+            String data = url.getQueryParameter("data");
+            if (action == null || data == null || !isHttp(Uri.parse(action))) {
+                toast("Extrovert login failed: invalid consent data");
+                endOAuthFlow(view);
+                return;
+            }
+            // Only accept the provider this flow is talking to.
+            if (oauthProviderHost == null || !oauthProviderHost.equals(Uri.parse(action).getHost())) {
+                Log.d(LOG_TAG, "consent host mismatch: " + Uri.parse(action).getHost());
+                endOAuthFlow(view);
+                return;
+            }
+            Log.d(LOG_TAG, "handling consent natively: " + action);
+            oauthMode = false;
+            oauthServerHost = null;
+            oauthProviderHost = null;
+            oauthStartedAt = 0L;
+            view.stopLoading();
+            new Thread(() -> {
+                final ConsentResult res = submitConsent(action, data);
+                runOnUiThread(() -> {
+                    if (res.token != null) {
+                        Log.d(LOG_TAG, "consent token len " + res.token.length());
+                        storeToken(res.token);
+                        toast("Signed in via Extrovert ✓");
+                    } else {
+                        Log.d(LOG_TAG, "consent failed: " + res.error);
+                        copyToClipboard("LLMDash OAuth error", res.error);
+                        String e = res.error.length() > 120 ? res.error.substring(0, 120) : res.error;
+                        toast("Extrovert login failed: " + e);
+                    }
+                    try {
+                        view.loadUrl(homeUrl());
+                    } catch (Exception e) {
+                        Log.d(LOG_TAG, "reload home failed: " + e);
+                    }
+                });
+            }).start();
+        }
+
+        private static final class ConsentResult {
+            final String token;
+            final String error;
+            ConsentResult(String token, String error) {
+                this.token = token;
+                this.error = error;
+            }
+        }
+
+        /**
+         * POST the consent form from native code: mint the CSRF token from the
+         * provider homepage (same session cookies), POST urlencoded, follow the
+         * redirect to the callback, extract the JWT from the HTML. Retries once
+         * with a fresh token if the provider rejects CSRF.
+         */
+        private ConsentResult submitConsent(String action, String data) {
+            try {
+                java.util.LinkedHashMap<String, String> params = new java.util.LinkedHashMap<>();
+                for (String pair : data.split("&")) {
+                    int eq = pair.indexOf('=');
+                    if (eq < 0) continue;
+                    params.put(java.net.URLDecoder.decode(pair.substring(0, eq), "UTF-8"),
+                            java.net.URLDecoder.decode(pair.substring(eq + 1), "UTF-8"));
+                }
+                java.net.URI uri = java.net.URI.create(action);
+                String home = uri.getScheme() + "://" + uri.getHost() + "/";
+                for (int attempt = 0; attempt < 2; attempt++) {
+                    String csrf = params.get("_csrf");
+                    if (csrf == null || csrf.isEmpty()) {
+                        csrf = fetchCsrfToken(home);
+                        if (csrf != null) params.put("_csrf", csrf);
+                    }
+                    String body = encodeParams(params);
+                    java.net.HttpURLConnection conn =
+                            (java.net.HttpURLConnection) new java.net.URL(action).openConnection();
+                    conn.setInstanceFollowRedirects(true);
+                    conn.setRequestMethod("POST");
+                    conn.setConnectTimeout(15000);
+                    conn.setReadTimeout(15000);
+                    conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8");
+                    String cookies = CookieManager.getInstance().getCookie(action);
+                    if (cookies != null && !cookies.isEmpty()) {
+                        conn.setRequestProperty("Cookie", cookies);
+                    }
+                    conn.setDoOutput(true);
+                    conn.getOutputStream().write(body.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    int code = conn.getResponseCode();
+                    String resp = readFully(code >= 400 ? conn.getErrorStream() : conn.getInputStream());
+                    String jwt = extractJwt(resp);
+                    if (jwt != null) return new ConsentResult(jwt, null);
+                    if (code == 403 && attempt == 0) {
+                        params.remove("_csrf");
+                        continue; // CSRF rejected — mint a fresh token and retry
+                    }
+                    return new ConsentResult(null, extractError(resp));
+                }
+                return new ConsentResult(null, "consent POST failed");
+            } catch (Exception e) {
+                return new ConsentResult(null, "consent POST failed: " + e);
+            }
+        }
+
+        /** GET the provider homepage with the WebView's cookies and pull its CSRF token. */
+        private String fetchCsrfToken(String home) {
+            try {
+                java.net.HttpURLConnection conn =
+                        (java.net.HttpURLConnection) new java.net.URL(home).openConnection();
+                conn.setInstanceFollowRedirects(true);
+                conn.setConnectTimeout(15000);
+                conn.setReadTimeout(15000);
+                String cookies = CookieManager.getInstance().getCookie(home);
+                if (cookies != null && !cookies.isEmpty()) {
+                    conn.setRequestProperty("Cookie", cookies);
+                }
+                int code = conn.getResponseCode();
+                String html = readFully(code >= 400 ? conn.getErrorStream() : conn.getInputStream());
+                java.util.regex.Matcher m = java.util.regex.Pattern
+                        .compile("name=\"_csrf\" value=\"([0-9a-f]+)\"")
+                        .matcher(html);
+                return m.find() ? m.group(1) : null;
+            } catch (Exception e) {
+                Log.d(LOG_TAG, "csrf fetch failed: " + e);
+                return null;
+            }
+        }
+
+        private static String encodeParams(java.util.LinkedHashMap<String, String> params)
+                throws java.io.UnsupportedEncodingException {
+            StringBuilder sb = new StringBuilder();
+            for (java.util.Map.Entry<String, String> e : params.entrySet()) {
+                if (sb.length() > 0) sb.append('&');
+                sb.append(java.net.URLEncoder.encode(e.getKey(), "UTF-8"));
+                sb.append('=');
+                sb.append(java.net.URLEncoder.encode(e.getValue(), "UTF-8"));
+            }
+            return sb.toString();
+        }
+
+        /** A well-formed JWT anywhere in the HTML. */
+        private static String extractJwt(String html) {
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+")
+                    .matcher(html);
+            if (!m.find()) return null;
+            String token = m.group(0);
+            return token.split("\\.").length == 3 ? token : null;
+        }
+
+        /** The error text the LLMDash callback rendered, or a short diagnostic. */
+        private static String extractError(String html) {
+            java.util.regex.Matcher em = java.util.regex.Pattern
+                    .compile("<p style=\"color:#ff5d6c\">([^<]+)</p>")
+                    .matcher(html);
+            if (em.find()) return em.group(1).trim();
+            String txt = html.replaceAll("<[^>]+>", " ").replaceAll("\\s+", " ").trim();
+            return txt.isEmpty() ? "no token in callback response" : txt.substring(0, Math.min(txt.length(), 140));
         }
 
         /** llmdash-oauth://callback?url=<oidc callback URL> — handed over by the consent page's script. */
