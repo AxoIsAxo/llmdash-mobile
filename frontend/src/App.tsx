@@ -1141,7 +1141,7 @@ function App() {
   // Auth screens
   if (authLoading) {
     return (
-      <div className="h-screen flex items-center justify-center bg-theme-bg">
+      <div className="h-screen flex items-center justify-center bg-theme-bg pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
         <Loader2 className="w-8 h-8 animate-spin text-theme-accent-text" />
       </div>
     )
@@ -1203,7 +1203,7 @@ function App() {
             <span className="truncate">{models.find(m => m.id === selectedModelId)?.name}</span>
           </div>
         )}
-        <div className="p-2 border-t border-theme-border space-y-1">
+        <div className="p-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] border-t border-theme-border space-y-1">
           {isAdmin && (
             <button onClick={() => setShowAdmin(true)} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-theme-bg-elevated rounded-lg text-sm">
               <Shield className="w-4 h-4 text-theme-accent-text" /> Admin Panel
@@ -1357,7 +1357,7 @@ function App() {
         </div>
 
         {/* Input */}
-        <div className="border-t border-theme-border p-4">
+        <div className="border-t border-theme-border p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)]">
           <div className="max-w-4xl mx-auto">
             {attachments.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-2">

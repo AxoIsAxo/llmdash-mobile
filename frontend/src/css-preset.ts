@@ -107,7 +107,6 @@ const GLOBAL_CSS = `
 
 body {
   margin: 0;
-  padding-top: env(safe-area-inset-top);
   font-family: var(--theme-font-sans);
 }
 
