@@ -348,13 +348,26 @@ public class MainActivity extends BridgeActivity {
 
             // We are on the LLMDash server. The callback page stores the JWT in
             // localStorage on this origin (and the redirect target "/" inherits
-            // it, same origin) — read it natively and hand it to the app.
+            // it, same origin) — read it natively and hand it to the app. If
+            // there is no token, the callback returned an error page — pull its
+            // visible text so the failure is shown on screen (e.g. "Account
+            // limit reached for this IP address.", "Login expired. ...").
             final String pageUrl = url;
             view.evaluateJavascript(
-                    "(function(){ try { var t = localStorage.getItem('" + TOKEN_KEY + "'); return t ? t : null; } catch(e) { return null; } })()",
+                    "(function(){ try { var t = localStorage.getItem('" + TOKEN_KEY + "');"
+                            + " if (t) return 'TOKEN:' + t;"
+                            + " var b = document.body ? document.body.innerText.replace(/\\s+/g,' ').trim() : '';"
+                            + " return 'ERR:' + b; } catch(e) { return 'ERR:' + e; } })()",
                     (ValueCallback<String>) value -> {
-                        String token = unquoteJson(value);
-                        Log.d(LOG_TAG, "localStorage read: " + (token == null ? "null" : "token len " + token.length())
+                        String v = unquoteJson(value);
+                        String token = null;
+                        String err = null;
+                        if (v != null && v.startsWith("TOKEN:")) {
+                            token = v.substring("TOKEN:".length());
+                        } else if (v != null && v.startsWith("ERR:")) {
+                            err = v.substring("ERR:".length());
+                        }
+                        Log.d(LOG_TAG, "server page read: " + (token != null ? "token len " + token.length() : "err: " + err)
                                 + " on " + pageUrl);
                         if (token != null && !token.isEmpty()) {
                             storeToken(token);
@@ -362,8 +375,12 @@ public class MainActivity extends BridgeActivity {
                             endOAuthFlow(view);
                         } else if (pageUrl.contains("/api/auth/extrovert/callback")) {
                             // Error / expired / cancelled login — drop back into the app.
-                            Log.d(LOG_TAG, "callback page without token — ending flow (login failed)");
-                            toast("Extrovert login failed: no token in callback page");
+                            String msg = (err != null && !err.trim().isEmpty()) ? err.trim() : "no token in callback page";
+                            if (msg.length() > 120) {
+                                msg = msg.substring(0, 120);
+                            }
+                            Log.d(LOG_TAG, "callback page without token: " + msg);
+                            toast("Extrovert login failed: " + msg);
                             endOAuthFlow(view);
                         }
                     });
