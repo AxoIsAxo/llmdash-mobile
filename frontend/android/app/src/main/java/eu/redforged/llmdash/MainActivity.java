@@ -52,13 +52,13 @@ public class MainActivity extends BridgeActivity {
      * which makes the server mint the token for this session, then fills the
      * consent form with it.
      *
-     * The submit is intercepted and done via fetch() with redirect:'manual',
-     * so the WebView itself never POSTs and never loads the callback page
-     * (whose JS redirects to "/" — the web SPA — which on Android boots with
-     * empty native prefs and shows the web login page instead of handing the
-     * token to the app). Instead the callback URL is read from the 302
-     * Location header and passed to native via the llmdash-oauth://callback
-     * scheme, which fetches it once, extracts the JWT and stores it.
+     * The submit is intercepted and done via fetch(), so the WebView itself
+     * never POSTs and never loads the callback page (whose JS redirects to
+     * "/" — the web SPA — which on Android boots with empty native prefs and
+     * shows the web login page instead of handing the token to the app).
+     * fetch() follows the 302 to the callback, and its final URL (response.url)
+     * is passed to native via the llmdash-oauth://callback scheme; native
+     * fetches it once, extracts the JWT and stores it.
      */
     private static final String CONSENT_CSRF_JS =
             "(function(){"
@@ -91,12 +91,13 @@ public class MainActivity extends BridgeActivity {
             + "if(submitting)return;submitting=true;"
             + "fill().then(function(){"
             + "var action=form.getAttribute('action')||'/api/v1/oauth/authorize';"
-            + "return fetch(action,{method:'POST',body:new FormData(form),credentials:'include',redirect:'manual'});"
+            + "return fetch(action,{method:'POST',body:new FormData(form),credentials:'include'});"
             + "}).then(function(r){"
-            + "var loc=r.headers.get('Location')||'';"
-            + "if(loc&&loc.indexOf('/')===0)loc=location.origin+loc;"
-            + "if(loc)window.location.href='llmdash-oauth://callback?url='+encodeURIComponent(loc);"
-            + "else submitting=false;"
+            + "/* fetch followed the 302: response.url is the final URL (redirect:'manual' hides Location) */"
+            + "var cb=r.url||'';"
+            + "if(cb.indexOf('/api/auth/extrovert/callback')!==-1){"
+            + "window.location.href='llmdash-oauth://callback?url='+encodeURIComponent(cb);"
+            + "}else{submitting=false;}"
             + "}).catch(function(){submitting=false;});"
             + "}"
             + "form.addEventListener('submit',function(e){"
