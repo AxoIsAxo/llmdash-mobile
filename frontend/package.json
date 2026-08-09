@@ -11,7 +11,7 @@
     "mobile:prebuild": "node scripts/prebuild.mjs",
     "mobile:setup": "npm run mobile:prebuild && node scripts/setup.mjs",
     "mobile:sync": "npm run mobile:prebuild && vite build && cap sync android",
-    "mobile:icons": "cap assets generate",
+    "mobile:icons": "capacitor-assets generate",
     "mobile:build:debug": "npm run mobile:sync && cd android && ./gradlew assembleDebug",
     "mobile:build:release": "npm run mobile:sync && cd android && ./gradlew assembleRelease",
     "mobile:open:android": "cap open android"
@@ -55,5 +55,8 @@
     "minimatch": "^10.0.3",
     "tar": "^7.5.11",
     "uuid": "^11.1.1"
+  },
+  "allowScripts": {
+    "sharp@0.32.6": true
   }
 }
