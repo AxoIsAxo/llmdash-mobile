@@ -56,9 +56,11 @@ public class MainActivity extends BridgeActivity {
      * never POSTs and never loads the callback page (whose JS redirects to
      * "/" — the web SPA — which on Android boots with empty native prefs and
      * shows the web login page instead of handing the token to the app).
-     * fetch() follows the 302 to the callback, and its final URL (response.url)
-     * is passed to native via the llmdash-oauth://callback scheme; native
-     * fetches it once, extracts the JWT and stores it.
+     * fetch() follows the 302 to the callback and reads the response text
+     * (the LLMDash server sends ACAO:*; default same-origin credentials keep
+     * the wildcard CORS response readable); the JWT — or the error the server
+     * rendered — is passed to native via the llmdash-oauth://token or
+     * llmdash-oauth://error scheme, which stores it and ends the flow.
      */
     private static final String CONSENT_CSRF_JS =
             "(function(){"
@@ -91,13 +93,16 @@ public class MainActivity extends BridgeActivity {
             + "if(submitting)return;submitting=true;"
             + "fill().then(function(){"
             + "var action=form.getAttribute('action')||'/api/v1/oauth/authorize';"
-            + "return fetch(action,{method:'POST',body:new FormData(form),credentials:'include'});"
-            + "}).then(function(r){"
-            + "/* fetch followed the 302: response.url is the final URL (redirect:'manual' hides Location) */"
-            + "var cb=r.url||'';"
-            + "if(cb.indexOf('/api/auth/extrovert/callback')!==-1){"
-            + "window.location.href='llmdash-oauth://callback?url='+encodeURIComponent(cb);"
-            + "}else{submitting=false;}"
+            + "/* default credentials (same-origin) so the cross-origin callback"
+            + " * response stays readable with ACAO:* — credentials:'include'"
+            + " * would make the browser reject the wildcard CORS response */"
+            + "return fetch(action,{method:'POST',body:new FormData(form)});"
+            + "}).then(function(r){return r.text();}).then(function(html){"
+            + "var m=html.match(/localStorage\\.setItem\\('llmdash_token', \"([^\"]+)\"\\)/);"
+            + "if(m){window.location.href='llmdash-oauth://token?value='+encodeURIComponent(m[1]);return;}"
+            + "var e=html.match(/<p style=\"color:#ff5d6c\">([^<]+)<\\/p>/);"
+            + "if(e){window.location.href='llmdash-oauth://error?msg='+encodeURIComponent(e[1].trim());return;}"
+            + "window.location.href='llmdash-oauth://error?msg='+encodeURIComponent('unexpected callback response');"
             + "}).catch(function(){submitting=false;});"
             + "}"
             + "form.addEventListener('submit',function(e){"
@@ -150,11 +155,7 @@ public class MainActivity extends BridgeActivity {
             Uri url = request.getUrl();
             Log.d(LOG_TAG, "shouldOverride(request) " + url + " oauthMode=" + oauthMode);
             if (OAUTH_SCHEME.equals(url.getScheme())) {
-                if ("callback".equals(url.getHost())) {
-                    handleOAuthCallback(view, url);
-                } else {
-                    startOAuthFlow(view, url);
-                }
+                handleOAuthScheme(view, url);
                 return true;
             }
             if (oauthMode && isExpired()) {
@@ -163,11 +164,10 @@ public class MainActivity extends BridgeActivity {
             }
             if (oauthMode && isHttp(url)) {
                 // Keep the whole OIDC round-trip inside the WebView. The
-                // consent page submits via fetch() and hands the callback URL
-                // to us through the llmdash-oauth://callback scheme, which we
-                // fetch natively; if that path is unavailable, the callback
-                // page loads here and its localStorage JWT is picked up in
-                // onPageFinished as a fallback.
+                // consent page submits via fetch() and hands the result to us
+                // through the llmdash-oauth:// scheme, so the callback page is
+                // never loaded by the WebView; the onPageFinished localStorage
+                // read stays as a fallback.
                 return false;
             }
             return super.shouldOverrideUrlLoading(view, request);
@@ -179,11 +179,7 @@ public class MainActivity extends BridgeActivity {
             Log.d(LOG_TAG, "shouldOverride(String) " + urlString + " oauthMode=" + oauthMode);
             Uri url = Uri.parse(urlString);
             if (OAUTH_SCHEME.equals(url.getScheme())) {
-                if ("callback".equals(url.getHost())) {
-                    handleOAuthCallback(view, url);
-                } else {
-                    startOAuthFlow(view, url);
-                }
+                handleOAuthScheme(view, url);
                 return true;
             }
             if (oauthMode && isExpired()) {
@@ -194,6 +190,34 @@ public class MainActivity extends BridgeActivity {
                 return false;
             }
             return super.shouldOverrideUrlLoading(view, urlString);
+        }
+
+        /** Route the llmdash-oauth:// scheme: start, token (JWT from the consent fetch), error, or legacy callback. */
+        private void handleOAuthScheme(WebView view, Uri url) {
+            String host = url.getHost();
+            if ("token".equals(host)) {
+                String v = url.getQueryParameter("value");
+                if (v != null && v.split("\\.").length == 3) {
+                    Log.d(LOG_TAG, "token from consent fetch, len " + v.length());
+                    storeToken(v);
+                    toast("Signed in via Extrovert ✓");
+                } else {
+                    Log.d(LOG_TAG, "invalid token from consent fetch");
+                    toast("Extrovert login failed: invalid token from callback");
+                }
+                endOAuthFlow(view);
+            } else if ("error".equals(host)) {
+                String msg = url.getQueryParameter("msg");
+                if (msg != null && !msg.isEmpty()) {
+                    copyToClipboard("LLMDash OAuth error", msg);
+                    toast("Extrovert login failed: " + msg);
+                }
+                endOAuthFlow(view);
+            } else if ("callback".equals(host)) {
+                handleOAuthCallback(view, url);
+            } else {
+                startOAuthFlow(view, url);
+            }
         }
 
         /** llmdash-oauth://callback?url=<oidc callback URL> — handed over by the consent page's script. */
