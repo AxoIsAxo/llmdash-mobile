@@ -50,7 +50,15 @@ public class MainActivity extends BridgeActivity {
      * "CSRF token missing or invalid. Re-open the authorization request.".
      * This fetches a same-origin page that renders a CSRF form (the homepage),
      * which makes the server mint the token for this session, then fills the
-     * consent form with it before submit.
+     * consent form with it.
+     *
+     * The submit is intercepted and done via fetch() with redirect:'manual',
+     * so the WebView itself never POSTs and never loads the callback page
+     * (whose JS redirects to "/" — the web SPA — which on Android boots with
+     * empty native prefs and shows the web login page instead of handing the
+     * token to the app). Instead the callback URL is read from the 302
+     * Location header and passed to native via the llmdash-oauth://callback
+     * scheme, which fetches it once, extracts the JWT and stores it.
      */
     private static final String CONSENT_CSRF_JS =
             "(function(){"
@@ -79,10 +87,21 @@ public class MainActivity extends BridgeActivity {
             + "})"
             + ".catch(function(){});"
             + "}"
+            + "function submitConsent(){"
+            + "if(submitting)return;submitting=true;"
+            + "fill().then(function(){"
+            + "var action=form.getAttribute('action')||'/api/v1/oauth/authorize';"
+            + "return fetch(action,{method:'POST',body:new FormData(form),credentials:'include',redirect:'manual'});"
+            + "}).then(function(r){"
+            + "var loc=r.headers.get('Location')||'';"
+            + "if(loc&&loc.indexOf('/')===0)loc=location.origin+loc;"
+            + "if(loc)window.location.href='llmdash-oauth://callback?url='+encodeURIComponent(loc);"
+            + "else submitting=false;"
+            + "}).catch(function(){submitting=false;});"
+            + "}"
             + "form.addEventListener('submit',function(e){"
-            + "var btns=form.querySelectorAll('button[type=\"submit\"],input[type=\"submit\"]');"
-            + "for(var i=0;i<btns.length;i++){btns[i].disabled=true;}"
-            + "if(!input.value){e.preventDefault();if(submitting)return;submitting=true;fill().then(function(){form.submit();});}"
+            + "e.preventDefault();"
+            + "submitConsent();"
             + "});"
             + "if(!input.value)fill();"
             + "})();";
@@ -130,7 +149,11 @@ public class MainActivity extends BridgeActivity {
             Uri url = request.getUrl();
             Log.d(LOG_TAG, "shouldOverride(request) " + url + " oauthMode=" + oauthMode);
             if (OAUTH_SCHEME.equals(url.getScheme())) {
-                startOAuthFlow(view, url);
+                if ("callback".equals(url.getHost())) {
+                    handleOAuthCallback(view, url);
+                } else {
+                    startOAuthFlow(view, url);
+                }
                 return true;
             }
             if (oauthMode && isExpired()) {
@@ -139,10 +162,11 @@ public class MainActivity extends BridgeActivity {
             }
             if (oauthMode && isHttp(url)) {
                 // Keep the whole OIDC round-trip inside the WebView. The
-                // callback itself is intercepted in shouldInterceptRequest and
-                // fetched natively; if that interception is unavailable, the
-                // callback page loads here and its localStorage JWT is picked
-                // up in onPageFinished as a fallback.
+                // consent page submits via fetch() and hands the callback URL
+                // to us through the llmdash-oauth://callback scheme, which we
+                // fetch natively; if that path is unavailable, the callback
+                // page loads here and its localStorage JWT is picked up in
+                // onPageFinished as a fallback.
                 return false;
             }
             return super.shouldOverrideUrlLoading(view, request);
@@ -154,7 +178,11 @@ public class MainActivity extends BridgeActivity {
             Log.d(LOG_TAG, "shouldOverride(String) " + urlString + " oauthMode=" + oauthMode);
             Uri url = Uri.parse(urlString);
             if (OAUTH_SCHEME.equals(url.getScheme())) {
-                startOAuthFlow(view, url);
+                if ("callback".equals(url.getHost())) {
+                    handleOAuthCallback(view, url);
+                } else {
+                    startOAuthFlow(view, url);
+                }
                 return true;
             }
             if (oauthMode && isExpired()) {
@@ -165,6 +193,23 @@ public class MainActivity extends BridgeActivity {
                 return false;
             }
             return super.shouldOverrideUrlLoading(view, urlString);
+        }
+
+        /** llmdash-oauth://callback?url=<oidc callback URL> — handed over by the consent page's script. */
+        private void handleOAuthCallback(WebView view, Uri url) {
+            String cb = url.getQueryParameter("url");
+            if (cb == null || !isHttp(Uri.parse(cb))) {
+                Log.d(LOG_TAG, "invalid callback URL from consent page");
+                endOAuthFlow(view);
+                return;
+            }
+            // Only fetch callbacks for the LLMDash server this flow talks to.
+            if (oauthServerHost == null || !oauthServerHost.equals(Uri.parse(cb).getHost())) {
+                Log.d(LOG_TAG, "callback host mismatch: " + Uri.parse(cb).getHost());
+                endOAuthFlow(view);
+                return;
+            }
+            handleCallbackNatively(view, cb);
         }
 
         private void startOAuthFlow(WebView view, Uri url) {
