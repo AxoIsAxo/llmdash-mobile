@@ -251,7 +251,9 @@ public class MainActivity extends BridgeActivity {
                         toast("Signed in via Extrovert ✓");
                     } else {
                         Log.d(LOG_TAG, "callback returned no token: " + res.error);
-                        toast("Extrovert login failed: " + res.error);
+                        copyToClipboard("LLMDash OAuth error", res.error);
+                        String e = res.error.length() > 120 ? res.error.substring(0, 120) : res.error;
+                        toast("Extrovert login failed: " + e + " (full error copied to clipboard)");
                     }
                     try {
                         view.loadUrl(homeUrl());
@@ -311,6 +313,17 @@ public class MainActivity extends BridgeActivity {
 
         private void toast(String msg) {
             android.widget.Toast.makeText(MainActivity.this, msg, android.widget.Toast.LENGTH_LONG).show();
+        }
+
+        /** Put text on the system clipboard so a long error can be read/pasted in full. */
+        private void copyToClipboard(String label, String text) {
+            try {
+                android.content.ClipboardManager cm =
+                        (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                cm.setPrimaryClip(android.content.ClipData.newPlainText(label, text));
+            } catch (Exception e) {
+                Log.d(LOG_TAG, "clipboard copy failed: " + e);
+            }
         }
 
         /** Read an InputStream to a UTF-8 string (works on API 23+, unlike readAllBytes). */
@@ -375,12 +388,11 @@ public class MainActivity extends BridgeActivity {
                             endOAuthFlow(view);
                         } else if (pageUrl.contains("/api/auth/extrovert/callback")) {
                             // Error / expired / cancelled login — drop back into the app.
-                            String msg = (err != null && !err.trim().isEmpty()) ? err.trim() : "no token in callback page";
-                            if (msg.length() > 120) {
-                                msg = msg.substring(0, 120);
-                            }
-                            Log.d(LOG_TAG, "callback page without token: " + msg);
-                            toast("Extrovert login failed: " + msg);
+                            String full = (err != null && !err.trim().isEmpty()) ? err.trim() : "no token in callback page";
+                            copyToClipboard("LLMDash OAuth error", full);
+                            String msg = full.length() > 120 ? full.substring(0, 120) : full;
+                            Log.d(LOG_TAG, "callback page without token: " + full);
+                            toast("Extrovert login failed: " + msg + " (full error copied to clipboard)");
                             endOAuthFlow(view);
                         }
                     });
